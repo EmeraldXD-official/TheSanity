@@ -12,14 +12,10 @@ using TheSanity.Projectiles;
 
 namespace TheSanity.Items
 {
-    // =========================================================================
-    // KELAS 1: Setting Senjata Utama (ModItem)
-    // =========================================================================
     public class BlackwhipItem : ModItem
     {
         public override void SetStaticDefaults()
         {
-            // Menjalankan animasi inventory (4 frame vertikal)
             Main.RegisterItemAnimation(Item.type, new DrawAnimationVertical(6, 4));
         }
 
@@ -36,6 +32,34 @@ namespace TheSanity.Items
             Item.rare = ItemRarityID.Purple; 
             Item.value = Item.sellPrice(gold: 50);
         }
+
+        public override bool AltFunctionUse(Player player)
+        {
+            return true;
+        }
+
+        public override bool CanUseItem(Player player)
+        {
+            if (player.altFunctionUse == 2) 
+            {
+                if (Main.myPlayer == player.whoAmI)
+                {
+                    ModContent.GetInstance<BlackwhipSystem>().ToggleWhipUI();
+                }
+                return false; 
+            }
+            return base.CanUseItem(player);
+        }
+
+        public override void ModifyTooltips(List<TooltipLine> tooltips)
+        {
+            var modPlayer = Main.LocalPlayer.GetModPlayer<BlackwhipPlayer>();
+            Item tempWhip = new Item();
+            tempWhip.SetDefaults(modPlayer.selectedWhipTagType);
+
+            TooltipLine line = new TooltipLine(Mod, "ActiveWhipTag", $"[c/3cffc8:Active Tag Sub-Power:] {tempWhip.Name}\n[c/8bc34a:Right-Click to Change Tag Power]");
+            tooltips.Add(line);
+        }
         
         public override bool Shoot(Player player, EntitySource_ItemUse_WithAmmo source, Vector2 position, Vector2 velocity, int type, int damage, float knockback)
         {
@@ -46,7 +70,6 @@ namespace TheSanity.Items
                 Vector2 perturbedSpeed = velocity.RotatedBy(MathHelper.Lerp(-spread, spread, i / 2f));
                 Projectile.NewProjectile(source, position, perturbedSpeed, type, damage, knockback, player.whoAmI, 0f, (float)i);
             }
-
             return false; 
         }
 
@@ -80,15 +103,10 @@ namespace TheSanity.Items
         }
     }
 
-    // =========================================================================
-    // KELAS 2: Sistem Visual Efek Crystal Outline Kustom (GlobalItem)
-    // FIX CS1929: Mengubah struktur receiver DrawString ke SpriteBatch bawaan ReLogic
-    // =========================================================================
     public class BlackwhipVisuals : GlobalItem
     {
         public override bool PreDrawTooltipLine(Item item, DrawableTooltipLine line, ref int yOffset)
         {
-            // Pastikan efek ini HANYA diaplikasikan pada item Blackwhip milikmu
             if (item.type == ModContent.ItemType<BlackwhipItem>() && line.Name == "ItemName" && line.Mod == "Terraria")
             {
                 DynamicSpriteFont font = FontAssets.MouseText.Value;
@@ -96,7 +114,6 @@ namespace TheSanity.Items
                 Vector2 textPos = new Vector2(line.X, line.Y);
                 float time = (float)Main.GlobalTimeWrappedHourly;
 
-                // LAYER 1: SOFT EMERALD/TEAL GLOW (Aura Kabur di Luar Teks)
                 Color auraColor = new Color(0, 200, 140) * 0.4f;
                 float auraPulse = 4f + (float)Math.Sin(time * 6f) * 1f; 
                 for (int i = 0; i < 12; i++)
@@ -106,16 +123,14 @@ namespace TheSanity.Items
                     Main.spriteBatch.DrawString(font, text, textPos + offset, auraColor);
                 }
 
-                // LAYER 2: SOLID CRISP OUTLINE (Garis Tepi Neon Teal Terang)
                 Color crystalOutlineColor = new Color(60, 255, 200);
                 for (int i = 0; i < 8; i++)
                 {
                     float angle = i * MathHelper.TwoPi / 8f;
-                    Vector2 offset = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)) * 2f; // Ketebalan outline 2px
+                    Vector2 offset = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)) * 2f; 
                     Main.spriteBatch.DrawString(font, text, textPos + offset, crystalOutlineColor);
                 }
 
-                // LAYER 3: KUSTOM VISUAL PETIR (Keluar & Berpindah Secara Acak dari Teks)
                 Vector2 textSize = font.MeasureString(text);
                 Vector2 textCenter = textPos + textSize / 2f;
                 int seedValue = (int)(time * 15f); 
@@ -147,11 +162,9 @@ namespace TheSanity.Items
                     }
                 }
 
-                // LAYER 4: MAIN INNER TEXT (Inti Teks Hitam Pekat Energi Blackwhip)
                 Color mainTextColor = new Color(12, 24, 18);
                 Main.spriteBatch.DrawString(font, text, textPos, mainTextColor);
-
-                return false; // Matikan rendering teks asli bawaan game
+                return false; 
             }
             return true;
         }
