@@ -11,7 +11,7 @@ namespace TheSanity.Players
     {
         public bool lockCameraToMoon = false;
         public bool isInventoryErased = false; // Flag status kutukan
-        public bool immuneToErasure = false;   // BARU: Flag imunitas permanen dari Gluttony Fruit
+        public bool immuneToErasure = false;   // Flag imunitas permanen dari Gluttony Fruit
         public int trackBossIndex = -1; // Melacak index posisi boss secara dinamis
 
         public override void SaveData(TagCompound tag) {
@@ -33,6 +33,26 @@ namespace TheSanity.Players
             else if (lockCameraToMoon) {
                 Main.screenPosition.Y = (float)Main.worldSurface * 16f - 2500f;
                 Main.screenPosition.X = Player.Center.X - (Main.screenWidth / 2);
+            }
+        }
+
+        // LOGIKA PERTEMPURAN PERMANEN DARI GLUTTONY FRUIT
+        
+        // 1. Menambah damage ke boss sebesar 10%
+        public override void ModifyHitNPC(NPC target, ref NPC.HitModifiers modifiers) {
+            if (immuneToErasure && target.type == ModContent.NPCType<WhiteWhaleBoss>()) {
+                modifiers.FinalDamage *= 1.10f; // Damage akhir dikalikan 1.10 (+10%)
+            }
+        }
+
+        // 2. Mengurangi damage yang masuk dari boss sebesar 5%
+        public override void ModifyHurt(ref Player.HurtModifiers modifiers) {
+            if (immuneToErasure && modifiers.DamageSource.SourceNPCIndex >= 0) {
+                NPC npc = Main.npc[modifiers.DamageSource.SourceNPCIndex];
+                
+                if (npc.type == ModContent.NPCType<WhiteWhaleBoss>()) {
+                    modifiers.FinalDamage *= 0.95f; // Damage yang diterima dikurangi menjadi 95% (-5%)
+                }
             }
         }
 
