@@ -228,6 +228,36 @@ Items: {
 		Tooltip: ""
 		DisplayName: Gluttony Fruit
 	}
+
+	AmethystGemsparkRelicItem: {
+		DisplayName: Amethyst Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	DiamondGemsparkRelicItem: {
+		DisplayName: Diamond Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	EmeraldGemsparkRelicItem: {
+		DisplayName: Emerald Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	RubyGemsparkRelicItem: {
+		DisplayName: Ruby Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	SapphireGemsparkRelicItem: {
+		DisplayName: Sapphire Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	TopazGemsparkRelicItem: {
+		DisplayName: Topaz Gemspark Relic Item
+		Tooltip: ""
+	}
 }
 
 NPCs: {
@@ -244,6 +274,21 @@ NPCs: {
 	DummyTargetNPC.DisplayName: Mega Dummy
 	WhiteWhaleClone.DisplayName: White Whale Clone
 	WhiteWhaleBoss.DisplayName: White Whale Boss
+
+	SunCultist: {
+		DisplayName: Sun Cultist
+
+		TownNPCMood: {
+			Content: I am content.
+			NoHome: I hate not having a home.
+			FarFromHome: I am too far from home.
+			LoveSpace: I love having so much space.
+			DislikeCrowded: I dislike how crowded I am.
+			HateCrowded: I hate how crowded I am.
+			LikeNPC_Princess: I like {NPCName}.
+			Princess_LovesNPC: I like {NPCName}.
+		}
+	}
 }
 
 Projectiles: {
@@ -360,6 +405,7 @@ Projectiles: {
 	NebulaBlazeHostile.DisplayName: Nebula Blaze Hostile
 	SilkSlashProjectile.DisplayName: Silk Slash Projectile
 	WhiteWhaleLaser.DisplayName: White Whale Laser
+	SunCultistShot.DisplayName: Sun Cultist Shot
 }
 
 Buffs: {
