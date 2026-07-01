@@ -37,10 +37,20 @@ namespace TheSanity.Items
         public override bool? UseItem(Player player) {
             var cursePlayer = player.GetModPlayer<global::TheSanity.Players.WhaleCursePlayer>();
             
+            // CEK STATUS SEBELUM DI-RESET
+            if (cursePlayer.isInventoryErased) {
+                // PESAN A: Jika player saat ini SEDANG terkena efek hilangnya eksistensi (Kutukan Aktif)
+                Main.NewText("The souls of your items have been restored! You are now permanently immune to erasure, deal 10% more damage, and take 5% less damage from the White Whale.", Color.Orange);
+            }
+            else {
+                // PESAN B: Jika player BELUM PERNAH dihilangkan eksistensinya (Pencegahan/Preemptif)
+                Main.NewText("Your soul has been fortified! You are now permanently immune to erasure, deal 10% more damage, and take 5% less damage from the White Whale.", Color.Cyan);
+            }
+
+            // Baru setelah itu kita ubah datanya
             cursePlayer.isInventoryErased = false;
             cursePlayer.immuneToErasure = true; 
 
-            Main.NewText("The souls of your items have been restored! You are now permanently immune to the White Whale's existence erasure.", Color.Orange);
             return true;
         }
 
@@ -76,6 +86,9 @@ namespace TheSanity.Items
                 .AddIngredient(ItemID.AegisCrystal, 2)
                 .AddIngredient(ItemID.ArcaneCrystal, 2)
                 .AddIngredient(ItemID.Ambrosia, 2)
+                .AddIngredient(ItemID.Starfruit, 2)
+                .AddIngredient(ItemID.Dragonfruit, 2)
+                .AddIngredient(ItemID.LifeFruit, 2)
                 .AddTile(TileID.DemonAltar)
                 .Register();
         }
