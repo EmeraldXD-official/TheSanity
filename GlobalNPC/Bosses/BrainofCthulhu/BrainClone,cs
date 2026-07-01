@@ -1,0 +1,103 @@
+using System; // ✅ TAMBAHAN: untuk Math.Max
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using Terraria.GameContent;
+
+namespace TheSanity.GlobalNPCs
+{
+    /// <summary>
+    /// File ini menghilangkan mekanik clone/ilusi bawaan dari Brain of Cthulhu (state ai[0] == 2)
+    /// dan menggantinya dengan visual clones berputar di sekitar Brain asli.
+    /// Jumlah clone bertambah saat HP menurun, maksimal 6 clone.
+    /// </summary>
+    public class BrainNoClones : global::Terraria.ModLoader.GlobalNPC
+    {
+        public override bool AppliesToEntity(NPC entity, bool lateInstantiation)
+        {
+            return entity.type == NPCID.BrainofCthulhu;
+        }
+
+        public override bool InstancePerEntity => true;
+
+        // Variabel untuk visual clones
+        private float rotationTimer = 0f;
+        private int cloneCount = 0;
+        private Vector2[] clonePositions = new Vector2[6]; // maksimal 6 clone
+
+        // ================================================================
+        // 🔥 NONAKTIFKAN STATE ILUSI VANILLA (ai[0] == 2)
+        // ================================================================
+        public override bool PreAI(NPC npc)
+        {
+            // Jika state = 2 (ilusi), ubah ke 1 (idle) agar tidak membuat ilusi bawaan
+            if (npc.ai[0] == 2)
+            {
+                npc.ai[0] = 1;
+                // Reset timer agar tidak langsung menyerang (opsional)
+                npc.ai[1] = 0;
+                npc.netUpdate = true;
+            }
+            return true; // lanjutkan AI vanilla
+        }
+
+        // ================================================================
+        // 🌀 UPDATE POSISI VISUAL CLONES (HANYA VISUAL)
+        // ================================================================
+        public override void PostAI(NPC npc)
+        {
+            // Aktifkan visual clones hanya jika HP < 50%
+            if (npc.life < npc.lifeMax * 0.5f && npc.active)
+            {
+                // Timer rotasi
+                rotationTimer += 0.02f; // kecepatan rotasi
+                if (rotationTimer > MathHelper.TwoPi)
+                    rotationTimer -= MathHelper.TwoPi;
+
+                // Jumlah clone berdasarkan persentase HP (0-6)
+                float hpRatio = (float)npc.life / npc.lifeMax;
+                cloneCount = (int)(6 * (1f - hpRatio));
+                if (cloneCount < 0) cloneCount = 0;
+                if (cloneCount > 6) cloneCount = 6;
+
+                // Posisi clone melingkar dengan radius 100px
+                float baseRadius = 100f;
+                for (int i = 0; i < cloneCount; i++)
+                {
+                    float angle = rotationTimer + (i * MathHelper.TwoPi / Math.Max(cloneCount, 1));
+                    clonePositions[i] = npc.Center + angle.ToRotationVector2() * baseRadius;
+                }
+            }
+            else
+            {
+                // Jika tidak aktif, hapus clone
+                cloneCount = 0;
+            }
+        }
+
+        // ================================================================
+        // 🎨 GAMBAR CLONE SEBAGAI LAPISAN TRANSPARAN
+        // ================================================================
+        public override bool PreDraw(NPC npc, SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
+        {
+            if (cloneCount > 0)
+            {
+                Texture2D texture = TextureAssets.Npc[npc.type].Value;
+                Vector2 origin = new Vector2(texture.Width * 0.5f, (texture.Height / Main.npcFrameCount[npc.type]) * 0.5f);
+                Rectangle frame = npc.frame;
+                SpriteEffects effects = npc.spriteDirection == 1 ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
+
+                // Gambar clone dengan transparansi 50%
+                for (int i = 0; i < cloneCount; i++)
+                {
+                    Vector2 drawPos = clonePositions[i] - screenPos;
+                    Color cloneColor = drawColor * 0.5f;
+                    spriteBatch.Draw(texture, drawPos, frame, cloneColor, npc.rotation, origin, npc.scale, effects, 0f);
+                }
+            }
+            return true; // Lanjutkan menggambar NPC asli
+        }
+    }
+}

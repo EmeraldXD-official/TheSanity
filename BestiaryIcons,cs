@@ -1,0 +1,28 @@
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+using Terraria.GameContent.Bestiary; // WAJIB tambahkan ini!
+using TheSanity.NPCs;
+
+namespace TheSanity
+{
+    public class BestiaryIcons : ModSystem
+    {
+        public override void PostSetupContent()
+        {
+            // Untuk CustomCreeper
+            int customCreeperType = ModContent.NPCType<CustomCreeper>();
+            NPCID.Sets.NPCBestiaryDrawModifiers[customCreeperType] = new NPCBestiaryDrawModifiers()
+            {
+                CustomTexturePath = "TheSanity/Localization/Bestiary"
+            };
+
+            // Untuk ConfusionMinion
+            int confusionMinionType = ModContent.NPCType<ConfusionMinion>();
+            NPCID.Sets.NPCBestiaryDrawModifiers[confusionMinionType] = new NPCBestiaryDrawModifiers()
+            {
+                CustomTexturePath = "TheSanity/Localization/Bestiary"
+            };
+        }
+    }
+}

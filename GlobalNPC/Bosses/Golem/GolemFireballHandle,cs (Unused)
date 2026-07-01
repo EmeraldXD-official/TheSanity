@@ -1,0 +1,148 @@
+using System;
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace TheSanity.GlobalNPCs
+{
+    public class GolemFireballHandle : GlobalProjectile
+    {
+        public override bool InstancePerEntity => true;
+
+        public bool isGolemSuction = false; 
+        public bool isGolemSpew = false;    
+        public int targetNPCIndex = -1;
+
+        private int suctionDelay = -1;
+        private float currentPullSpeed = 0.5f; 
+
+        public override bool PreAI(Projectile projectile)
+        {
+            // MEKANIK 1: SAAT BOLA API DISEDOT OLEH KEPALA GOLEM
+            if (isGolemSuction)
+            {
+                projectile.tileCollide = false; 
+                projectile.hostile = false;     
+                projectile.friendly = false;
+                projectile.alpha = 135;          
+
+                projectile.frameCounter++;
+                if (projectile.frameCounter >= 4)
+                {
+                    projectile.frameCounter = 0;
+                    projectile.frame++;
+                    if (projectile.frame >= Main.projFrames[projectile.type])
+                    {
+                        projectile.frame = 0;
+                    }
+                }
+                Lighting.AddLight(projectile.Center, 0.4f, 0.1f, 0.05f);
+
+                int dustType = (projectile.type == ProjectileID.CultistBossFireBall) ? DustID.Torch : DustID.Shadowflame;
+                if (Main.rand.NextBool(3))
+                {
+                    int d = Dust.NewDust(projectile.position, projectile.width, projectile.height, dustType, -projectile.velocity.X * 0.3f, -projectile.velocity.Y * 0.3f, 130, default, 1.2f);
+                    Main.dust[d].noGravity = true;
+                }
+
+                if (targetNPCIndex != -1 && Main.npc[targetNPCIndex].active)
+                {
+                    Vector2 targetPos = Main.npc[targetNPCIndex].Center;
+                    Vector2 dir = targetPos - projectile.Center;
+                    float distance = dir.Length();
+
+                    if (suctionDelay == -1)
+                    {
+                        suctionDelay = Main.rand.Next(0, 180); 
+                    }
+
+                    if (distance < 24f) 
+                    {
+                        if (Main.npc[targetNPCIndex].type == NPCID.GolemHeadFree)
+                        {
+                            var headGlobal = Main.npc[targetNPCIndex].GetGlobalNPC<GolemHeadOverride>();
+                            
+                            if (projectile.type == ProjectileID.CultistBossFireBall)
+                            {
+                                headGlobal.absorbedFireballs++;
+                            }
+                            else if (projectile.type == ProjectileID.CultistBossFireBallClone)
+                            {
+                                headGlobal.absorbedClones++;
+                            }
+                        }
+                        
+                        for (int k = 0; k < 5; k++)
+                        {
+                            int dustIdx = Dust.NewDust(projectile.Center, 0, 0, DustID.Lava, Main.rand.NextFloat(-2f, 2f), Main.rand.NextFloat(-2f, 2f));
+                            Main.dust[dustIdx].noGravity = true;
+                        }
+                        projectile.Kill(); 
+                    }
+                    else
+                    {
+                        if (suctionDelay > 0)
+                        {
+                            suctionDelay--;
+                            
+                            // [PANDUAN BALANCING: KECEPATAN GERAK AWAL SEBELUM DISEDOT]
+                            float hoverSpeed = 0.5f;
+                            projectile.velocity = dir.SafeNormalize(Vector2.Zero) * hoverSpeed;
+                        }
+                        else
+                        {
+                            // [PANDUAN BALANCING: KECEPATAN & AKSELERASI PENYEDOTAN]
+                            // currentPullSpeed adalah kecepatan awal sedot, akan bertambah sebesar 0.05f setiap frame hingga batas maksimal 6.0f
+                            if (currentPullSpeed < 6.0f) currentPullSpeed += 0.05f;
+                            projectile.velocity = dir.SafeNormalize(Vector2.Zero) * currentPullSpeed;
+                        }
+                    }
+                }
+                else
+                {
+                    projectile.Kill();
+                }
+
+                projectile.rotation += 0.12f; 
+                return false; 
+            }
+
+            // MEKANIK 2: SAAT BOLA API DIMUNTAHKAN KEMBALI KEBANYAKAN OLEH GOLEM
+            if (isGolemSpew)
+            {
+                projectile.tileCollide = false; 
+                projectile.hostile = true;      
+                projectile.friendly = false;
+                projectile.alpha = 0;          
+
+                projectile.frameCounter++;
+                if (projectile.frameCounter >= 4)
+                {
+                    projectile.frameCounter = 0;
+                    projectile.frame++;
+                    if (projectile.frame >= Main.projFrames[projectile.type])
+                    {
+                        projectile.frame = 0;
+                    }
+                }
+                Lighting.AddLight(projectile.Center, 0.9f, 0.4f, 0.1f);
+
+                if (Main.rand.NextBool(3))
+                {
+                    int d = Dust.NewDust(projectile.position, projectile.width, projectile.height, DustID.Torch, 0f, 0f, 100, default, 1.1f);
+                    Main.dust[d].noGravity = true;
+                }
+
+                projectile.rotation = projectile.velocity.ToRotation() + MathHelper.PiOver2;
+                return false; 
+            }
+            return true;
+        }
+
+        public override bool PreDraw(Projectile projectile, ref Color lightColor)
+        {
+            return true;
+        }
+    }
+}

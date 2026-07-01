@@ -1,0 +1,94 @@
+[h1] Just Simple Rworked of Every Enemy and some Aspect of the game [/h1]
+
+Finish Biome and Event Reworked
+Crimson
+Corruption
+Hallow
+Jungle
+Hell
+Underground
+Space
+Dungeon
+Ocean
+Snow
+Blood Moon
+Old One Army (Except Betsy)
+
+
+Boss Reworked
+Eye of Cthulu
+King Slime
+Dreadnautlus (Not Tested)
+Golem
+Eater of World (WIP Still ballancing)
+Brain of Cthulhu (Maybe its Ballance than EoW)
+
+[h2] Changelog v1.1.1: [/h2]
+
+Fix Zombie emrmain and face Mosnter attack
+Fix Flyng Fish attack
+Make Effect of Wet debuff 30% not 60% in screen
+Fix Jungle Mimic Spawnrate
+Fix Hardmode Ore from Hardmode Crate (Like Calamity)
+Make Chloro and Life Fruit post Plantera only
+Mini Reworked For Vampire Frog staff and Sanguine Staff (Now can Life Steal)
+Add range attack for Deadly Sphere Staff
+Add Buddle System when rain
+Eclipse Reworked is WIP 
+but Mothron has been reworked
+now When Blood Moon and Eclipse, player get debuff Shadow Candle infinite until the event has done
+Add Enemy Vampire Frog (can drop Vampire Frog Staff)
+Reworked Sanguine Staff
+Reworked Vampire Frog Staff
+Add American Gold Fish enemy (My Friend Idea)
+
+[h2] Changelog v1.1.2 [/h2]
+
+Golem Reworked
+Fix Eye of Cthulhu Despawn Bug
+Fix American Gold Fish
+Fix and Fix
+Now Shroomite, Spectre and Spooky is Locked behind Golem (Except Wings)
+Add Costume Arena for Golem, that will Generate after Plantera is Defeated
+
+[h2] Changelog v1.1.3 [/h2]
+
+Eater of World Reworked (Still WiP)
+Brain of Cthulhu Reworked (Its Ballance)
+Add new NPC called "Cloudy"
+Add More Proper Icon
+
+[h2] Changelog v1.1.4 [/h2]
+Fix Whip not Detected Summon Damage
+Summoner Penalty increase from 80% to 95%
+Add Some Debuff in Golem Attack
+
+[h2] Changelog v.1.1.5 [/h2]
+add 4 Costume Main Menu Theme that From [url=https://store.steampowered.com/app/3079280/Saihate_Station/?curator_clanid=45693223] Saihate Station [/url] and [url=https://store.steampowered.com/app/3216040/Saihate_Station__Twilight_Railway/]Twilight Railway[/url]
+add some Tittle in Window Border Text
+ALSO TRY SAIHATE STATION AND TWILIGHT RAILWAY >v<
+Special Thanks to [url=https://store.steampowered.com/curator/45693223] びぶ / viv [/url]
+
+[h2] Changelog v.1.1.5.1 [/h2]
+Change the Background and BGM of Main menu (I didn't get approval from びぶ / viv, but that's fine, I'm still giving them credit because I Really Love the game they made.)
+
+[h2] Changelog 1.1.6.1 [/h2]
+Ballancing Brain and Eater
+Reworked Queen Bee
+Add new item called "Evil Belt" (this item is broken bro)
+Add Infinity Summon Item Mechanic (work with item from Fargo's Mutant)
+Add Costume Boss summon for some bosses
+Add QoL Biome Boss and Fix QoL Infinite Wormhole
+
+[h2] Changelog 1.1.7.1
+Add New Rarity for Costume Item
+Add item called "Mechanical Camera"
+Add item called "Royal Bone Pack"
+Add item called "Sardine" (Created by my Friend "Izhar)
+Reworked Rarity "Red" with costume rarity
+Reworked The Destroyer
+
+Note: Some Feature of This mod, specialy visual like Blue creen in water, that cannot be turn off
+
+[quote=tModLoader TheSanity]
+Developed By Emerald, Sisil, Shion, Haru, Aoi[/quote]

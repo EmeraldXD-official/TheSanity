@@ -1,0 +1,13 @@
+using Terraria.ModLoader;
+
+namespace TheSanity
+{
+    public class TheSanitySystem : ModSystem
+    {
+        public override void PostUpdateEverything()
+        {
+            // Update death animation setiap tick
+            GlobalNPCs.EaterOfWorldsHealthManager.UpdateDeathAnimation();
+        }
+    }
+}

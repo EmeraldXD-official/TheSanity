@@ -1,0 +1,129 @@
+================================================================================
+    PANDUAN IMPLEMENTASI NPC & EXPAND SHOP (THE SANITY SHOP PAGINATION)
+================================================================================
+
+Panduan ini berisi 2 bagian utama:
+1. Pembuatan NPC Baru (Contoh: Town Slime) dengan Toko Standar (Halaman 1).
+2. Sistem Registrasi API untuk menyuntikkan item tambahan (Meluber ke Halaman 2 & 3).
+
+--------------------------------------------------------------------------------
+BAGIAN 1: FILE NPC KUSTOM (Contoh: MyTownSlime.cs)
+--------------------------------------------------------------------------------
+Catatan: Taruh file ini di folder NPCs mod kamu.
+
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+using Terraria.Localization;
+
+namespace MyMod.NPCs
+{
+    public class MyTownSlime : ModNPC
+    {
+        public override void SetStaticDefaults() {
+            Main.npcFrameCount[Type] = 25;        // Jumlah frame animasi standar Town Slime
+            NPCID.Sets.ActsLikeTownNPC[Type] = true;
+            NPCID.Sets.IsTownSlime[Type] = true;   // Menandakan NPC ini adalah jenis Town Slime
+        }
+
+        public override void SetDefaults() {
+            NPC.townNPC = true;
+            NPC.friendly = true;
+            NPC.width = 18;
+            NPC.height = 14;
+            NPC.aiStyle = 7;                       // AI nomor 7 adalah AI untuk Town NPC biasa
+            NPC.damage = 10;
+            NPC.defense = 15;
+            NPC.lifeMax = 250;
+            NPC.HitSound = SoundID.NPCHit1;
+            NPC.DeathSound = SoundID.NPCDeath1;
+            NPC.knockBackResist = 0.5f;
+        }
+
+        // Menentukan nama tombol interaksi saat diajak bicara
+        public override void SetChatButtons(ref string button, ref string button2) {
+            // Mengambil teks otomatis kata "Shop" dari internal bahasa Terraria
+            button = Language.GetTextValue("LegacyInterface.28"); 
+        }
+
+        // Menangani aksi ketika tombol interaksi tersebut diklik
+        public override void OnChatButtonClicked(bool firstButton, ref string shopName) {
+            if (firstButton) {
+                shopName = "SlimeShop"; // Mengarahkan ke toko bernama "SlimeShop"
+            }
+        }
+
+        // Mendaftarkan item bawaan awal (Akan mengisi slot utama di Halaman 1)
+        public override void AddShops() {
+            var npcShop = new NPCShop(Type, "SlimeShop")
+                .Add(ItemID.Gel)
+                .Add(ItemID.SlimeCrown)
+                .Add(ItemID.PinkGel);
+            
+            npcShop.Register();
+        }
+    }
+}
+
+
+--------------------------------------------------------------------------------
+BAGIAN 2: FILE SISTEM SUNTIK ITEM API (Contoh: ExpandShopSystem.cs)
+--------------------------------------------------------------------------------
+Catatan: Taruh file ini di folder Systems mod kamu. Method ini otomatis berjalan
+         sekali saat loading mod selesai (PostSetupContent).
+
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+using TheSanity.MainMenu.UI; // PENTING: Arahkan ke namespace tempat SanityShopAPI berada!
+
+namespace MyMod.Systems
+{
+    public class ExpandShopSystem : ModSystem
+    {
+        public override void PostSetupContent() {
+            // 1. Ambil ID numerik dari NPC kustom yang ditargetkan
+            int targetNPCID = ModContent.NPCType<NPCs.MyTownSlime>();
+
+            // 2. DAFTARKAN ITEM TAMBAHAN VIA API
+            // Format 1: Registrasi langsung menggunakan Item ID (Sangat instan)
+            SanityShopAPI.RegisterDLCShopItem(targetNPCID, ItemID.Zenith);
+            SanityShopAPI.RegisterDLCShopItem(targetNPCID, ItemID.SlimeGun);
+            SanityShopAPI.RegisterDLCShopItem(targetNPCID, ItemID.KingSlimeMask);
+
+            // Format 2: Menggunakan Lambda/Factory (Bisa diatur tumpukan stack/kondisi itemnya)
+            SanityShopAPI.RegisterDLCShopItem(targetNPCID, () => {
+                Item kustomItem = new Item();
+                kustomItem.SetDefaults(ItemID.SuperHealingPotion);
+                kustomItem.stack = 99; // Mengatur item langsung terbeli dalam jumlah banyak
+                return kustomItem;
+            });
+
+            // TIPS PENGUJIAN HALAMAN:
+            // Loop di bawah ini sengaja memasukkan 45 Dirt Block untuk memaksa item 
+            // meluber melebihi 40 slot, sehingga halaman 2 dan 3 otomatis aktif.
+            for (int i = 0; i < 45; i++) {
+                SanityShopAPI.RegisterDLCShopItem(targetNPCID, ItemID.DirtBlock);
+            }
+        }
+    }
+}
+
+
+================================================================================
+    RINGKASAN CARA KERJA SISTEM PAGINATION AUTOMATIC
+================================================================================
+1. Saat Toko Dibuka:
+   Sistem pagination kita (ShopPaginationSystem) mendeteksi event tersebut secara
+   global, mengosongkan layar display asli, lalu menarik semua item dari Toko Asli
+   ditambah item hasil suntikan dari `SanityShopAPI`.
+
+2. Penggabungan & Kalkulasi:
+   Semua item digabung dalam satu list (MasterShopCache). Jika total item di atas 
+   40, tombol "Next" bisa diklik untuk membagi per 40 item ke halaman berikutnya.
+
+3. Sistem Autoload untuk Semua NPC:
+   Semua NPC (baik bawaan Vanilla, Mod lain, ataupun Mod milikmu sendiri) yang 
+   memiliki tab Shop akan otomatis dipasang fitur tombol halaman ini dengan 
+   minimum limit 3 halaman kosong (bisa ditekan Next walau belum diisi item DLC).
+================================================================================

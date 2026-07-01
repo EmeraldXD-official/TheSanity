@@ -1,0 +1,58 @@
+using System.Collections.Generic;
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace TheSanity
+{
+    // =========================================================================
+    // SYSTEM MODIFIKASI DESKRIPSI & TIPE DAMAGE ITEM (GLOBALITEM)
+    // =========================================================================
+    public class SoCItemOverride : GlobalItem
+    {
+        public override void SetDefaults(Item item) {
+            if (item.type == ItemID.EoCShield) {
+                item.DamageType = DamageClass.Default; // Set tipe damage item menjadi Classless
+            }
+        }
+
+        public override void ModifyWeaponDamage(Item item, Player player, ref StatModifier damage) {
+            if (item.type == ItemID.EoCShield) {
+                StatModifier melee = player.GetTotalDamage(DamageClass.Melee);
+                StatModifier ranged = player.GetTotalDamage(DamageClass.Ranged);
+                StatModifier magic = player.GetTotalDamage(DamageClass.Magic);
+                StatModifier summon = player.GetTotalDamage(DamageClass.Summon);
+
+                float meleeVal = melee.ApplyTo(1f);
+                float rangedVal = ranged.ApplyTo(1f);
+                float magicVal = magic.ApplyTo(1f);
+                float summonVal = summon.ApplyTo(1f);
+
+                StatModifier highestModifier = melee;
+                float maxDamageValue = meleeVal;
+
+                if (rangedVal > maxDamageValue) {
+                    maxDamageValue = rangedVal;
+                    highestModifier = ranged;
+                }
+                if (magicVal > maxDamageValue) {
+                    maxDamageValue = magicVal;
+                    highestModifier = magic;
+                }
+                if (summonVal > maxDamageValue) {
+                    maxDamageValue = summonVal;
+                    highestModifier = summon;
+                }
+
+                damage = highestModifier;
+            }
+        }
+
+        public override void ModifyTooltips(Item item, List<TooltipLine> tooltips) {
+            if (item.type == ItemID.EoCShield) {
+                TooltipLine sanityLine = new TooltipLine(Mod, "SanityReworkText", "[c/FF0000:Sanity] Change: Able to Ram Dash through enemies safely");
+                tooltips.Add(sanityLine);
+            }
+        }
+    }
+}
