@@ -258,6 +258,21 @@ Items: {
 		DisplayName: Topaz Gemspark Relic Item
 		Tooltip: ""
 	}
+
+	AbyssalKrakenTentacle: {
+		DisplayName: Abyssal Kraken Tentacle
+		Tooltip:
+			'''
+			Releases the fury of the deep sea
+			Striking enemies summons homing MiniTentacle and Abyssal Maws
+			Abyssal Maws bite through enemy armor, applying Ichor
+			'''
+	}
+
+	AlchemistHomunculusStaff: {
+		DisplayName: Alchemist Homunculus Staff
+		Tooltip: Summons an alchemical homunculus to fight for you.
+	}
 }
 
 NPCs: {
@@ -406,6 +421,11 @@ Projectiles: {
 	SilkSlashProjectile.DisplayName: Silk Slash Projectile
 	WhiteWhaleLaser.DisplayName: White Whale Laser
 	SunCultistShot.DisplayName: Sun Cultist Shot
+	AbyssalKrakenTentacleProj.DisplayName: Abyssal Kraken Tentacle Proj
+	AbyssalMaw.DisplayName: Abyssal Maw
+	MiniTentacleProj.DisplayName: Mini Tentacle Proj
+	HomunculusMinion.DisplayName: Homunculus Minion
+	HomunculusPotion.DisplayName: Homunculus Potion
 }
 
 Buffs: {
@@ -458,6 +478,10 @@ Buffs: {
 		Description: Mods.TheSanity.Buffs.HaloMinionBuff.Description
 		DisplayName: Halo Minion Buff
 	}
+	HomunculusBuff: {
+          DisplayName: "Homunculus",
+          Description: "The homunculus will fight for you."
+        }
 }
 
 Configs: {
