@@ -1,25 +1,37 @@
 using Microsoft.Xna.Framework;
+using System;
 using Terraria;
 using Terraria.Audio; 
 using Terraria.GameInput;
 using Terraria.ID;
 using Terraria.ModLoader;
+using Terraria.ModLoader.IO;
 
 namespace TheSanity
 {
     public class BlackwhipPlayer : ModPlayer
     {
-        // --- DATA SKILL 1: TETHER ---
         public bool isTethered = false;
         public int tetheredNPCIndex = -1;
         public float currentTetherLength = 0f;
 
-        // --- DATA SKILL 2: DOC OCK WEB WALK ---
         public bool isWebWalking = false;
         public Vector2[] legAnchors = new Vector2[4];
         public bool[] legAnchored = new bool[4];
         private float[] legAngles = new float[] { -2.35f, -0.78f, 2.35f, 0.78f }; 
         private int legStepTimer = 0; 
+
+        public int selectedWhipTagType = ItemID.BlandWhip;
+
+        public override void SaveData(TagCompound tag) {
+            tag["selectedWhipTagType"] = selectedWhipTagType;
+        }
+
+        public override void LoadData(TagCompound tag) {
+            if (tag.ContainsKey("selectedWhipTagType")) {
+                selectedWhipTagType = tag.GetInt("selectedWhipTagType");
+            }
+        }
 
         public override void ProcessTriggers(TriggersSet triggersSet) {
             if (Player.HeldItem.type != ModContent.ItemType<Items.BlackwhipItem>()) {
@@ -31,14 +43,12 @@ namespace TheSanity
                 return;
             }
 
-            // Trigger Skill 1 (Tether - E)
             if (BlackwhipSystem.TetherKeybind.JustPressed) {
                 if (isWebWalking) isWebWalking = false; 
                 if (isTethered) BreakTether();
                 else TryStartTether();
             }
 
-            // Trigger Skill 2 (Doc Ock Web Walk - Z)
             if (BlackwhipSystem.WebWalkKeybind.JustPressed) {
                 if (isTethered) BreakTether(); 
                 isWebWalking = !isWebWalking;
@@ -78,7 +88,6 @@ namespace TheSanity
                 tetheredNPCIndex = closestNPC;
                 currentTetherLength = closestDist; 
 
-                // Suara "THWIP!" mantap saat jaring berhasil mengunci target musuh
                 SoundEngine.PlaySound(SoundID.Item17 with { Pitch = -0.1f, Volume = 0.85f }, Player.Center);
 
                 if (Main.myPlayer == Player.whoAmI) {
@@ -91,7 +100,6 @@ namespace TheSanity
             if (isTethered) {
                 SoundEngine.PlaySound(SoundID.Item16 with { Pitch = 0.1f, Volume = 0.7f }, Player.Center);
             }
-            
             isTethered = false;
             tetheredNPCIndex = -1;
         }
@@ -106,10 +114,36 @@ namespace TheSanity
             if (isWebWalking) {
                 Player.RemoveAllGrapplingHooks();
                 Player.gravity = 0f; 
+                Player.stepSpeed = 0f; // PERBAIKAN 1: Matikan fitur step-up otomatis agar tidak tersangkut di pinggir platform
+
+                bool actualUp = Player.controlUp;
+                bool actualDown = Player.controlDown;
+
+                // PERBAIKAN 2: Jika menekan tombol bawah, bimbing koordinat Y pemain agar menembus platform
+                if (actualDown) {
+                    int tileXStart = (int)(Player.position.X / 16f);
+                    int tileXEnd = (int)((Player.position.X + Player.width) / 16f);
+                    int tileY = (int)((Player.position.Y + Player.height + 1f) / 16f); // Area tepat di bawah kaki
+
+                    bool standingOnPlatform = false;
+                    for (int x = tileXStart; x <= tileXEnd; x++) {
+                        if (WorldGen.InWorld(x, tileY)) {
+                            Tile tile = Main.tile[x, tileY];
+                            if (tile.HasTile && Main.tileSolidTop[tile.TileType]) {
+                                standingOnPlatform = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (standingOnPlatform) {
+                        Player.position.Y += 4f; // Dorong sedikit ke bawah melewati batas solid top platform
+                    }
+                }
 
                 Vector2 move = Vector2.Zero;
-                if (Player.controlUp) move.Y -= 1f;
-                if (Player.controlDown) move.Y += 1f;
+                if (actualUp) move.Y -= 1f;
+                if (actualDown) move.Y += 1f;
                 if (Player.controlLeft) move.X -= 1f;
                 if (Player.controlRight) move.X += 1f;
 
@@ -123,11 +157,10 @@ namespace TheSanity
                 }
 
                 UpdateDocOckLegs();
-
                 Player.fallStart = (int)(Player.position.Y / 16f);
+                Player.controlDown = true; 
 
                 if (Main.myPlayer == Player.whoAmI && Player.ownedProjectileCounts[ModContent.ProjectileType<Projectiles.BlackwhipWebWalkProjectile>()] == 0) {
-                    // FIX: Karakter ']' liar sudah dibuang dari baris ini!
                     Projectile.NewProjectile(Player.GetSource_FromThis(), Player.Center, Vector2.Zero, ModContent.ProjectileType<Projectiles.BlackwhipWebWalkProjectile>(), 0, 0f, Player.whoAmI);
                 }
                 return; 
@@ -166,9 +199,11 @@ namespace TheSanity
             float maxScanReach = 50f * 16f; 
             float openAirReach = 1500f; 
 
+            // Cek apakah player berniat turun (menekan tombol Down sebelum di-override di akhir PreUpdateMovement)
+            bool pressingDown = Player.controlDown;
+
             for (int i = 0; i < 4; i++) {
                 Vector2 scanDir = legAngles[i].ToRotationVector2();
-                
                 if (Player.velocity != Vector2.Zero) {
                     scanDir = Vector2.Normalize(scanDir + Player.velocity * 0.2f);
                 }
@@ -184,6 +219,11 @@ namespace TheSanity
                     if (WorldGen.InWorld(tileX, tileY)) {
                         Tile tile = Main.tile[tileX, tileY];
                         if (tile.HasTile && Main.tileSolid[tile.TileType]) {
+                            // PERBAIKAN 3: Jika ubin adalah platform dan player menekan tombol bawah, abaikan ubin ini agar kaki tidak mengunci di sana
+                            if (Main.tileSolidTop[tile.TileType] && pressingDown) {
+                                continue;
+                            }
+
                             closestTilePos = new Vector2(tileX * 16 + 8, tileY * 16 + 8);
                             foundTile = true;
                             break; 
