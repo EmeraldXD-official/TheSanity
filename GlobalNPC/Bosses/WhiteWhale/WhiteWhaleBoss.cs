@@ -36,8 +36,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
         private enum P1Attacks {
             Dash3X,
-            SlamAndNebula,
-            LaserAttack
+            SequentialNebulaBlaze,
+            LaserRotation180,
+            SlamPlayer2X
         }
 
         private BossState State {
@@ -60,6 +61,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
         private int dashCount = 0;
         private bool spawnedClones = false;
         private float dashTelegraphRotation = 0f; 
+        private int laserIndex = -1; 
         
         public Vector2 rotatingCenter = Vector2.Zero; 
 
@@ -97,7 +99,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.Dash3X && NPC.velocity.Length() > 5f) {
                 useFrameThree = true; 
             }
-            else if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.SlamAndNebula && AttackTimer > 50 && AttackTimer < 85) {
+            else if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.SlamPlayer2X && (AttackTimer % 90) > 45 && (AttackTimer % 90) < 80) {
                 useFrameThree = true;
             }
             else if (State == BossState.Phase2_Active && (P2Attacks)AttackState <= P2Attacks.Dash_Letter_H && NPC.velocity.Length() > 8f) {
@@ -107,7 +109,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                 useFrameThree = true;
             }
             
-            if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.LaserAttack) {
+            if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.LaserRotation180 && AttackTimer > 40 && AttackTimer < 140) {
                 useFrameThree = true;
             }
             else if (State == BossState.Phase2_Active && (P2Attacks)AttackState == P2Attacks.RotatingLaserTriangle) {
@@ -151,7 +153,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                 return; 
             }
 
-            NPC.direction = NPC.Center.X < target.Center.X ? 1 : -1;
+            // Kunci arah agar mulut tidak berpindah tempat secara berlawanan di tengah menembak laser
+            bool lockDirection = (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.LaserRotation180 && AttackTimer >= 40 && AttackTimer <= 140);
+            if (!lockDirection) {
+                NPC.direction = NPC.Center.X < target.Center.X ? 1 : -1;
+            }
 
             switch (State) {
                 case BossState.SpawnAnimation:
@@ -180,7 +186,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             if (!Main.dedServ && State != BossState.SpawnAnimation) {
                 for (int i = 0; i < 4; i++) {
                     float angle = Main.rand.NextFloat(0f, MathHelper.TwoPi);
-                    // Partikel halo disesuaikan mengikuti posisi kepala baru
                     Vector2 haloOffset = angle.ToRotationVector2() * new Vector2(110f, 65f) + new Vector2(NPC.spriteDirection * 90f, -10f); 
                     
                     int dustType = Main.rand.NextBool() ? DustID.PinkTorch : DustID.WhiteTorch;
@@ -220,39 +225,39 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             SpawnFog(target, 4, -200, 700); 
 
             if (target.whoAmI == Main.myPlayer && target.TryGetModPlayer<WhaleCursePlayer>(out var whalePlayer)) {
-                if (GlobalTimer < 3420) {
+                if (GlobalTimer < 1800) { 
                     whalePlayer.trackBossIndex = NPC.whoAmI; 
                 } else {
                     whalePlayer.trackBossIndex = -1; 
                 }
             }
 
-            if (GlobalTimer == 180) {
+            if (GlobalTimer == 60) {
                 Main.NewText("<Moby Dick> ...", 175, 75, 255);
                 CombatText.NewText(NPC.getRect(), new Color(175, 75, 255), "...", true);
             }
-            else if (GlobalTimer == 600) {
+            else if (GlobalTimer == 300) {
                 Main.NewText("<Moby Dick> I am the creature shrouded in mist... the pure manifestation of the Sin of Gluttony.", 175, 75, 255);
                 CombatText.NewText(NPC.getRect(), new Color(175, 75, 255), "Sin of Gluttony...", true);
             }
-            else if (GlobalTimer == 1200) {
+            else if (GlobalTimer == 600) {
                 Main.NewText("<Moby Dick> This fog does not merely kill; it completely erases the very remnants of your existence.", 175, 75, 255);
                 CombatText.NewText(NPC.getRect(), new Color(175, 75, 255), "Erasing existence!", true);
             }
-            else if (GlobalTimer == 1800) {
+            else if (GlobalTimer == 900) {
                 Main.NewText("<Moby Dick> Do you truly believe you possess the strength to defeat me, mere mortal?", 175, 75, 255);
                 CombatText.NewText(NPC.getRect(), new Color(175, 75, 255), "Defeat me?", true);
             }
-            else if (GlobalTimer == 2400) {
+            else if (GlobalTimer == 1200) {
                 Main.NewText("<Moby Dick> Or will your soul shatter... and all the world's memories of you be entirely devoured?", 175, 75, 255);
                 CombatText.NewText(NPC.getRect(), new Color(175, 75, 255), "Memories devoured!", true);
             }
-            else if (GlobalTimer == 3000) {
+            else if (GlobalTimer == 1500) {
                 Main.NewText("<Moby Dick> Let us test your resolve before your memories vanish into the hollow fog!", 175, 75, 255);
                 CombatText.NewText(NPC.getRect(), new Color(255, 25, 25), "FEEL THIS HUNGER!", true);
             }
 
-            if (GlobalTimer >= 3420) {
+            if (GlobalTimer >= 1800) {
                 State = BossState.Phase1;
                 GlobalTimer = 0;
                 AttackTimer = 0;
@@ -298,67 +303,115 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
                     if (dashCount >= 3 && AttackTimer > 270) {
                         dashCount = 0;
-                        AttackState = (float)P1Attacks.SlamAndNebula;
+                        AttackState = (float)P1Attacks.SequentialNebulaBlaze;
                         AttackTimer = 0;
                     }
                     break;
 
-                case P1Attacks.SlamAndNebula:
-                    if (AttackTimer <= 50) {
+                case P1Attacks.SequentialNebulaBlaze:
+                    Vector2 hoverPos = target.Center + new Vector2(NPC.direction * -350f, -200f);
+                    NPC.velocity = Vector2.Lerp(NPC.velocity, (hoverPos - NPC.Center) * 0.08f, 0.1f);
+
+                    if (AttackTimer == 30 || AttackTimer == 60 || AttackTimer == 90) {
+                        SoundEngine.PlaySound(SoundID.Item9, NPC.position);
+                        if (Main.netMode != NetmodeID.MultiplayerClient) {
+                            Vector2 shootVel = (target.Center - NPC.Center).SafeNormalize(Vector2.Zero) * 9.5f;
+                            
+                            Projectile.NewProjectile(
+                                NPC.GetSource_FromAI(),
+                                NPC.Center,
+                                shootVel,
+                                ModContent.ProjectileType<Projectiles.NebulaBlazeHostile>(),
+                                31, 
+                                0f,
+                                Main.myPlayer
+                            );
+                        }
+                    }
+
+                    if (AttackTimer > 130) {
+                        AttackState = (float)P1Attacks.LaserRotation180;
+                        AttackTimer = 0;
+                        laserIndex = -1; 
+                    }
+                    break;
+
+                case P1Attacks.LaserRotation180:
+                    Vector2 laserCenterPos = target.Center + new Vector2(0f, -300f);
+                    NPC.velocity = Vector2.Lerp(NPC.velocity, (laserCenterPos - NPC.Center) * 0.05f, 0.1f);
+                    
+                    // PENYESUAIAN COORD: Menghitung letak visual mulut depan asli dengan menambahkan offset gambar
+                    Vector2 mouthPosition = NPC.Center + new Vector2(-NPC.direction * 90f, -10f) + new Vector2(NPC.direction * 105f, 30f);
+
+                    if (AttackTimer < 40) {
+                        dashTelegraphRotation = (target.Center - mouthPosition).ToRotation();
+                    }
+                    else if (AttackTimer >= 40 && AttackTimer <= 140) {
+                        // PERBAIKAN TRACKING: Sudut laser secara aktif dikunci halus mengikuti gerak koordinat player (AngleLerp)
+                        float angleToPlayer = (target.Center - mouthPosition).ToRotation();
+                        dashTelegraphRotation = MathHelper.WrapAngle(dashTelegraphRotation).AngleLerp(angleToPlayer, 0.045f);
+
+                        if (AttackTimer == 40) {
+                            if (Main.netMode != NetmodeID.MultiplayerClient) {
+                                Vector2 beamVel = dashTelegraphRotation.ToRotationVector2() * 8.5f;
+                                laserIndex = Projectile.NewProjectile(
+                                    NPC.GetSource_FromAI(), 
+                                    mouthPosition, 
+                                    beamVel, 
+                                    ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>(), 
+                                    100, 
+                                    0f, 
+                                    Main.myPlayer
+                                );
+                            }
+                        }
+
+                        if (laserIndex >= 0 && laserIndex < Main.maxProjectiles) {
+                            Projectile laser = Main.projectile[laserIndex];
+                            if (laser.active && laser.type == ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>()) {
+                                laser.Center = mouthPosition;
+                                laser.velocity = dashTelegraphRotation.ToRotationVector2() * 8.5f;
+                                laser.netUpdate = true;
+                            }
+                        }
+                    }
+
+                    if (AttackTimer > 140) {
+                        if (laserIndex >= 0 && laserIndex < Main.maxProjectiles) {
+                            if (Main.projectile[laserIndex].active && Main.projectile[laserIndex].type == ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>()) {
+                                Main.projectile[laserIndex].Kill();
+                            }
+                        }
+                        AttackState = (float)P1Attacks.SlamPlayer2X;
+                        AttackTimer = 0;
+                        dashCount = 0;
+                    }
+                    break;
+
+                case P1Attacks.SlamPlayer2X:
+                    int slamCycle = (int)AttackTimer % 90;
+
+                    if (slamCycle <= 45) {
                         Vector2 slamReadyPos = target.Center + new Vector2(0f, -550f); 
                         NPC.velocity = Vector2.Lerp(NPC.velocity, (slamReadyPos - NPC.Center) * 0.25f, 0.2f);
                         dashTelegraphRotation = MathHelper.PiOver2; 
                     }
-                    else if (AttackTimer == 51) {
-                        NPC.velocity = new Vector2(0f, 35f); 
+                    else if (slamCycle == 46) {
+                        NPC.velocity = new Vector2(0f, 38f); 
                         SoundEngine.PlaySound(SoundID.Roar, NPC.position);
                     }
-                    else if (AttackTimer > 51 && AttackTimer <= 90) {
-                        if (AttackTimer == 75) {
-                            NPC.velocity *= 0.08f; 
-                            
-                            if (Main.netMode != NetmodeID.MultiplayerClient) {
-                                Vector2 hollowCenter = NPC.Center; 
-                                float baseAngle = (target.Center - hollowCenter).ToRotation();
-                                float spreadAngle = MathHelper.ToRadians(24f); 
-                                
-                                for (int i = 0; i < 4; i++) {
-                                    float finalAngle = baseAngle + (i - 1.5f) * spreadAngle;
-                                    Vector2 shootVel = finalAngle.ToRotationVector2() * 3.2f; 
-                                    
-                                    Projectile.NewProjectile(
-                                        NPC.GetSource_FromAI(),
-                                        hollowCenter,
-                                        shootVel,
-                                        ModContent.ProjectileType<Projectiles.NebulaBlazeHostile>(),
-                                        31, 
-                                        0f,
-                                        Main.myPlayer
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    else if (AttackTimer > 130) {
-                        AttackState = (float)P1Attacks.LaserAttack;
-                        AttackTimer = 0;
-                    }
-                    break;
-
-                case P1Attacks.LaserAttack:
-                    NPC.velocity = Vector2.Lerp(NPC.velocity, (target.Center - new Vector2(0, 300) - NPC.Center) * 0.05f, 0.1f);
-                    
-                    if (AttackTimer == 60) {
-                        // Karena titik NPC.Center sekarang sudah pas di kepala, jarak ke moncong luar tinggal +110f ke depan
-                        Vector2 mouthPos = NPC.Center + new Vector2(NPC.direction * 110f, 15f);
-                        Vector2 beamVel = (target.Center - mouthPos).SafeNormalize(Vector2.Zero) * 8f;
-                        
-                        if (Main.netMode != NetmodeID.MultiplayerClient) {
-                            Projectile.NewProjectile(NPC.GetSource_FromAI(), mouthPos, beamVel, ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>(), 100, 0f, Main.myPlayer);
+                    else if (slamCycle > 46 && slamCycle <= 80) {
+                        if (slamCycle == 75) {
+                            NPC.velocity *= 0.1f; 
                         }
                     }
 
-                    if (AttackTimer > 120) {
+                    if (slamCycle == 89) {
+                        dashCount++;
+                    }
+
+                    if (dashCount >= 2 && AttackTimer > 175) {
+                        dashCount = 0;
                         AttackState = (float)P1Attacks.Dash3X; 
                         AttackTimer = 0;
                     }
@@ -397,6 +450,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
                 AttackState = (float)nextAttack;
             }
+            NPC.velocity *= 0.2f; 
             AttackTimer = 0;
             NPC.netUpdate = true;
         }
@@ -568,7 +622,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                     }
 
                     float radius = 500f; 
-                    Vector2 mouthPos = NPC.Center + new Vector2(NPC.direction * 110f, 15f);
+                    Vector2 mouthPosP2 = NPC.Center + new Vector2(-NPC.direction * 90f, -10f) + new Vector2(NPC.direction * 105f, 30f);
                     
                     if (AttackTimer >= 1 && AttackTimer <= 180) {
                         float angle = (AttackTimer - 1f) * (MathHelper.TwoPi / 120f); 
@@ -578,7 +632,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                         if (AttackTimer > 40 && AttackTimer % 15 == 0) {
                             if (Main.netMode != NetmodeID.MultiplayerClient) {
                                 Vector2 laserVel = angle.ToRotationVector2() * 8f;
-                                Projectile.NewProjectile(NPC.GetSource_FromAI(), mouthPos, laserVel, ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>(), 160, 0f, Main.myPlayer);
+                                Projectile.NewProjectile(NPC.GetSource_FromAI(), mouthPosP2, laserVel, ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>(), 160, 0f, Main.myPlayer);
                             }
                         }
                     }
@@ -593,7 +647,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                         if (AttackTimer % 15 == 0) {
                             if (Main.netMode != NetmodeID.MultiplayerClient) {
                                 Vector2 laserVel = angle.ToRotationVector2() * 8f;
-                                Projectile.NewProjectile(NPC.GetSource_FromAI(), mouthPos, laserVel, ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>(), 100, 0f, Main.myPlayer);
+                                Projectile.NewProjectile(NPC.GetSource_FromAI(), mouthPosP2, laserVel, ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>(), 100, 0f, Main.myPlayer);
                             }
                         }
                     }
@@ -645,9 +699,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
         public override bool PreDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor) {
             Vector2 origin = NPC.frame.Size() / 2f;
             
-            // --- FIX POSISI HITBOX KEPALA (DIBALIK BIAR PAS SESUAI IMAGE_B944BC.PNG) ---
-            float visualOffsetY = -10f; // Negatif agar sprite bergeser naik (otomatis hitbox turun ke dalam tubuh paus)
-            float visualOffsetX = NPC.spriteDirection * 90f; // Diubah jadi positif! Sprite mundur, membuat hitbox maju ke arah kepala
+            float visualOffsetY = -10f; 
+            float visualOffsetX = NPC.spriteDirection * 90f; 
             Vector2 visualOffset = new Vector2(visualOffsetX, visualOffsetY);
 
             if (Main.netMode != NetmodeID.Server) {
@@ -665,7 +718,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                 }
             }
 
-            if (State == BossState.SpawnAnimation && GlobalTimer < 3420) {
+            if (State == BossState.SpawnAnimation && GlobalTimer < 1800) { 
                 Texture2D texture = TextureAssets.Npc[NPC.type].Value;
                 Vector2 drawPos = NPC.Center - screenPos + visualOffset;
                 SpriteEffects effects = NPC.spriteDirection == 1 ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
@@ -675,16 +728,21 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
             Texture2D magicPixel = TextureAssets.MagicPixel.Value;
 
-            if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.Dash3X && dashCount < 3) {
-                float cycleTimer = AttackTimer % 90;
-                if (cycleTimer >= 0 && cycleTimer <= 40) {
-                    float opacity = cycleTimer / 40f; 
-                    spriteBatch.Draw(magicPixel, NPC.Center - screenPos, new Rectangle(0, 0, 1, 1), Color.Red * opacity * 0.6f, dashTelegraphRotation, new Vector2(0, 0.5f), new Vector2(2400f, 90f), SpriteEffects.None, 0f);
+            if (State == BossState.Phase1) {
+                if ((P1Attacks)AttackState == P1Attacks.Dash3X && dashCount < 3) {
+                    float cycleTimer = AttackTimer % 90;
+                    if (cycleTimer >= 0 && cycleTimer <= 40) {
+                        float opacity = cycleTimer / 40f; 
+                        spriteBatch.Draw(magicPixel, NPC.Center - screenPos, new Rectangle(0, 0, 1, 1), Color.Red * opacity * 0.6f, dashTelegraphRotation, new Vector2(0, 0.5f), new Vector2(2400f, 90f), SpriteEffects.None, 0f);
+                    }
                 }
-            }
-            else if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.SlamAndNebula && AttackTimer <= 50) {
-                float opacity = AttackTimer / 50f;
-                spriteBatch.Draw(magicPixel, NPC.Center - screenPos, new Rectangle(0, 0, 1, 1), Color.Red * opacity * 0.7f, MathHelper.PiOver2, new Vector2(0, 0.5f), new Vector2(2400f, 130f), SpriteEffects.None, 0f);
+                else if ((P1Attacks)AttackState == P1Attacks.SlamPlayer2X) {
+                    float cycleTimer = AttackTimer % 90;
+                    if (cycleTimer <= 45) {
+                        float opacity = cycleTimer / 45f;
+                        spriteBatch.Draw(magicPixel, NPC.Center - screenPos, new Rectangle(0, 0, 1, 1), Color.Red * opacity * 0.7f, MathHelper.PiOver2, new Vector2(0, 0.5f), new Vector2(2400f, 130f), SpriteEffects.None, 0f);
+                    }
+                }
             }
             else if (State == BossState.Phase2_Active) {
                 if ((P2Attacks)AttackState <= P2Attacks.Dash_Letter_H && AttackTimer <= 50) {
