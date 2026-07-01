@@ -25,50 +25,33 @@ namespace TheSanity.Projectiles
             set => Projectile.ai[1] = value;
         }
 
-        // Properti dinamis untuk menentukan durasi bidik berdasarkan keadaan serangan unit pemiliknya
         public float GetTelegraphDuration() {
-            int ownerIndex = (int)Projectile.ai[0];
-            if (ownerIndex >= 0 && ownerIndex < Main.maxNPCs) {
-                NPC owner = Main.npc[ownerIndex];
-                if (owner.active) {
-                    if (owner.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss>() && owner.ai[0] == 3f && (global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks)owner.ai[2] == global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
-                        return (owner.ai[3] > 210) ? 0f : 40f; 
-                    }
-                    if (owner.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleClone>()) {
-                        int parentIdx = (int)owner.ai[0];
-                        if (parentIdx >= 0 && parentIdx < Main.maxNPCs) {
-                            NPC parent = Main.npc[parentIdx];
-                            if (parent.active && parent.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss>() && (global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks)parent.ai[2] == global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
-                                return (parent.ai[3] > 210) ? 0f : 40f;
-                            }
-                        }
-                    }
-                }
-            }
-            return 35f; 
+            return 0f; 
         }
 
-        // Properti dinamis untuk menentukan durasi total keaktifan laser secara presisi
         public float GetTotalDuration() {
             int ownerIndex = (int)Projectile.ai[0];
             if (ownerIndex >= 0 && ownerIndex < Main.maxNPCs) {
                 NPC owner = Main.npc[ownerIndex];
                 if (owner.active) {
-                    if (owner.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss>() && owner.ai[0] == 3f && (global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks)owner.ai[2] == global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
+                    if (owner.type == ModContent.NPCType<WhiteWhaleBoss>() && owner.ai[0] == 1f && owner.ai[2] == 2f) {
+                        return 100f; // Menyelaraskan durasi tembakan Fase 1 menjadi 100 frame
+                    }
+                    if (owner.type == ModContent.NPCType<WhiteWhaleBoss>() && owner.ai[0] == 3f && (WhiteWhaleBoss.P2Attacks)owner.ai[2] == WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
                         return 180f; 
                     }
-                    if (owner.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleClone>()) {
+                    if (owner.type == ModContent.NPCType<WhiteWhaleClone>()) {
                         int parentIdx = (int)owner.ai[0];
                         if (parentIdx >= 0 && parentIdx < Main.maxNPCs) {
                             NPC parent = Main.npc[parentIdx];
-                            if (parent.active && parent.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss>() && (global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks)parent.ai[2] == global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
+                            if (parent.active && parent.type == ModContent.NPCType<WhiteWhaleBoss>() && (WhiteWhaleBoss.P2Attacks)parent.ai[2] == WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
                                 return 180f;
                             }
                         }
                     }
                 }
             }
-            return 35f + 45f; 
+            return 100f; 
         }
 
         public override void SetDefaults() {
@@ -83,7 +66,6 @@ namespace TheSanity.Projectiles
         public override void AI() {
             Timer++;
             float totalDur = GetTotalDuration();
-            float telegDur = GetTelegraphDuration();
 
             if (Timer >= totalDur) {
                 Projectile.Kill();
@@ -96,7 +78,7 @@ namespace TheSanity.Projectiles
                     float closestDist = 250f; 
                     for (int i = 0; i < Main.maxNPCs; i++) {
                         NPC npc = Main.npc[i];
-                        if (npc.active && (npc.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss>() || npc.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleClone>())) {
+                        if (npc.active && (npc.type == ModContent.NPCType<WhiteWhaleBoss>() || npc.type == ModContent.NPCType<WhiteWhaleClone>())) {
                             float dist = Vector2.Distance(Projectile.Center, npc.Center);
                             if (dist < closestDist) {
                                 closestDist = dist;
@@ -109,45 +91,38 @@ namespace TheSanity.Projectiles
                 Projectile.rotation = Projectile.velocity.ToRotation(); 
             }
 
-            float telegraphScale = 0.2f; 
             float maxLaserScale = 1.3f; 
-            
-            if (Timer < telegDur) {
-                Projectile.scale = telegraphScale;
+            if (Timer < 8f) {
+                Projectile.scale = MathHelper.Lerp(0.2f, maxLaserScale, Timer / 8f);
+            }
+            else if (Timer > totalDur - 8f) {
+                Projectile.scale = MathHelper.Lerp(0f, maxLaserScale, (totalDur - Timer) / 8f);
             }
             else {
-                float laserTimer = Timer - telegDur;
-                float growDuration = 8f;   
-                float shrinkDuration = 8f; 
-                
-                if (laserTimer < growDuration) {
-                    Projectile.scale = MathHelper.Lerp(telegraphScale, maxLaserScale, laserTimer / growDuration);
-                }
-                else if (Timer > totalDur - shrinkDuration) {
-                    Projectile.scale = MathHelper.Lerp(0f, maxLaserScale, (totalDur - Timer) / shrinkDuration);
-                }
-                else {
-                    Projectile.scale = maxLaserScale;
-                }
+                Projectile.scale = maxLaserScale;
             }
 
             int ownerIndex = (int)Projectile.ai[0];
             if (ownerIndex >= 0 && ownerIndex < Main.maxNPCs) {
                 NPC owner = Main.npc[ownerIndex];
                 if (owner.active) {
-                    Projectile.Center = owner.Center; 
-
-                    bool isTrackingLaser = (owner.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss>() && owner.ai[0] == 1f && owner.ai[2] == 1f);
-
-                    if (Timer < telegDur) {
-                        if (isTrackingLaser && owner.target >= 0 && owner.target < 255) {
-                            Player playerTarget = Main.player[owner.target];
-                            Projectile.rotation = (playerTarget.Center - Projectile.Center).ToRotation();
-                        }
+                    
+                    // PERBAIKAN SEJATI: Menggabungkan koordinat fisik dan offset visual gambar paus
+                    if (owner.type == ModContent.NPCType<WhiteWhaleBoss>() && owner.ai[0] == 1f && owner.ai[2] == 2f) {
+                        Vector2 visualCenter = owner.Center + new Vector2(-owner.direction * 90f, -10f);
+                        Projectile.Center = visualCenter + new Vector2(owner.direction * 105f, 30f);
+                        Projectile.rotation = Projectile.velocity.ToRotation();
+                    }
+                    else if (owner.type == ModContent.NPCType<WhiteWhaleBoss>() && owner.ai[0] == 3f && (WhiteWhaleBoss.P2Attacks)owner.ai[2] == WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
+                        Vector2 visualCenter = owner.Center + new Vector2(-owner.direction * 90f, -10f);
+                        Projectile.Center = visualCenter + new Vector2(owner.direction * 105f, 30f);
+                    }
+                    else {
+                        Projectile.Center = owner.Center;
                     }
 
-                    // KONDISI UTAMA SINKRONISASI ROTASI PERMANEN MENGIKUTI KECEPATAN ORBIT UNIT
-                    if (owner.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss>() && owner.ai[0] == 3f && (global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks)owner.ai[2] == global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
+                    // Rotasi khusus orbit segitiga Fase 2
+                    if (owner.type == ModContent.NPCType<WhiteWhaleBoss>() && owner.ai[0] == 3f && (WhiteWhaleBoss.P2Attacks)owner.ai[2] == WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
                         float pTimer = owner.ai[3];
                         if (pTimer >= 1 && pTimer <= 180) {
                             Projectile.rotation = (pTimer - 1f) * (MathHelper.TwoPi / 120f);
@@ -156,11 +131,11 @@ namespace TheSanity.Projectiles
                             Projectile.rotation = -(pTimer - 211f) * (MathHelper.TwoPi / 120f);
                         }
                     }
-                    else if (owner.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleClone>()) {
+                    else if (owner.type == ModContent.NPCType<WhiteWhaleClone>()) {
                         int parentIdx = (int)owner.ai[0];
                         if (parentIdx >= 0 && parentIdx < Main.maxNPCs) {
                             NPC parent = Main.npc[parentIdx];
-                            if (parent.active && parent.type == ModContent.NPCType<global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss>() && (global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks)parent.ai[2] == global::TheSanity.GlobalNPC.Bosses.WhiteWhale.WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
+                            if (parent.active && parent.type == ModContent.NPCType<WhiteWhaleBoss>() && (WhiteWhaleBoss.P2Attacks)parent.ai[2] == WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
                                 float pTimer = parent.ai[3];
                                 int cloneType = (int)owner.ai[1];
                                 float offsetAngle = (cloneType == 1) ? MathHelper.TwoPi / 3f : 2f * MathHelper.TwoPi / 3f;
@@ -179,7 +154,7 @@ namespace TheSanity.Projectiles
 
             CurrentLaserLength = MaxLaserLength;
 
-            if (Timer >= telegDur && Main.rand.NextBool(2)) {
+            if (Main.rand.NextBool(2)) {
                 Vector2 beamDir = Projectile.rotation.ToRotationVector2();
                 Vector2 dustPos = Projectile.Center + beamDir * Main.rand.NextFloat(100f, CurrentLaserLength);
                 Dust dust = Dust.NewDustDirect(dustPos, 0, 0, DustID.PinkTorch, 0f, 0f, 100, default, 1.5f);
@@ -189,13 +164,10 @@ namespace TheSanity.Projectiles
         }
 
         public override bool CanHitPlayer(Player target) {
-            if (Timer < GetTelegraphDuration()) return false; 
             return true;
         }
 
         public override bool? Colliding(Rectangle projHitbox, Rectangle targetHitbox) {
-            if (Timer < GetTelegraphDuration()) return false;
-
             Vector2 beamDir = Projectile.rotation.ToRotationVector2();
             float samplePoint = 0f;
             return Collision.CheckAABBvLineCollision(targetHitbox.TopLeft(), targetHitbox.Size(), Projectile.Center, Projectile.Center + (beamDir * CurrentLaserLength), Projectile.width * Projectile.scale, ref samplePoint);
@@ -246,15 +218,8 @@ namespace TheSanity.Projectiles
         }
 
         private Color GetDynamicColor(float distance, Color pink, Color white) {
-            float telegDur = GetTelegraphDuration();
-            if (telegDur > 0f && Timer < telegDur) {
-                float pulse = (float)Math.Sin(Main.GlobalTimeWrappedHourly * 30f) * 0.2f + 0.5f;
-                return pink * pulse * (Timer / telegDur);
-            }
-            
             float wavePhase = (Main.GlobalTimeWrappedHourly * 25f) - (distance * 0.015f);
             float lerpFactor = (float)(Math.Sin(wavePhase) + 1f) / 2f;
-            
             return Color.Lerp(pink, white, lerpFactor) * Projectile.Opacity;
         }
     }
