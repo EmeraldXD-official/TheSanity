@@ -11,6 +11,10 @@ namespace TheSanity.Items
     {
         public override void SetStaticDefaults() {
             ItemID.Sets.LockOnIgnoresCollision[Item.type] = true;
+
+            // Mendaftarkan 2 frame vertikal ke sistem game agar mod lain (Recipe Browser)
+            // tahu isi filenya ada 2 gambar dan tidak menggambar keduanya sekaligus.
+            Main.RegisterItemAnimation(Item.type, new DrawAnimationVertical(int.MaxValue, 2));
         }
 
         public override void SetDefaults() {
@@ -18,7 +22,7 @@ namespace TheSanity.Items
             Item.knockBack = 3f;
             Item.mana = 10;
             Item.width = 38;    // Lebar 1 frame
-            Item.height = 106;  // Tinggi frame
+            Item.height = 106;  // Tinggi 1 frame
             Item.useTime = 36;
             Item.useAnimation = 36;
             Item.useStyle = ItemUseStyleID.Swing;
@@ -34,15 +38,21 @@ namespace TheSanity.Items
             Item.noUseGraphic = true; 
         }
 
-        // ================== BAGIAN YANG DI-FIX ==================
+        // ================== FIX: MIRING KE KANAN & UKURAN PAS ==================
         public override bool PreDrawInInventory(SpriteBatch spriteBatch, Vector2 position, Rectangle frame, Color drawColor, Color itemColor, Vector2 origin, float scale) {
             Texture2D texture = ModContent.Request<Texture2D>(Texture).Value;
-            Rectangle singleFrame = new Rectangle(0, 0, 38, 106); 
             
-            // FIX: Hitung ulang origin murni dari singleFrame (19f, 53f) agar pas di tengah slot inventory
+            // Mengunci potongan hanya pada Frame 1 (Atas)
+            Rectangle singleFrame = new Rectangle(0, 0, 38, 106); 
             Vector2 trueOrigin = singleFrame.Size() / 2f; 
             
-            spriteBatch.Draw(texture, position, singleFrame, drawColor, 0f, trueOrigin, scale, SpriteEffects.None, 0f);
+            // Mengatur skala agar item terlihat padat dan proporsional di dalam kotak slot
+            float customScale = scale * 1.35f; 
+            
+            // FIX: Menggunakan nilai positif MathHelper.PiOver4 agar sprite miring ke KANAN
+            float rotation = MathHelper.PiOver4; 
+            
+            spriteBatch.Draw(texture, position, singleFrame, drawColor, rotation, trueOrigin, customScale, SpriteEffects.None, 0f);
             return false;
         }
 
@@ -51,11 +61,9 @@ namespace TheSanity.Items
             Rectangle singleFrame = new Rectangle(0, 0, 38, 106);
             Vector2 origin = singleFrame.Size() / 2f;
             
-            // Dioptimalkan menggunakan Item.Center agar posisi drop di tanah lebih akurat
             spriteBatch.Draw(texture, Item.Center - Main.screenPosition, singleFrame, lightColor, rotation, origin, scale, SpriteEffects.None, 0f);
             return false;
         }
-        // ========================================================
 
         public override bool Shoot(Player player, Terraria.DataStructures.EntitySource_ItemUse_WithAmmo source, Vector2 position, Vector2 velocity, int type, int damage, float knockback) {
             player.AddBuff(Item.buffType, 2);
@@ -90,8 +98,9 @@ namespace TheSanity.Items
 
             Texture2D texture = ModContent.Request<Texture2D>("TheSanity/Items/HaloStaff").Value;
             
-            int frameX = 38; 
-            Rectangle srcRect = new Rectangle(frameX, 0, 38, 106);
+            // Mengambil Frame 2 (Bawah) untuk visual saat dipegang karakter
+            int frameY = 106; 
+            Rectangle srcRect = new Rectangle(0, frameY, 38, 106);
 
             Vector2 itemPosition = drawPlayer.MountedCenter + new Vector2(drawPlayer.direction * 2f, 1f);
             
