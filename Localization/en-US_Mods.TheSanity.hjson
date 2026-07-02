@@ -215,17 +215,27 @@ Items: {
 	}
 
 	HaloStaff: {
-		Tooltip: ""
+		Tooltip: 
+		    '''
+			Summons a powerful halo entity to fight for you
+			The first summon creates a grand leader, subsequent summons create smaller helpers
+			'''
+
 		DisplayName: Halo Staff
 	}
 
 	HaloRune: {
-		Tooltip: ""
+		Tooltip: "emits 3 lasers around you"
 		DisplayName: Halo Rune
 	}
 
 	GluttonyFruit: {
-		Tooltip: ""
+		Tooltip: 
+		        '''
+				Some people say this fruit can eat people or perhaps it's the other way around?
+				[c/32FF32:+10% Permanently increases the damage dealt to the White Whale boss]
+				[c/32FF32:-5% Permanently reduces damage received from the White Whale boss]
+				'''
 		DisplayName: Gluttony Fruit
 	}
 
@@ -259,19 +269,13 @@ Items: {
 		Tooltip: ""
 	}
 
-	AbyssalKrakenTentacle: {
-		DisplayName: Abyssal Kraken Tentacle
-		Tooltip:
-			'''
-			Releases the fury of the deep sea
-			Striking enemies summons homing MiniTentacle and Abyssal Maws
-			Abyssal Maws bite through enemy armor, applying Ichor
-			'''
-	}
-
-	AlchemistHomunculusStaff: {
-		DisplayName: Alchemist Homunculus Staff
-		Tooltip: Summons an alchemical homunculus to fight for you.
+	FluegelWhaleBone: {
+		DisplayName: Fluegel Whale Bone
+		Tooltip: 
+		        '''
+			    An ancient, marrow-chilled bone that vibrates with a mournful melody.
+				Blow into it to challenge the phantom tyrant of the endless skies.
+				'''
 	}
 }
 
@@ -288,7 +292,7 @@ NPCs: {
 	Twinkle.DisplayName: Twinkle, The Mini Stars Guardian
 	DummyTargetNPC.DisplayName: Mega Dummy
 	WhiteWhaleClone.DisplayName: White Whale Clone
-	WhiteWhaleBoss.DisplayName: White Whale Boss
+	WhiteWhaleBoss.DisplayName: The White Whale
 
 	SunCultist: {
 		DisplayName: Sun Cultist
@@ -421,11 +425,6 @@ Projectiles: {
 	SilkSlashProjectile.DisplayName: Silk Slash Projectile
 	WhiteWhaleLaser.DisplayName: White Whale Laser
 	SunCultistShot.DisplayName: Sun Cultist Shot
-	AbyssalKrakenTentacleProj.DisplayName: Abyssal Kraken Tentacle Proj
-	AbyssalMaw.DisplayName: Abyssal Maw
-	MiniTentacleProj.DisplayName: Mini Tentacle Proj
-	HomunculusMinion.DisplayName: Homunculus Minion
-	HomunculusPotion.DisplayName: Homunculus Potion
 }
 
 Buffs: {
@@ -475,13 +474,9 @@ Buffs: {
 	}
 
 	HaloMinionBuff: {
-		Description: Mods.TheSanity.Buffs.HaloMinionBuff.Description
+		Description: Halo Minion Protect You!
 		DisplayName: Halo Minion Buff
 	}
-	HomunculusBuff: {
-          DisplayName: "Homunculus",
-          Description: "The homunculus will fight for you."
-        }
 }
 
 Configs: {
