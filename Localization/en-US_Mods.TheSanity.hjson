@@ -273,6 +273,11 @@ Items: {
 		DisplayName: Alchemist Homunculus Staff
 		Tooltip: Summons an alchemical homunculus to fight for you.
 	}
+
+	FluegelWhaleBone: {
+		DisplayName: Fluegel Whale Bone
+		Tooltip: ""
+	}
 }
 
 NPCs: {
@@ -478,10 +483,11 @@ Buffs: {
 		Description: Mods.TheSanity.Buffs.HaloMinionBuff.Description
 		DisplayName: Halo Minion Buff
 	}
+
 	HomunculusBuff: {
-          DisplayName: "Homunculus",
-          Description: "The homunculus will fight for you."
-        }
+		DisplayName: Homunculus
+		Description: The homunculus will fight for you.
+	}
 }
 
 Configs: {
