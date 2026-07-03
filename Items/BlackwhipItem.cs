@@ -9,6 +9,7 @@ using Terraria.ModLoader;
 using Terraria.DataStructures;
 using Terraria.GameContent;
 using TheSanity.Projectiles;
+using TheSanity.Items.Whips;
 
 namespace TheSanity.Items
 {
@@ -79,6 +80,10 @@ namespace TheSanity.Items
             recipe.AddIngredient(ItemID.FragmentStardust, 51);
             recipe.AddIngredient(ItemID.FragmentVortex, 49);
             recipe.AddIngredient(ItemID.LunarBar, 100);
+            
+            recipe.AddIngredient(ModContent.ItemType<AbyssalKrakenTentacle>());
+            recipe.AddIngredient(ModContent.ItemType<FeatherWireWhip>());
+
             recipe.AddIngredient(ItemID.BlandWhip);     
             recipe.AddIngredient(ItemID.ThornWhip);
             recipe.AddIngredient(ItemID.BoneWhip);
@@ -165,7 +170,7 @@ namespace TheSanity.Items
                 Color mainTextColor = new Color(12, 24, 18);
                 Main.spriteBatch.DrawString(font, text, textPos, mainTextColor);
                 return false; 
-            }
+                    }
             return true;
         }
 
