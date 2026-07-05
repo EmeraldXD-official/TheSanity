@@ -77,7 +77,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
         public override void SetDefaults() {
             NPC.width = 200;
             NPC.height = 120;
-            NPC.damage = 50;
+            NPC.damage = 120;
             NPC.defense = 90;
             NPC.lifeMax = 87000;
             NPC.boss = true;
@@ -184,29 +184,32 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             }
 
             if (!Main.dedServ && State != BossState.SpawnAnimation) {
-                for (int i = 0; i < 4; i++) {
-                    float angle = Main.rand.NextFloat(0f, MathHelper.TwoPi);
-                    Vector2 haloOffset = angle.ToRotationVector2() * new Vector2(110f, 65f) + new Vector2(NPC.spriteDirection * 90f, -10f); 
-                    
-                    int dustType = Main.rand.NextBool() ? DustID.PinkTorch : DustID.WhiteTorch;
-                    int d = Dust.NewDust(NPC.Center + haloOffset, 0, 0, dustType, 0f, 0f, 60, default, Main.rand.NextFloat(1.4f, 2.2f));
-                    Main.dust[d].noGravity = true;
-                    Main.dust[d].velocity = NPC.velocity * 0.4f + Main.rand.NextVector2Circular(1f, 1f); 
-                }
-
-                bool isDashing = (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.Dash3X && NPC.velocity.Length() > 18f) ||
-                                 (State == BossState.Phase2_Active && (P2Attacks)AttackState <= P2Attacks.Dash_Letter_H && NPC.velocity.Length() > 18f) ||
-                                 (State == BossState.Phase2_Active && (P2Attacks)AttackState == P2Attacks.PredictiveSequentialDash && NPC.velocity.Length() > 18f);
-
-                if (isDashing) {
-                    for (int i = 0; i < 16; i++) {
-                        int dustType = Main.rand.NextBool() ? DustID.PinkTorch : DustID.WhiteTorch;
-                        Vector2 backOffset = -NPC.velocity.SafeNormalize(Vector2.Zero) * 90f;
-                        Vector2 spawnPos = NPC.Center + backOffset + new Vector2(NPC.spriteDirection * 90f, -10f) + Main.rand.NextVector2Circular(50f, 50f);
+                // Jangan spawn dust kalau boss sedang mode siluet
+                if (NPC.localAI[3] == 0f) {
+                    for (int i = 0; i < 4; i++) {
+                        float angle = Main.rand.NextFloat(0f, MathHelper.TwoPi);
+                        Vector2 haloOffset = angle.ToRotationVector2() * new Vector2(110f, 65f) + new Vector2(NPC.spriteDirection * 90f, -10f); 
                         
-                        int d = Dust.NewDust(spawnPos, 0, 0, dustType, 0f, 0f, 40, default, Main.rand.NextFloat(1.8f, 2.6f));
+                        int dustType = Main.rand.NextBool() ? DustID.PinkTorch : DustID.WhiteTorch;
+                        int d = Dust.NewDust(NPC.Center + haloOffset, 0, 0, dustType, 0f, 0f, 60, default, Main.rand.NextFloat(1.4f, 2.2f));
                         Main.dust[d].noGravity = true;
-                        Main.dust[d].velocity = -NPC.velocity * Main.rand.NextFloat(0.2f, 0.4f) + Main.rand.NextVector2Circular(4f, 4f);
+                        Main.dust[d].velocity = NPC.velocity * 0.4f + Main.rand.NextVector2Circular(1f, 1f); 
+                    }
+
+                    bool isDashing = (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.Dash3X && NPC.velocity.Length() > 18f) ||
+                                     (State == BossState.Phase2_Active && (P2Attacks)AttackState <= P2Attacks.Dash_Letter_H && NPC.velocity.Length() > 18f) ||
+                                     (State == BossState.Phase2_Active && (P2Attacks)AttackState == P2Attacks.PredictiveSequentialDash && NPC.velocity.Length() > 18f);
+
+                    if (isDashing) {
+                        for (int i = 0; i < 16; i++) {
+                            int dustType = Main.rand.NextBool() ? DustID.PinkTorch : DustID.WhiteTorch;
+                            Vector2 backOffset = -NPC.velocity.SafeNormalize(Vector2.Zero) * 90f;
+                            Vector2 spawnPos = NPC.Center + backOffset + new Vector2(NPC.spriteDirection * 90f, -10f) + Main.rand.NextVector2Circular(50f, 50f);
+                            
+                            int d = Dust.NewDust(spawnPos, 0, 0, dustType, 0f, 0f, 40, default, Main.rand.NextFloat(1.8f, 2.6f));
+                            Main.dust[d].noGravity = true;
+                            Main.dust[d].velocity = -NPC.velocity * Main.rand.NextFloat(0.2f, 0.4f) + Main.rand.NextVector2Circular(4f, 4f);
+                        }
                     }
                 }
             }
@@ -340,14 +343,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                     Vector2 laserCenterPos = target.Center + new Vector2(0f, -300f);
                     NPC.velocity = Vector2.Lerp(NPC.velocity, (laserCenterPos - NPC.Center) * 0.05f, 0.1f);
                     
-                    // PENYESUAIAN COORD: Menghitung letak visual mulut depan asli dengan menambahkan offset gambar
                     Vector2 mouthPosition = NPC.Center + new Vector2(-NPC.direction * 90f, -10f) + new Vector2(NPC.direction * 105f, 30f);
 
                     if (AttackTimer < 40) {
                         dashTelegraphRotation = (target.Center - mouthPosition).ToRotation();
                     }
                     else if (AttackTimer >= 40 && AttackTimer <= 140) {
-                        // PERBAIKAN TRACKING: Sudut laser secara aktif dikunci halus mengikuti gerak koordinat player (AngleLerp)
                         float angleToPlayer = (target.Center - mouthPosition).ToRotation();
                         dashTelegraphRotation = MathHelper.WrapAngle(dashTelegraphRotation).AngleLerp(angleToPlayer, 0.045f);
 
@@ -458,6 +459,29 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
         private void UpdatePhase2(Player target) {
             AttackTimer++;
             SpawnFog(target, 6, -300, 500);
+
+            // LOGIKA SILUET INVISIBLE & INVINCIBLE PHASE 2
+            bool isRepositioning = false;
+            P2Attacks p2Attack = (P2Attacks)AttackState;
+            
+            // Phase saat bersiap membentuk huruf
+            if (p2Attack >= P2Attacks.Dash_Letter_X && p2Attack <= P2Attacks.Dash_Letter_H && AttackTimer <= 50) {
+                isRepositioning = true;
+            }
+            // Phase saat balik arah putaran (Triangle)
+            else if (p2Attack == P2Attacks.RotatingLaserTriangle && AttackTimer > 180 && AttackTimer <= 210) {
+                isRepositioning = true;
+            }
+
+            if (isRepositioning) {
+                NPC.localAI[3] = 1f;       // Flag untuk menyalakan efek siluet
+                NPC.dontTakeDamage = true; // Tak bisa diserang
+                NPC.damage = 0;            // Tidak menabrak/damage player
+            } else {
+                NPC.localAI[3] = 0f;       // Matikan siluet
+                NPC.dontTakeDamage = false;
+                NPC.damage = 50; 
+            }
 
             if (!spawnedClones) {
                 spawnedClones = true;
@@ -653,6 +677,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                     }
 
                     if (AttackTimer > 410) {
+                        for (int i = 0; i < Main.maxProjectiles; i++) {
+                            if (Main.projectile[i].active && Main.projectile[i].type == ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>()) {
+                                Main.projectile[i].Kill();
+                            }
+                        }
                         rotatingCenter = Vector2.Zero; 
                         ChooseNextP2Attack();
                     }
@@ -758,10 +787,13 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             Texture2D mainTexture = TextureAssets.Npc[NPC.type].Value;
             SpriteEffects mainEffects = NPC.spriteDirection == 1 ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
 
+            // Ubah warna menjadi hitam agak transparan jika flag siluet menyala
+            Color alphaColor = (NPC.localAI[3] == 1f) ? Color.Black * 0.7f : (drawColor * NPC.Opacity); 
+
             for (int i = 1; i < NPC.oldPos.Length; i++) {
                 if (NPC.oldPos[i] == Vector2.Zero) continue;
 
-                Color shadowColor = drawColor * ((NPC.oldPos.Length - i) / (float)NPC.oldPos.Length) * 0.35f;
+                Color shadowColor = alphaColor * ((NPC.oldPos.Length - i) / (float)NPC.oldPos.Length) * 0.35f;
                 Vector2 drawPos = NPC.oldPos[i] + NPC.Size / 2f - screenPos + visualOffset;
                 float oldRot = NPC.oldRot[i];
 
@@ -769,7 +801,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             }
 
             Vector2 mainDrawPos = NPC.Center - screenPos + visualOffset;
-            spriteBatch.Draw(mainTexture, mainDrawPos, NPC.frame, drawColor, NPC.rotation, origin, 1.0f, mainEffects, 0f);
+            spriteBatch.Draw(mainTexture, mainDrawPos, NPC.frame, alphaColor, NPC.rotation, origin, 1.0f, mainEffects, 0f);
 
             return false; 
         }
