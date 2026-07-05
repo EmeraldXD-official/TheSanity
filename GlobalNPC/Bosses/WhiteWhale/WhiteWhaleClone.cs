@@ -33,7 +33,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
         public override void SetDefaults() {
             NPC.width = 276; 
             NPC.height = 95;
-            NPC.damage = 50;
+            NPC.damage = 100;
             NPC.defense = 40;
             NPC.lifeMax = 10000; 
             NPC.noGravity = true;
@@ -41,7 +41,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             NPC.knockBackResist = 0f;
             NPC.HitSound = SoundID.NPCHit1;
             NPC.DeathSound = SoundID.NPCDeath10;
-            NPC.dontTakeDamage = true;
+            NPC.dontTakeDamage = true; // Clone kebal dari awal
         }
 
         public override void FindFrame(int frameHeight) {
@@ -95,6 +95,24 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             
             WhiteWhaleBoss.P2Attacks parentAttackState = (WhiteWhaleBoss.P2Attacks)parent.ai[2];
             float parentAttackTimer = parent.ai[3];
+
+            // LOGIKA SILUET & INVINCIBLE CLONE
+            bool isRepositioning = false;
+            
+            if (parentAttackState >= WhiteWhaleBoss.P2Attacks.Dash_Letter_X && parentAttackState <= WhiteWhaleBoss.P2Attacks.Dash_Letter_H && parentAttackTimer <= 50) {
+                isRepositioning = true;
+            }
+            else if (parentAttackState == WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle && parentAttackTimer > 180 && parentAttackTimer <= 210) {
+                isRepositioning = true;
+            }
+
+            if (isRepositioning) {
+                NPC.localAI[3] = 1f; // Flag siluet
+                NPC.damage = 0;
+            } else {
+                NPC.localAI[3] = 0f; // Matikan siluet
+                NPC.damage = 50;
+            }
 
             NPC.direction = NPC.Center.X < target.Center.X ? 1 : -1;
 
@@ -280,32 +298,34 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             }
 
             if (!Main.dedServ) {
-                for (int i = 0; i < 4; i++) {
-                    float angle = Main.rand.NextFloat(0f, MathHelper.TwoPi);
-                    Vector2 haloOffset = angle.ToRotationVector2() * new Vector2(145f, 52f) + new Vector2(NPC.spriteDirection * 90f, -10f); 
-                    
-                    int dustType = Main.rand.NextBool() ? DustID.PinkTorch : DustID.WhiteTorch;
-                    int d = Dust.NewDust(NPC.Center + haloOffset, 0, 0, dustType, 0f, 0f, 60, default, Main.rand.NextFloat(1.4f, 2.2f));
-                    Main.dust[d].noGravity = true;
-                    Main.dust[d].velocity = NPC.velocity * 0.4f + Main.rand.NextVector2Circular(1f, 1f);
-                }
-
-                if (NPC.velocity.Length() > 20f) {
-                    for (int i = 0; i < 16; i++) {
-                        int dustType = Main.rand.NextBool() ? DustID.PinkTorch : DustID.WhiteTorch;
-                        Vector2 backOffset = -NPC.velocity.SafeNormalize(Vector2.Zero) * 120f;
-                        Vector2 spawnPos = NPC.Center + backOffset + new Vector2(NPC.spriteDirection * 90f, -10f) + Main.rand.NextVector2Circular(50f, 50f);
+                // Tahan memunculkan debu kalau sedang mode siluet
+                if (NPC.localAI[3] == 0f) {
+                    for (int i = 0; i < 4; i++) {
+                        float angle = Main.rand.NextFloat(0f, MathHelper.TwoPi);
+                        Vector2 haloOffset = angle.ToRotationVector2() * new Vector2(145f, 52f) + new Vector2(NPC.spriteDirection * 90f, -10f); 
                         
-                        int d = Dust.NewDust(spawnPos, 0, 0, dustType, 0f, 0f, 40, default, Main.rand.NextFloat(1.8f, 2.6f));
+                        int dustType = Main.rand.NextBool() ? DustID.PinkTorch : DustID.WhiteTorch;
+                        int d = Dust.NewDust(NPC.Center + haloOffset, 0, 0, dustType, 0f, 0f, 60, default, Main.rand.NextFloat(1.4f, 2.2f));
                         Main.dust[d].noGravity = true;
-                        Main.dust[d].velocity = -NPC.velocity * Main.rand.NextFloat(0.2f, 0.4f) + Main.rand.NextVector2Circular(4f, 4f);
+                        Main.dust[d].velocity = NPC.velocity * 0.4f + Main.rand.NextVector2Circular(1f, 1f);
+                    }
+
+                    if (NPC.velocity.Length() > 20f) {
+                        for (int i = 0; i < 16; i++) {
+                            int dustType = Main.rand.NextBool() ? DustID.PinkTorch : DustID.WhiteTorch;
+                            Vector2 backOffset = -NPC.velocity.SafeNormalize(Vector2.Zero) * 120f;
+                            Vector2 spawnPos = NPC.Center + backOffset + new Vector2(NPC.spriteDirection * 90f, -10f) + Main.rand.NextVector2Circular(50f, 50f);
+                            
+                            int d = Dust.NewDust(spawnPos, 0, 0, dustType, 0f, 0f, 40, default, Main.rand.NextFloat(1.8f, 2.6f));
+                            Main.dust[d].noGravity = true;
+                            Main.dust[d].velocity = -NPC.velocity * Main.rand.NextFloat(0.2f, 0.4f) + Main.rand.NextVector2Circular(4f, 4f);
+                        }
                     }
                 }
             }
         }
 
         public override bool PreDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor) {
-            // --- FIX SINKRON KLON ---
             float visualOffsetY = -10f; 
             float visualOffsetX = NPC.spriteDirection * 90f;
             Vector2 visualOffset = new Vector2(visualOffsetX, visualOffsetY);
@@ -339,10 +359,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             Vector2 origin = NPC.frame.Size() / 2f;
             SpriteEffects cloneEffects = NPC.spriteDirection == 1 ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
 
+            Color alphaColor = (NPC.localAI[3] == 1f) ? Color.Black * 0.7f : (drawColor * NPC.Opacity);
+
             for (int i = 1; i < NPC.oldPos.Length; i++) {
                 if (NPC.oldPos[i] == Vector2.Zero) continue;
 
-                Color shadowColor = drawColor * ((NPC.oldPos.Length - i) / (float)NPC.oldPos.Length) * 0.35f;
+                Color shadowColor = alphaColor * ((NPC.oldPos.Length - i) / (float)NPC.oldPos.Length) * 0.35f;
                 Vector2 drawPos = NPC.oldPos[i] + NPC.Size / 2f - screenPos + visualOffset;
                 float oldRot = NPC.oldRot[i];
 
@@ -350,7 +372,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             }
 
             Vector2 mainDrawPos = NPC.Center - screenPos + visualOffset;
-            spriteBatch.Draw(cloneTexture, mainDrawPos, NPC.frame, drawColor, NPC.rotation, origin, 1.0f, cloneEffects, 0f);
+            spriteBatch.Draw(cloneTexture, mainDrawPos, NPC.frame, alphaColor, NPC.rotation, origin, 1.0f, cloneEffects, 0f);
 
             return false; 
         }
