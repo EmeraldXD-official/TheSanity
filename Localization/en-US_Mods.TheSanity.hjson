@@ -278,6 +278,21 @@ Items: {
 		DisplayName: Fluegel Whale Bone
 		Tooltip: ""
 	}
+
+	GemStrataSummon: {
+		DisplayName: Gem Strata Summon
+		Tooltip: ""
+	}
+
+	BladeOfTheDarkness: {
+		Tooltip:
+			'''
+			With every strike, there is a 40% chance the sky will answer, raining down 2–4 spectral greatswords upon your foes. 
+			Each devastating impact and projectile contact ignites the enemy with ShadowFlame, burning their souls in agonizing shadow.
+			"A blade forged from pure darkness."
+			'''
+		DisplayName: Blade Of The Darkness
+	}
 }
 
 NPCs: {
@@ -309,6 +324,17 @@ NPCs: {
 			Princess_LovesNPC: I like {NPCName}.
 		}
 	}
+
+	AmberBoss.DisplayName: Amber Boss
+	AmethystBoss.DisplayName: Amethyst Boss
+	DiamondBoss.DisplayName: Diamond, The Patience
+	EmeraldBoss.DisplayName: Emerald, The Kindness
+	RubyBoss.DisplayName: Ruby, The Determination
+	SapphireBoss.DisplayName: Sapphire Boss
+	TopazBoss.DisplayName: Topaz Boss
+	RubyBossClone.DisplayName: Ruby Boss Clone
+	DiamondBossClone.DisplayName: Diamond Boss Clone
+	WhoAmI.DisplayName: Who Am I
 }
 
 Projectiles: {
@@ -431,6 +457,13 @@ Projectiles: {
 	MiniTentacleProj.DisplayName: Mini Tentacle Proj
 	HomunculusMinion.DisplayName: Homunculus Minion
 	HomunculusPotion.DisplayName: Homunculus Potion
+	GemShardProjectile.DisplayName: Gem Shard Projectile
+	AmberDeathBeamProjectile.DisplayName: Amber Death Beam Projectile
+	EmeraldBossProjectile.DisplayName: Emerald Projectile
+	RubyBossProjectile.DisplayName: Ruby Boss Projectile
+	DiamondBossProjectile.DisplayName: Diamond Boss Projectile
+	BladeOfTheDarknessProj.DisplayName: Blade Of The Darkness Proj
+	BladeOfTheDarknessImpactProj.DisplayName: Blade Of The Darkness Impact Proj
 }
 
 Buffs: {
@@ -487,6 +520,21 @@ Buffs: {
 	HomunculusBuff: {
 		DisplayName: Homunculus
 		Description: The homunculus will fight for you.
+	}
+
+	ElementalCurse: {
+		DisplayName: Elemental Curse
+		Description: Elemental Guardian is angry
+	}
+
+	EmeraldSpell: {
+		DisplayName: Elemental Spell
+		Description: The Seven Soul Out of Controll
+	}
+
+	EmeraldSpellEnraged: {
+		DisplayName: Emerald Spell Enraged
+		Description: Poisoned Leaf
 	}
 }
 
