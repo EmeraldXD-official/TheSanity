@@ -289,7 +289,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 WhoAmI.CutsceneZoom = WhoAmICutscenePlayer.OriginalZoom; 
 
                 if (aiTimer == 60) CombatText.NewText(NPC.getRect(), new Color(160, 110, 240), "Hello, my name is...", true);
-                if (aiTimer == 200) CombatText.NewText(NPC.getRect(), new Color(160, 110, 240), "Who am I? Why am I in this world?", true);
+                if (aiTimer == 200) CombatText.NewText(NPC.getRect(), new Color(160, 110, 240), "Wait... Who am I? Why am I in this world?", true);
                 if (aiTimer >= 360) { 
                     aiState = 101; 
                     aiTimer = 0;
@@ -307,7 +307,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 CutsceneShakeIntensity = progress * 8.5f; 
                 WhoAmI.CutsceneZoom = WhoAmICutscenePlayer.OriginalZoom * (1.0f + (progress * 0.45f)); 
 
-                if (aiTimer == 60) CombatText.NewText(NPC.getRect(), new Color(210, 70, 210), "I... I look like you?", true);
+                if (aiTimer == 60) CombatText.NewText(NPC.getRect(), new Color(210, 70, 210), "Why... I look like you?", true);
                 if (aiTimer == 200) CombatText.NewText(NPC.getRect(), new Color(255, 40, 40), "Does that mean this is all your fault?!", true);
                 if (aiTimer >= 360) { 
                     IsCutsceneActive = false; 
@@ -333,7 +333,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.PurpleTorch, Main.rand.NextFloat(-4f, 4f), Main.rand.NextFloat(-4f, 4f));
                 }
                 if (aiTimer == 30) CombatText.NewText(NPC.getRect(), new Color(255, 25, 25), "IS THIS ALL YOU'VE GOT?!", true);
-                if (aiTimer == 90) CombatText.NewText(NPC.getRect(), new Color(180, 30, 255), "BEHOLD MY TRUE FORM!", true);
+                if (aiTimer == 90) CombatText.NewText(NPC.getRect(), new Color(180, 30, 255), "BEHOLD MY TRUE POWER!", true);
                 if (aiTimer >= 140) {
                     IsCutsceneActive = false; 
                     NPC.dontTakeDamage = false;
