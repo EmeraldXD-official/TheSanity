@@ -14,7 +14,7 @@ namespace TheSanity.Items
     {
         public override void SetDefaults() {
             Item.damage = 160; 
-            Item.DamageType = DamageClass.TrueMelee;
+            Item.DamageType = DamageClass.Melee;
             Item.width = 50;  
             Item.height = 50;
             
