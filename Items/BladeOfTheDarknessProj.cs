@@ -111,18 +111,12 @@ namespace TheSanity.Items
 
             timer++;
             if (timer >= maxTime) {
-                if (combo == 2) {
-                    player.GetModPlayer<TheSanityPlayer>().comboCooldown = 24; 
-                    player.GetModPlayer<TheSanityPlayer>().comboType = 0;
+                // ✨ SISTEM COOLDOWN DIHAPUS: Semua combo kini berputar tanpa henti secara mulus jika tombol hold ditekan terus
+                if (!player.controlUseItem) {
                     Projectile.Kill();
                 }
                 else {
-                    if (!player.controlUseItem) {
-                        Projectile.Kill();
-                    }
-                    else {
-                        timer = maxTime; 
-                    }
+                    timer = maxTime; 
                 }
             }
         }
@@ -229,7 +223,6 @@ namespace TheSanity.Items
             Main.EntitySpriteDraw(texture, mainDrawPos, null, lightColor, Projectile.rotation + mainDrawRotationOffset, origin, Projectile.scale, mainEffects, 0);
         }
 
-        // ⚔️ HITBOX KUSTOM KEMBALI DIGUNAKAN + JANGKAUAN DIPERPANJANG 1.5 BLOCK (130f) AGAR PUCUK SELALU KENA DAMAGE
         public override void ModifyDamageHitbox(ref Rectangle hitbox) {
             Vector2 extension = Projectile.rotation.ToRotationVector2() * 172f; 
             Vector2 tipPosition = Projectile.Center + extension;
