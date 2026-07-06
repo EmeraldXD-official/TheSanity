@@ -6,9 +6,10 @@ using Terraria;
 using Terraria.DataStructures;
 using Terraria.ID;
 using Terraria.ModLoader;
-using Terraria.Graphics;         
+using Terraria.Graphics;
 using Terraria.Graphics.Shaders;
 using System.Reflection;
+using System.Linq;
 
 namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 {
@@ -39,7 +40,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             int bossIndex = NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>());
             if (bossIndex != -1) {
                 var boss = Main.npc[bossIndex].ModNPC as WhoAmI;
-                // Hanya membalikkan gravitasi jika player saat ini adalah target utama bos
                 if (boss != null && boss.activePotionType == 1 && Main.npc[bossIndex].target == Player.whoAmI) {
                     Player.gravDir = -1f; 
                 }
@@ -72,6 +72,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
     {
         public override string Texture => "TheSanity/GlobalNPC/Bosses/WhoAmI/WhoAmI";
 
+        // Daftar senjata yang dilarang (tidak akan pernah digunakan oleh bos)
+        private static readonly int[] BannedWeapons = new int[] { ItemID.PiercingStarlight, ItemID.Celeb2 };
+
         public static bool IsCutsceneActive = false;
         public static Vector2 CutsceneCameraTarget = Vector2.Zero;
         public static float CutsceneShakeIntensity = 0f;
@@ -81,6 +84,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private bool initializedCutscene = false;
         private Item activeWeapon;
+        private int lastWeaponType = -1;
         private List<Item> weaponPool = new List<Item>();
         private int currentPoolIndex = 0;
         private int weaponCarouselTimer = 0;
@@ -115,12 +119,13 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private Player dummyPlayer;
         private int proxySlot => Main.maxPlayers - 1;
 
-        private enum WeaponArchetype { TrueMelee, ProjMelee, Ranged, Magic, Summon, Whip }
+        private enum WeaponArchetype { TrueMelee, ProjMelee, Ranged, Magic, Summon, Whip, Yoyo, Boomerang }
         private WeaponArchetype currentArchetype = WeaponArchetype.TrueMelee;
         private bool loadoutHasWings = false;
         private bool loadoutHasDashAccessory = false;
         private int dashType = 0; 
         private float loadoutSpeedMultiplier = 1f;
+        private bool isTrueMelee = false;
 
         public override void SetStaticDefaults() {
             NPCID.Sets.MustAlwaysDraw[NPC.type] = true;
@@ -145,7 +150,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             NPC.scale = 1f;
         }
 
-        // BARU: Menangani sinkronisasi kustom data multiplayer agar Potion & State terkirim ke Client
         public override void SendExtraAI(System.IO.BinaryWriter writer) {
             writer.Write(aiState);
             writer.Write(aiTimer);
@@ -208,7 +212,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 Terraria.Audio.SoundEngine.PlaySound(SoundID.Item66, NPC.Center);
                 
                 if (NPC.target != -1) {
-                    ExecuteGlitchTeleport(Main.player[NPC.target]);
+                    if (!isTrueMelee) {
+                        ExecuteGlitchTeleport(Main.player[NPC.target]);
+                    } else {
+                        Player target = Main.player[NPC.target];
+                        Vector2 dashDir = target.Center - NPC.Center;
+                        if (dashDir != Vector2.Zero) dashDir.Normalize();
+                        NPC.velocity = dashDir * 25f;
+                        aiState = 1;
+                        aiTimer = 0;
+                        dodgeCooldownTimer = 20;
+                    }
                 }
                 return true;
             }
@@ -402,6 +416,19 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             ScanAndSelectWeapon(player);
             AnalyzeWeaponArchetype();
 
+            // True melee immunity dan nonaktif teleport
+            if (isTrueMelee) {
+                for (int i = 0; i < BuffID.Count; i++) {
+                    NPC.buffImmune[i] = true;
+                }
+                teleportCooldownTimer = 9999;
+            } else {
+                for (int i = 0; i < BuffID.Count; i++) {
+                    NPC.buffImmune[i] = false;
+                }
+                if (teleportCooldownTimer == 9999) teleportCooldownTimer = 0;
+            }
+
             if (aiState != 3) {
                 NPC.direction = (player.Center.X < NPC.Center.X) ? -1 : 1;
             }
@@ -409,7 +436,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             float distanceToPlayer = Vector2.Distance(NPC.Center, player.Center);
             
-            if ((distanceToPlayer > 1600f || (distanceToPlayer > 950f && !Collision.CanHitLine(NPC.position, NPC.width, NPC.height, player.position, player.width, player.height))) && teleportCooldownTimer == 0 && aiState != 3) {
+            if (!isTrueMelee && (distanceToPlayer > 1600f || (distanceToPlayer > 950f && !Collision.CanHitLine(NPC.position, NPC.width, NPC.height, player.position, player.width, player.height))) && teleportCooldownTimer == 0 && aiState != 3) {
                 ExecuteGlitchTeleport(player);
             }
 
@@ -507,7 +534,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             if (potionCooldownTimer <= 0 && activePotionType == 0) {
                 activePotionType = Main.rand.Next(1, 4);
-                potionDurationTimer = Main.rand.Next(240, 360); 
+                if (activePotionType == 1) potionDurationTimer = 1200; // 20 detik
+                else potionDurationTimer = Main.rand.Next(240, 360); 
 
                 Terraria.Audio.SoundEngine.PlaySound(SoundID.Item3, NPC.Center);
 
@@ -548,7 +576,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 if (held != null && !held.IsAir) {
                     bool isForbiddenMinion = held.CountsAsClass(DamageClass.Summon) && (held.shoot <= ProjectileID.None || !ProjectileID.Sets.IsAWhip[held.shoot]);
                     bool isTomeOfEclipsa = held.Name == "Tome of Eclipsa" || (held.ModItem != null && held.ModItem.Name == "TomeOfEclipsa");
-                    if (!isForbiddenMinion && !isTomeOfEclipsa) activeWeapon = held.Clone();
+                    if (!isForbiddenMinion && !isTomeOfEclipsa && !BannedWeapons.Contains(held.type)) {
+                        Item newWeapon = new Item();
+                        newWeapon.SetDefaults(held.type);
+                        activeWeapon = newWeapon;
+                    }
                 }
             }
             UpdateProxyPlayerVisuals(player);
@@ -564,8 +596,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 Item currentlyHeld = player.inventory[player.selectedItem];
                 if (currentlyHeld != null && !currentlyHeld.IsAir && currentlyHeld.damage > 0) {
                     bool isTomeOfEclipsa = currentlyHeld.Name == "Tome of Eclipsa" || (currentlyHeld.ModItem != null && currentlyHeld.ModItem.Name == "TomeOfEclipsa");
-                    if (!isTomeOfEclipsa) {
-                        weaponPool.Add(currentlyHeld.Clone());
+                    if (!isTomeOfEclipsa && !BannedWeapons.Contains(currentlyHeld.type)) {
+                        Item newWeapon = new Item();
+                        newWeapon.SetDefaults(currentlyHeld.type);
+                        weaponPool.Add(newWeapon);
                         uniqueItems.Add(currentlyHeld.type);
                     }
                 }
@@ -574,15 +608,24 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     Item item = player.inventory[i];
                     if (item == null || item.IsAir || item.damage <= 0) continue;
                     if (item.Name == "Tome of Eclipsa" || (item.ModItem != null && item.ModItem.Name == "TomeOfEclipsa")) continue;
+                    if (BannedWeapons.Contains(item.type)) continue;
 
                     if (item.CountsAsClass(DamageClass.Summon)) {
                         bool isWhip = item.shoot > ProjectileID.None && ProjectileID.Sets.IsAWhip[item.shoot];
                         if (!isWhip) continue; 
                     }
                     if (!uniqueItems.Contains(item.type)) {
-                        weaponPool.Add(item.Clone());
+                        Item newWeapon = new Item();
+                        newWeapon.SetDefaults(item.type);
+                        weaponPool.Add(newWeapon);
                         uniqueItems.Add(item.type);
                     }
+                }
+
+                if (weaponPool.Count == 0) {
+                    Item defaultWeapon = new Item();
+                    defaultWeapon.SetDefaults(ItemID.CopperShortsword);
+                    weaponPool.Add(defaultWeapon);
                 }
             }
 
@@ -608,17 +651,41 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
                     List<Item> idealWeapons = new List<Item>();
                     foreach (var item in weaponPool) {
+                        if (BannedWeapons.Contains(item.type)) continue;
                         bool isMeleeWhip = item.CountsAsClass(DamageClass.Melee) || (item.shoot > ProjectileID.None && ProjectileID.Sets.IsAWhip[item.shoot]);
                         if (preferCloseRangeWeapon == isMeleeWhip) {
                             idealWeapons.Add(item);
                         }
                     }
 
+                    Item selectedItem = null;
                     if (idealWeapons.Count > 0) {
-                        activeWeapon = idealWeapons[Main.rand.Next(idealWeapons.Count)].Clone();
+                        selectedItem = idealWeapons[Main.rand.Next(idealWeapons.Count)];
                     } else {
-                        currentPoolIndex = (currentPoolIndex + 1) % weaponPool.Count;
-                        activeWeapon = weaponPool[currentPoolIndex].Clone();
+                        var safePool = weaponPool.Where(w => !BannedWeapons.Contains(w.type)).ToList();
+                        if (safePool.Count > 0) {
+                            currentPoolIndex = (currentPoolIndex + 1) % safePool.Count;
+                            selectedItem = safePool[currentPoolIndex];
+                        } else {
+                            selectedItem = weaponPool[0];
+                        }
+                    }
+
+                    if (selectedItem != null) {
+                        Item newWeapon = new Item();
+                        newWeapon.SetDefaults(selectedItem.type);
+                        activeWeapon = newWeapon;
+                    } else {
+                        Item fallback = new Item();
+                        fallback.SetDefaults(ItemID.CopperShortsword);
+                        activeWeapon = fallback;
+                    }
+
+                    // Pastikan bukan banned
+                    if (BannedWeapons.Contains(activeWeapon.type)) {
+                        Item safe = new Item();
+                        safe.SetDefaults(ItemID.EnchantedSword);
+                        activeWeapon = safe;
                     }
 
                     burstShotCounter = 0;
@@ -626,18 +693,46 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 }
             }
 
-            if (activeWeapon == null || activeWeapon.type == ItemID.None) {
+            if (activeWeapon == null || activeWeapon.type == ItemID.None || BannedWeapons.Contains(activeWeapon.type)) {
                 Item held = player.inventory[player.selectedItem];
-                if (held != null && !held.IsAir) {
+                if (held != null && !held.IsAir && !BannedWeapons.Contains(held.type)) {
                     bool isForbiddenMinion = held.CountsAsClass(DamageClass.Summon) && (held.shoot <= ProjectileID.None || !ProjectileID.Sets.IsAWhip[held.shoot]);
                     bool isTomeOfEclipsa = held.Name == "Tome of Eclipsa" || (held.ModItem != null && held.ModItem.Name == "TomeOfEclipsa");
-                    if (!isForbiddenMinion && !isTomeOfEclipsa) activeWeapon = held.Clone();
+                    if (!isForbiddenMinion && !isTomeOfEclipsa) {
+                        Item newWeapon = new Item();
+                        newWeapon.SetDefaults(held.type);
+                        activeWeapon = newWeapon;
+                    }
+                }
+                if (activeWeapon == null || activeWeapon.type == ItemID.None || BannedWeapons.Contains(activeWeapon.type)) {
+                    Item fallback = new Item();
+                    fallback.SetDefaults(ItemID.CopperShortsword);
+                    activeWeapon = fallback;
                 }
             }
         }
 
         private void AnalyzeWeaponArchetype() {
+            isTrueMelee = false;
             if (activeWeapon != null && !activeWeapon.IsAir && activeWeapon.type != ItemID.None) {
+                // Yoyo
+                if (activeWeapon.useStyle == ItemUseStyleID.HoldUp && activeWeapon.shoot > ProjectileID.None && !ProjectileID.Sets.IsAWhip[activeWeapon.shoot]) {
+                    currentArchetype = WeaponArchetype.Yoyo;
+                    return;
+                }
+
+                // Boomerang
+                if (activeWeapon.useStyle == ItemUseStyleID.Swing && activeWeapon.shoot > ProjectileID.None) {
+                    int testProj = activeWeapon.shoot;
+                    if (testProj == ProjectileID.EnchantedBoomerang || testProj == ProjectileID.LightDisc || testProj == ProjectileID.Bananarang ||
+                        testProj == ProjectileID.ThornChakram || testProj == ProjectileID.FruitcakeChakram || testProj == ProjectileID.IceBoomerang ||
+                        testProj == ProjectileID.Flamarang || testProj == ProjectileID.WoodenBoomerang) {
+                        currentArchetype = WeaponArchetype.Boomerang;
+                        return;
+                    }
+                }
+
+                // Whip
                 if (activeWeapon.shoot > ProjectileID.None && ProjectileID.Sets.IsAWhip[activeWeapon.shoot]) {
                     currentArchetype = WeaponArchetype.Whip;
                 }
@@ -645,7 +740,14 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 else if (activeWeapon.CountsAsClass(DamageClass.Magic)) currentArchetype = WeaponArchetype.Magic;
                 else if (activeWeapon.CountsAsClass(DamageClass.Summon)) currentArchetype = WeaponArchetype.Summon;
                 else {
-                    currentArchetype = activeWeapon.shoot > ProjectileID.None ? WeaponArchetype.ProjMelee : WeaponArchetype.TrueMelee;
+                    bool isSwing = activeWeapon.useStyle == ItemUseStyleID.Swing;
+                    bool hasProjectile = activeWeapon.shoot > ProjectileID.None;
+                    if (isSwing && !hasProjectile) {
+                        currentArchetype = WeaponArchetype.TrueMelee;
+                        isTrueMelee = true;
+                    } else {
+                        currentArchetype = WeaponArchetype.ProjMelee;
+                    }
                 }
             }
         }
@@ -668,6 +770,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     case WeaponArchetype.Ranged:
                     case WeaponArchetype.Magic:
                     case WeaponArchetype.Summon:
+                    case WeaponArchetype.Yoyo:
+                    case WeaponArchetype.Boomerang:
                         float idealDist = MathHelper.Clamp(weaponVelocity * 46f, 550f, 950f);
                         tacticalTargetOffset = new Vector2(Main.rand.Next((int)idealDist - 90, (int)idealDist + 90) * (Main.rand.NextBool() ? 1 : -1), Main.rand.Next(-140, -40));
                         break;
@@ -820,6 +924,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 case WeaponArchetype.Ranged:
                 case WeaponArchetype.Magic:
                 case WeaponArchetype.Summon:
+                case WeaponArchetype.Yoyo:
+                case WeaponArchetype.Boomerang:
                     maxDynamicRange = MathHelper.Clamp(weaponVelocityStat * 65f, 500f, 1350f);
                     if (currentDistance <= maxDynamicRange) canUseWeapon = true;
                     break;
@@ -912,28 +1018,24 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
         }
 
-        // BARU: Sistem kalkulasi penyeimbangan damage sesuai instruksi base damage senjata
         private int CalculateScaledDamage(Item weapon) {
             int rawDamage = weapon.damage;
             float reductionMultiplier = 1f;
 
             if (rawDamage > 100) {
-                reductionMultiplier = 0.2f; // Pengurangan 80% (Damage tersisa 20%)
+                reductionMultiplier = 0.2f;
             }
             else if (rawDamage > 80) {
-                reductionMultiplier = 0.5f; // Pengurangan 50% (Damage tersisa 50%)
+                reductionMultiplier = 0.5f;
             }
             else {
-                reductionMultiplier = 1f;  // Pengurangan 0% (Damage utuh 100%)
+                reductionMultiplier = 1f;
             }
 
             int scaledDamage = (int)(rawDamage * reductionMultiplier);
-            
-            // Tambahan mekanik bonus tipis fase 2 jika ingin lebih menantang
             if (isPhase2) {
                 scaledDamage = (int)(scaledDamage * 1.25f);
             }
-
             if (scaledDamage < 1) scaledDamage = 1;
             return scaledDamage; 
         }
@@ -948,21 +1050,83 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             Vector2 projectileVelocity = perfectAimDir * projSpeed;
 
             int projType = activeWeapon.shoot;
-            if (projType <= ProjectileID.None && activeWeapon.type != ItemID.None) {
+            if (projType <= ProjectileID.None) {
                 projType = ContentSamples.ItemsByType[activeWeapon.type].shoot;
             }
-
-            if (activeWeapon.type == ItemID.TerraBlade || projType == 954) projType = ProjectileID.TerraBeam; 
-            else if (activeWeapon.type == ItemID.TrueNightsEdge) projType = ProjectileID.NightBeam;
-            else if (activeWeapon.type == ItemID.TrueExcalibur) projType = ProjectileID.LightBeam;
-
-            if (currentArchetype == WeaponArchetype.Ranged) {
-                if (activeWeapon.useAmmo == AmmoID.Bullet || projType == ProjectileID.PurificationPowder) projType = ProjectileID.Bullet; 
-                else if (activeWeapon.useAmmo == AmmoID.Arrow || projType == ProjectileID.WoodenArrowFriendly) projType = ProjectileID.WoodenArrowHostile;
+            if (projType <= ProjectileID.None) {
+                projType = ProjectileID.EnchantedBeam; // fallback
             }
 
-            if (projType <= ProjectileID.None) projType = ProjectileID.EnchantedBeam; 
+            // Penanganan khusus Terrablade family
+            if (activeWeapon.type == ItemID.TerraBlade || activeWeapon.type == ItemID.TrueNightsEdge || activeWeapon.type == ItemID.TrueExcalibur) {
+                projType = (activeWeapon.type == ItemID.TerraBlade) ? ProjectileID.TerraBeam : 
+                           (activeWeapon.type == ItemID.TrueNightsEdge) ? ProjectileID.NightBeam : ProjectileID.LightBeam;
+                Vector2 aim = target.Center - NPC.Center;
+                if (aim != Vector2.Zero) aim.Normalize();
+                projectileVelocity = aim * projSpeed;
+                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, projectileVelocity, projType, finalDamage, 0f, proxySlot);
+                if (p >= 0 && p < 1000) {
+                    Main.projectile[p].hostile = true;
+                    Main.projectile[p].friendly = false;
+                }
+                return;
+            }
 
+            // Penanganan berdasarkan archetype
+            if (currentArchetype == WeaponArchetype.Magic) {
+                projectileVelocity = perfectAimDir * projSpeed;
+            }
+            else if (currentArchetype == WeaponArchetype.Ranged) {
+                bool isSniper = activeWeapon.type == ItemID.SniperRifle;
+                if (isSniper) {
+                    projectileVelocity = perfectAimDir * (projSpeed * 1.5f);
+                } else {
+                    float spread = MathHelper.ToRadians(5f);
+                    projectileVelocity = perfectAimDir.RotatedBy(Main.rand.NextFloat(-spread, spread)) * projSpeed;
+                }
+            }
+            else if (currentArchetype == WeaponArchetype.ProjMelee) {
+                Vector2 aim = target.Center - NPC.Center;
+                if (aim != Vector2.Zero) aim.Normalize();
+                float spread = MathHelper.ToRadians(2f);
+                aim = aim.RotatedBy(Main.rand.NextFloat(-spread, spread));
+                projectileVelocity = aim * projSpeed;
+            }
+            else if (currentArchetype == WeaponArchetype.Yoyo) {
+                int count = 4;
+                float angleStep = MathHelper.TwoPi / count;
+                float baseAngle = Main.GameUpdateCount * 0.02f;
+                for (int i = 0; i < count; i++) {
+                    float angle = baseAngle + i * angleStep;
+                    Vector2 dir = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle));
+                    Vector2 velocity = dir * projSpeed;
+                    int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, velocity, projType, finalDamage, 0f, proxySlot);
+                    if (p >= 0 && p < 1000) {
+                        Main.projectile[p].hostile = true;
+                        Main.projectile[p].friendly = false;
+                        Main.projectile[p].timeLeft = 180;
+                    }
+                }
+                return;
+            }
+            else if (currentArchetype == WeaponArchetype.Boomerang) {
+                int count = (activeWeapon.damage > 80) ? 3 : 1;
+                float spread = MathHelper.ToRadians(10f);
+                for (int i = 0; i < count; i++) {
+                    Vector2 aim = target.Center - NPC.Center;
+                    if (aim != Vector2.Zero) aim.Normalize();
+                    aim = aim.RotatedBy(Main.rand.NextFloat(-spread, spread));
+                    Vector2 velocity = aim * projSpeed;
+                    int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, velocity, projType, finalDamage, 0f, proxySlot);
+                    if (p >= 0 && p < 1000) {
+                        Main.projectile[p].hostile = true;
+                        Main.projectile[p].friendly = false;
+                    }
+                }
+                return;
+            }
+
+            // Untuk senjata lain (Summon, Whip, atau default) dengan spread
             int projectileCount = 1;
             float spreadAngle = 0f;
             bool useLinearSpread = false; 
@@ -1083,13 +1247,26 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             dummyPlayer.velocity = NPC.velocity;
             dummyPlayer.direction = NPC.direction;
 
+            // Pastikan inventory[0] selalu diisi dengan senjata terbaru (tidak pernah banned)
             if (activeWeapon != null && aiState != 102) {
                 if (dummyPlayer.inventory == null || dummyPlayer.inventory.Length < 58) {
                     dummyPlayer.inventory = new Item[58];
                     for (int i = 0; i < dummyPlayer.inventory.Length; i++) dummyPlayer.inventory[i] = new Item();
                 }
                 dummyPlayer.selectedItem = 0;
-                dummyPlayer.inventory[0] = activeWeapon;
+                // Jika senjata aktif adalah banned (seharusnya tidak), ganti dengan fallback
+                if (BannedWeapons.Contains(activeWeapon.type)) {
+                    Item fallback = new Item();
+                    fallback.SetDefaults(ItemID.EnchantedSword);
+                    activeWeapon = fallback;
+                }
+                if (dummyPlayer.inventory[0] == null || dummyPlayer.inventory[0].type != activeWeapon.type) {
+                    Item newItem = new Item();
+                    newItem.SetDefaults(activeWeapon.type);
+                    dummyPlayer.inventory[0] = newItem;
+                } else {
+                    dummyPlayer.inventory[0].SetDefaults(activeWeapon.type);
+                }
                 dummyPlayer.itemAnimation = bossWeaponSwingTimer;
                 dummyPlayer.itemAnimationMax = bossWeaponSwingMax;
                 dummyPlayer.itemTime = bossWeaponSwingTimer;
