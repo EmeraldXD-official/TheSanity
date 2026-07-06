@@ -13,7 +13,7 @@ namespace TheSanity.Items
     public class FlareSword : ModItem
     {
         public override void SetDefaults() {
-            Item.damage = 160; 
+            Item.damage = 120; 
             Item.DamageType = DamageClass.Melee;
             Item.width = 50;  
             Item.height = 50;
@@ -37,12 +37,12 @@ namespace TheSanity.Items
             if (Main.dayTime) {
                 Item.useTime = 14; 
                 Item.useAnimation = 14;
-                Item.damage = 160;
+                Item.damage = 120;
             }
             else {
                 Item.useTime = 30; 
                 Item.useAnimation = 30;
-                Item.damage = 320;
+                Item.damage = 240;
             }
         }
 
