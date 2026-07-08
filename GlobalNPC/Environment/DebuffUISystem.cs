@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using Terraria;
 using Terraria.ModLoader;
 using Terraria.UI;
+using Terraria.GameInput;
+using TheSanity.Items; // ✨ REQUIRED: Agar sistem mengenali item DummyTool
 
 namespace TheSanity.Buff
 {
@@ -10,13 +12,22 @@ namespace TheSanity.Buff
     {
         internal UserInterface DebuffUserInterface;
         internal DebuffSelectorUI DebuffUI;
+        public static ModKeybind ToggleUIKeybind { get; private set; }
+        
+        // ✨ VARIABEL BARU: Menyimpan status On/Off Contact Damage (Default: false / OFF)
+        public static bool ContactDamageEnabled = false;
 
         public override void Load() {
             if (!Main.dedServ) {
                 DebuffUserInterface = new UserInterface();
                 DebuffUI = new DebuffSelectorUI();
                 DebuffUI.Activate();
+                ToggleUIKeybind = KeybindLoader.RegisterKeybind(Mod, "Toggle Dummy UI", "K");
             }
+        }
+
+        public override void Unload() {
+            ToggleUIKeybind = null;
         }
 
         public override void UpdateUI(GameTime gameTime) {
@@ -25,7 +36,6 @@ namespace TheSanity.Buff
             }
         }
 
-        // Inserts the GUI dashboard into the game layout layer
         public override void ModifyInterfaceLayers(List<GameInterfaceLayer> layers) {
             int mouseTextIndex = layers.FindIndex(layer => layer.Name.Equals("Vanilla: Mouse Text"));
             if (mouseTextIndex != -1) {
@@ -42,14 +52,10 @@ namespace TheSanity.Buff
             }
         }
 
-        // Toggles the Dashboard state when called via Dummy RMB interaction
         public void ToggleUI() {
             if (DebuffUserInterface.CurrentState == null) {
-                DebuffUI.searchFilter = ""; // Reset search filter text on open
-                
-                // FIX: Changed from PopulateDebuffs() to PopulateList() to match the multi-tab upgrade
+                DebuffUI.searchFilter = "";
                 DebuffUI.PopulateList(); 
-                
                 DebuffUserInterface.SetState(DebuffUI);
             } else {
                 CloseUI();
@@ -59,6 +65,18 @@ namespace TheSanity.Buff
         public void CloseUI() {
             DebuffUI.ResetTypingState();
             DebuffUserInterface.SetState(null);
+        }
+    }
+
+    public class DebuffUIPlayer : ModPlayer
+    {
+        public override void ProcessTriggers(TriggersSet triggersSet) {
+            if (DebuffUISystem.ToggleUIKeybind != null && DebuffUISystem.ToggleUIKeybind.JustPressed) {
+                // ✨ FIX UTAMA: UI hanya bisa terbuka jika item yang sedang dipegang aktif adalah DummyTool
+                if (Player.HeldItem.type == ModContent.ItemType<DummyTool>()) {
+                    ModContent.GetInstance<DebuffUISystem>().ToggleUI();
+                }
+            }
         }
     }
 }
