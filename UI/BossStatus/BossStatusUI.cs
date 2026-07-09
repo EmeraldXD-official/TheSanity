@@ -1,11 +1,11 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
-using Microsoft.Xna.Framework.Input; 
+using Microsoft.Xna.Framework.Input;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using Terraria;
-using Terraria.Audio; 
+using Terraria.Audio;
 using Terraria.GameContent;
 using Terraria.GameInput;
 using Terraria.ID;
@@ -13,7 +13,7 @@ using Terraria.Localization;
 using Terraria.ModLoader;
 using Terraria.ModLoader.IO;
 using Terraria.UI;
-using Terraria.UI.Chat; 
+using Terraria.UI.Chat;
 
 namespace TheSanity.Interface
 {
@@ -52,7 +52,8 @@ namespace TheSanity.Interface
         public List<int> PlayerRankDeaths = new List<int>();
         public int GlobalDebuffTrapDamage;
         public string DeathReason = "None";
-        public bool IsPinned = false; // Pin property status
+        public bool IsPinned = false;
+        public string WorldName = "";
 
         public TagCompound Save() {
             return new TagCompound {
@@ -77,7 +78,8 @@ namespace TheSanity.Interface
                 ["PlayerRankDeaths"] = PlayerRankDeaths,
                 ["GlobalDebuffTrapDamage"] = GlobalDebuffTrapDamage,
                 ["DeathReason"] = DeathReason,
-                ["IsPinned"] = IsPinned
+                ["IsPinned"] = IsPinned,
+                ["WorldName"] = WorldName
             };
         }
 
@@ -91,7 +93,8 @@ namespace TheSanity.Interface
                 TotalHits = tag.GetInt("TotalHits"),
                 TotalDamage = tag.GetInt("TotalDamage"),
                 BestWeapon = tag.GetString("BestWeapon"),
-                IsPinned = tag.ContainsKey("IsPinned") && tag.GetBool("IsPinned")
+                IsPinned = tag.ContainsKey("IsPinned") && tag.GetBool("IsPinned"),
+                WorldName = tag.ContainsKey("WorldName") ? tag.GetString("WorldName") : "Unknown"
             };
 
             if (tag.ContainsKey("WeaponNames")) record.WeaponNames = tag.GetList<string>("WeaponNames").ToList();
@@ -140,6 +143,14 @@ namespace TheSanity.Interface
             if (tag.ContainsKey("HasUnreadRecords")) HasUnreadRecords = tag.GetBool("HasUnreadRecords");
             if (tag.ContainsKey("BookBtnX")) BookButtonPosition.X = tag.GetFloat("BookBtnX");
             if (tag.ContainsKey("BookBtnY")) BookButtonPosition.Y = tag.GetFloat("BookBtnY");
+        }
+
+        // --- TAMBAHAN: method untuk renumber attempt setelah hapus ---
+        public void RenumberAttempts(string bossName) {
+            var records = BossRecords.Where(r => r.BossName == bossName).OrderBy(r => r.AttemptNumber).ToList();
+            for (int i = 0; i < records.Count; i++) {
+                records[i].AttemptNumber = i + 1;
+            }
         }
     }
 
@@ -269,14 +280,15 @@ namespace TheSanity.Interface
     public class BossMainUIState : UIState
     {
         public static bool Visible = false;
-        private bool wasVisible = false; // Auto-center cursor control flag
+        private bool wasVisible = false;
         private Vector2 windowOffset;
         private bool isDraggingWindow = false;
         private bool isResizingWindow = false;
 
+        // Lebar window diperbesar agar background mengikuti
         public float winX = 100, winY = 120;
-        public float winW = 1160, winH = 580; 
-        private const float minW = 1100, minH = 450;
+        public float winW = 1540, winH = 580; 
+        private const float minW = 1380, minH = 450;
 
         private string bossSearchFilter = "";
         private string playerSearchFilter = "";
@@ -291,9 +303,7 @@ namespace TheSanity.Interface
         private int bossSortMode = 0; 
         private int globalRankPanelScroll = 0;
 
-        // NEW ATTEMPT SUB-GUI ENGINE FIELDS
-        private bool isSelectModeActive = false;
-        private int attemptSortMode = 0; // 0 = Chronological, 1 = Speed/Fastest, 2 = Highest Player Damage
+        private int attemptSortMode = 0;
 
         private KeyboardState oldKeyboardState;
 
@@ -375,9 +385,6 @@ namespace TheSanity.Interface
                 return;
             }
 
-            // =========================================================================
-            // 🎯 CURSOR AUTO-SNAP HARDWARE EVENT CENTER TOP
-            // =========================================================================
             if (Visible && !wasVisible) {
                 Main.mouseX = (int)(winX + winW / 2f);
                 Main.mouseY = (int)(winY + 15);
@@ -481,9 +488,6 @@ namespace TheSanity.Interface
                 spriteBatch.Draw(pixel, singleLineRect, Color.Orange * (0.05f * alphaSinFade));
             }
 
-            // =========================================================================
-            // 🍊 ORANGE VISUALS: PULSING AMBIENT ACTIVE TOP HEADER WINDOW BORDER
-            // =========================================================================
             float pulseSinTime = 0.80f + 0.20f * (float)Math.Sin(Main.GlobalTimeWrappedHourly * 3.5f);
             Color themeOrangeAesthetic = Color.Orange * pulseSinTime;
             Color themeOrangeDarkFill = new Color(75, 30, 0) * 0.75f;
@@ -519,10 +523,11 @@ namespace TheSanity.Interface
                 HandleKeyboardTyping(ref playerSearchFilter, ref isTypingPlayerSearch, currentKeyboardState);
             }
 
+            //Resize UI
             float gap = 6;
             float leftW = 165;
-            float rightAttemptW = 110;
-            float rightPlayerW = 145;
+            float rightAttemptW = 190;
+            float rightPlayerW = 164;
             float globalRankW = 185; 
             float centerW = winW - (leftW + rightAttemptW + rightPlayerW + globalRankW + (gap * 6));
             float panelH = winH - 50;
@@ -792,12 +797,19 @@ namespace TheSanity.Interface
             string dReasonText = string.IsNullOrEmpty(selectedRecord.DeathReason) ? "None" : selectedRecord.DeathReason;
             Color reasonUiColor = dReasonText == "None" ? Color.LightGreen : Color.Red; 
             DrawChatString(spriteBatch, dReasonText, new Vector2(drawPos.X + 140, drawPos.Y), reasonUiColor, 0.76f);
-            drawPos.Y += 22; 
+            drawPos.Y += 22;
+
+            // World Name
+            DrawChatString(spriteBatch, $"[i:{ItemID.Compass}] World Name: ", drawPos, Color.White, 0.76f);
+            string worldDisplay = string.IsNullOrEmpty(selectedRecord.WorldName) ? "Unknown" : selectedRecord.WorldName;
+            DrawChatString(spriteBatch, worldDisplay, new Vector2(drawPos.X + 140, drawPos.Y), Color.LightBlue, 0.76f);
+            drawPos.Y += 22;
 
             string speedText = $"Fight Speed: {selectedRecord.SlowdownPercent:F1}% Slowdown - {selectedRecord.AvgFPS:F1} avg FPS - {selectedRecord.RtaStr} RTA";
             DrawChatString(spriteBatch, speedText, drawPos, Color.LightGreen, 0.74f);
             drawPos.Y += 25;
 
+            // --- KEMBALI KE UKURAN NORMAL ---
             float totalBoxesH = h - (drawPos.Y - y) - 25;
             float singleBoxH = (totalBoxesH - 12) / 2f;
 
@@ -807,7 +819,8 @@ namespace TheSanity.Interface
 
             float wItemY = weaponBox.Y + 22;
             float debuffTrapUiPct = selectedRecord.TotalDamage > 0 ? ((float)selectedRecord.GlobalDebuffTrapDamage / selectedRecord.TotalDamage * 100f) : 0f;
-            DrawChatString(spriteBatch, $"[i:{ItemID.Spike}] Debuff/Trap: {selectedRecord.GlobalDebuffTrapDamage} DMG ({debuffTrapUiPct:F1}%)", new Vector2(weaponBox.X + 10, wItemY), Color.Tomato, 0.72f);
+            // --- PERUBAHAN: label Debuff/Trap/etc ---
+            DrawChatString(spriteBatch, $"[i:{ItemID.Spike}] Debuff/Trap/etc: {selectedRecord.GlobalDebuffTrapDamage} DMG ({debuffTrapUiPct:F1}%)", new Vector2(weaponBox.X + 10, wItemY), Color.Tomato, 0.72f);
             wItemY += 20; 
 
             List<string> wNames = selectedRecord.WeaponNames ?? new List<string>();
@@ -880,9 +893,6 @@ namespace TheSanity.Interface
             DrawChatString(spriteBatch, "ATTEMPTS", new Vector2(x + 10, y + 10), Color.Orange, 0.78f);
             if (selectedBossType == -1) return;
 
-            // =========================================================================
-            // 🐛 FIX LOCATION: FILTER STRATEGY USING UNIQUE STANDARDIZED BOSS NAME
-            // =========================================================================
             string selectedBossName = Lang.GetNPCNameValue(selectedBossType);
             if (selectedBossType == NPCID.EaterofWorldsHead) selectedBossName = "Eater of Worlds";
             if (selectedBossType == NPCID.Retinazer) selectedBossName = "The Twins";
@@ -905,13 +915,12 @@ namespace TheSanity.Interface
             int bestTicks = successRuns.Count > 0 ? successRuns.Min(r => r.DurationTicks) : -1;
             int worstTicks = successRuns.Count > 0 ? successRuns.Max(r => r.DurationTicks) : -1;
 
-            // PRE-SORTING LOGIC FOR CHRONO / SPEED / DAMAGE TRACKING WITH PIN PRIORITY
             IOrderedEnumerable<PlayerBossRecord> orderedRuns;
-            if (attemptSortMode == 1) { // Speed layout sorting
+            if (attemptSortMode == 1) {
                 orderedRuns = targetHistory.OrderByDescending(r => r.IsPinned).ThenBy(r => r.BossHPPercent != 0).ThenBy(r => r.DurationTicks);
-            } else if (attemptSortMode == 2) { // Power damage outputs sorting
+            } else if (attemptSortMode == 2) {
                 orderedRuns = targetHistory.OrderByDescending(r => r.IsPinned).ThenByDescending(r => r.TotalDamage);
-            } else { // Standard chronological baseline layout
+            } else {
                 orderedRuns = targetHistory.OrderByDescending(r => r.IsPinned).ThenBy(r => r.AttemptNumber);
             }
             var renderingHistoryList = orderedRuns.ToList();
@@ -934,9 +943,9 @@ namespace TheSanity.Interface
                 if (selectedRecord == rec) spriteBatch.Draw(pixel, rowRect, Color.Cyan * 0.22f);
                 else if (hov) spriteBatch.Draw(pixel, rowRect, Color.White * 0.08f);
 
-                string pinPrefix = rec.IsPinned ? "[i:{ItemID.FallenStar}]" : "";
                 string statusSuffix = rec.BossHPPercent > 0 ? " (F)" : " (K)";
-                DrawChatString(spriteBatch, $"{pinPrefix}Run #{rec.AttemptNumber}{statusSuffix}", new Vector2(rowRect.X + 6, rowRect.Y + 4), titleColor, 0.74f);
+                string worldDisplay = string.IsNullOrEmpty(rec.WorldName) ? "" : $" ({rec.WorldName})";
+                DrawChatString(spriteBatch, $"Run #{rec.AttemptNumber}{worldDisplay}{statusSuffix}", new Vector2(rowRect.X + 6, rowRect.Y + 4), titleColor, 0.74f);
 
                 if (hov && jointClick) {
                     selectedRecord = rec;
@@ -947,100 +956,71 @@ namespace TheSanity.Interface
                 rowY += 26;
             }
 
-            // =========================================================================
-            // 🛠️ NEW HUD ADDITION: 3 SMALL PROTRUDING UTILITY TABS AT THE BOTTOM
-            // =========================================================================
+            // 4 tombol: SRT, RFH, PIN, DEL
             float buttonsY = y + h - 2; 
-            float totalButtonsWidth = (30 * 3) + (4 * 2); 
+            float totalButtonsWidth = (30 * 4) + (4 * 3); 
             float startBtnX = x + (w - totalButtonsWidth) / 2f;
 
-            Rectangle btn1Rect = new Rectangle((int)startBtnX, (int)buttonsY, 30, 22);
-            Rectangle btn2Rect = new Rectangle((int)startBtnX + 34, (int)buttonsY, 30, 22);
-            Rectangle btn3Rect = new Rectangle((int)startBtnX + 68, (int)buttonsY, 30, 22);
+            Rectangle btnSortRect = new Rectangle((int)startBtnX, (int)buttonsY, 30, 22);
+            Rectangle btnRefreshRect = new Rectangle((int)startBtnX + 34, (int)buttonsY, 30, 22);
+            Rectangle btnPinRect   = new Rectangle((int)startBtnX + 68, (int)buttonsY, 30, 22);
+            Rectangle btnDelRect   = new Rectangle((int)startBtnX + 102, (int)buttonsY, 30, 22);
 
-            bool hovB1 = btn1Rect.Contains(Main.MouseScreen.ToPoint());
-            bool hovB2 = btn2Rect.Contains(Main.MouseScreen.ToPoint());
-            bool hovB3 = btn3Rect.Contains(Main.MouseScreen.ToPoint());
+            bool hovSort = btnSortRect.Contains(Main.MouseScreen.ToPoint());
+            bool hovRefresh = btnRefreshRect.Contains(Main.MouseScreen.ToPoint());
+            bool hovPin = btnPinRect.Contains(Main.MouseScreen.ToPoint());
+            bool hovDel = btnDelRect.Contains(Main.MouseScreen.ToPoint());
 
-            spriteBatch.Draw(pixel, btn1Rect, hovB1 ? Color.Orange * 0.7f : Color.Orange * 0.3f);
-            spriteBatch.Draw(pixel, btn2Rect, hovB2 ? Color.Orange * 0.7f : Color.Orange * 0.3f);
-            spriteBatch.Draw(pixel, btn3Rect, hovB3 ? Color.Orange * 0.7f : Color.Orange * 0.3f);
+            spriteBatch.Draw(pixel, btnSortRect, hovSort ? Color.Orange * 0.7f : Color.Orange * 0.3f);
+            spriteBatch.Draw(pixel, btnRefreshRect, hovRefresh ? Color.Orange * 0.7f : Color.Orange * 0.3f);
+            spriteBatch.Draw(pixel, btnPinRect, hovPin ? Color.Orange * 0.7f : Color.Orange * 0.3f);
+            spriteBatch.Draw(pixel, btnDelRect, hovDel ? Color.Red * 0.7f : Color.DarkRed * 0.5f);
 
-            if (!isSelectModeActive) {
-                // NORMAL MODE TAB RENDERING: SORTIR, REFRESH, SELECT MODE TRIGGER
-                DrawChatString(spriteBatch, "SRT", new Vector2(btn1Rect.X + 4, btn1Rect.Y + 4), Color.White, 0.58f);
-                DrawChatString(spriteBatch, "RFH", new Vector2(btn2Rect.X + 4, btn2Rect.Y + 4), Color.LightSkyBlue, 0.58f);
-                DrawChatString(spriteBatch, "SEL", new Vector2(btn3Rect.X + 5, btn3Rect.Y + 4), Color.Gold, 0.58f);
+            DrawChatString(spriteBatch, "SRT", new Vector2(btnSortRect.X + 4, btnSortRect.Y + 4), Color.White, 0.58f);
+            DrawChatString(spriteBatch, "RFH", new Vector2(btnRefreshRect.X + 4, btnRefreshRect.Y + 4), Color.LightSkyBlue, 0.58f);
+            DrawChatString(spriteBatch, "PIN", new Vector2(btnPinRect.X + 5, btnPinRect.Y + 4), Color.Gold, 0.58f);
+            DrawChatString(spriteBatch, "DEL", new Vector2(btnDelRect.X + 5, btnDelRect.Y + 4), Color.White, 0.58f);
 
-                if (hovB1) Main.instance.MouseText($"Sort Attempts (Current: {(attemptSortMode == 0 ? "Chrono" : attemptSortMode == 1 ? "Speed" : "Max Dmg")})");
-                if (hovB2) Main.instance.MouseText("Force Refresh Database");
-                if (hovB3) Main.instance.MouseText("Enter Action Select Mode");
+            if (hovSort) Main.instance.MouseText($"Sort Attempts (Current: {(attemptSortMode == 0 ? "Chrono" : attemptSortMode == 1 ? "Speed" : "Max Dmg")})");
+            if (hovRefresh) Main.instance.MouseText("Force Refresh Database");
+            if (hovPin) Main.instance.MouseText(selectedRecord != null ? $"Toggle Pin/Unpin Run #{selectedRecord.AttemptNumber}" : "Select a run first");
+            if (hovDel) Main.instance.MouseText(selectedRecord != null ? $"Delete Run #{selectedRecord.AttemptNumber}" : "Select a run first");
 
-                if (jointClick) {
-                    if (hovB1) {
-                        attemptSortMode = (attemptSortMode + 1) % 3;
-                        SpawnShatterParticles(Main.MouseScreen, Color.Orange);
-                        SoundEngine.PlaySound(SoundID.MenuTick);
-                        jointClick = false;
-                    }
-                    else if (hovB2) {
-                        lastTotalRecordCount = -1; // Reset window matrix to fetch live clean calculations
-                        SpawnShatterParticles(Main.MouseScreen, Color.LightSkyBlue);
-                        SoundEngine.PlaySound(SoundID.Item4); // Enchantment magic item sound
-                        jointClick = false;
-                    }
-                    else if (hovB3) {
-                        isSelectModeActive = true;
-                        SpawnShatterParticles(Main.MouseScreen, Color.Gold);
-                        SoundEngine.PlaySound(SoundID.MenuOpen); 
-                        jointClick = false;
-                    }
+            if (jointClick) {
+                if (hovSort) {
+                    attemptSortMode = (attemptSortMode + 1) % 3;
+                    SpawnShatterParticles(Main.MouseScreen, Color.Orange);
+                    SoundEngine.PlaySound(SoundID.MenuTick);
+                    jointClick = false;
                 }
-            } 
-            else {
-                // ACTIVE SELECT MODE: TRASHBIN TRACER, PINNING ENGINE, CANCEL/UNSELECT TAB
-                Texture2D trashIcon = TextureAssets.Item[ItemID.TrashCan].Value;
-                Vector2 tOrigin = new Vector2(trashIcon.Width / 2f, trashIcon.Height / 2f);
-                spriteBatch.Draw(trashIcon, new Vector2(btn1Rect.X + 15, btn1Rect.Y + 11), null, Color.White, 0f, tOrigin, 0.60f, SpriteEffects.None, 0f);
-
-                Texture2D pinIcon = TextureAssets.Item[ItemID.GolfCupFlagYellow].Value;
-                Vector2 pOrigin = new Vector2(pinIcon.Width / 2f, pinIcon.Height / 2f);
-                spriteBatch.Draw(pinIcon, new Vector2(btn2Rect.X + 15, btn2Rect.Y + 11), null, Color.White, 0f, pOrigin, 0.60f, SpriteEffects.None, 0f);
-
-                DrawChatString(spriteBatch, "CNL", new Vector2(btn3Rect.X + 4, btn3Rect.Y + 4), Color.Tomato, 0.58f);
-
-                if (hovB1) Main.instance.MouseText(selectedRecord != null ? $"Delete Run #{selectedRecord.AttemptNumber}" : "Select a run first");
-                if (hovB2) Main.instance.MouseText(selectedRecord != null ? $"Toggle Pin/Unpin Run #{selectedRecord.AttemptNumber}" : "Select a run first");
-                if (hovB3) Main.instance.MouseText("Cancel and Exit Select Mode");
-
-                if (jointClick) {
-                    if (hovB1) {
-                        if (selectedRecord != null) {
-                            modPlayer.BossRecords.Remove(selectedRecord);
-                            selectedRecord = null;
-                            lastTotalRecordCount = -1; // Request layout updates
-                            SpawnShatterParticles(Main.MouseScreen, Color.Red);
-                            SoundEngine.PlaySound(SoundID.Item14); // Explosive shatter crash
-                        }
-                        jointClick = false;
+                else if (hovRefresh) {
+                    lastTotalRecordCount = -1;
+                    SpawnShatterParticles(Main.MouseScreen, Color.LightSkyBlue);
+                    SoundEngine.PlaySound(SoundID.Item4);
+                    jointClick = false;
+                }
+                else if (hovPin) {
+                    if (selectedRecord != null) {
+                        selectedRecord.IsPinned = !selectedRecord.IsPinned;
+                        SpawnShatterParticles(Main.MouseScreen, Color.Yellow);
+                        SoundEngine.PlaySound(SoundID.Coins);
                     }
-                    else if (hovB2) {
-                        if (selectedRecord != null) {
-                            selectedRecord.IsPinned = !selectedRecord.IsPinned;
-                            SpawnShatterParticles(Main.MouseScreen, Color.Yellow);
-                            SoundEngine.PlaySound(SoundID.Coins); // Gold coin sound effect
-                        }
-                        jointClick = false;
+                    jointClick = false;
+                }
+                else if (hovDel) {
+                    if (selectedRecord != null) {
+                        string bossName = selectedRecord.BossName; // simpan sebelum hapus
+                        modPlayer.BossRecords.Remove(selectedRecord);
+                        selectedRecord = null;
+                        // --- RENUMBER ulang attempt untuk boss tersebut ---
+                        modPlayer.RenumberAttempts(bossName);
+                        lastTotalRecordCount = -1; // refresh
+                        SpawnShatterParticles(Main.MouseScreen, Color.Red);
+                        SoundEngine.PlaySound(SoundID.Item14);
                     }
-                    else if (hovB3) {
-                        isSelectModeActive = false;
-                        SpawnShatterParticles(Main.MouseScreen, Color.Tomato);
-                        SoundEngine.PlaySound(SoundID.MenuClose); 
-                        jointClick = false;
-                    }
+                    jointClick = false;
                 }
             }
-            // =========================================================================
         }
 
         private void DrawPlayerListPanel(SpriteBatch spriteBatch, float x, float y, float w, float h, ref bool jointClick) {
