@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Terraria;
@@ -7,7 +6,7 @@ using Terraria.ID;
 using Terraria.ModLoader;
 using Terraria.GameContent;
 using Terraria.Audio;
-using Terraria.DataStructures; // Diperlukan untuk IEntitySource, EntitySource_Parent, dan DrawData
+using Terraria.DataStructures;
 
 namespace TheSanity.NPCs
 {
@@ -26,9 +25,8 @@ namespace TheSanity.NPCs
         private bool isFreezingPostLightning = false; 
         private int postLightningFreezeTimer = 0;     
 
-        // [SISTEM TIMER BARU UNTUK FITUR HOOK & SLAM LANDING]
-        private int hookedLifetimeTimer = 0; // Menyimpan durasi waktu saat awan di-hook player
-        private int landingWindowTimer = 0;  // Jendela deteksi 0.5 detik setelah mendarat
+        private int hookedLifetimeTimer = 0;
+        private int landingWindowTimer = 0;
 
         public override string Texture => "Terraria/Images/Projectile_" + ProjectileID.RainCloudRaining;
 
@@ -59,15 +57,10 @@ namespace TheSanity.NPCs
         public override float SpawnChance(NPCSpawnInfo spawnInfo)
         {
             if (NPC.CountNPCS(Type) >= 150) 
-            {
                 return 0f;
-            }
 
-            // [LOC] [VAL] KONTROL SPAWN RATE UTAMA
             if (spawnInfo.Player.ZoneSkyHeight || spawnInfo.Player.ZoneOverworldHeight)
-            {
-                return 900.0f; 
-            }
+                return 900.0f;
             
             return 0f;
         }
@@ -89,9 +82,7 @@ namespace TheSanity.NPCs
             }
 
             if (!targetPlayer.active || targetPlayer.dead)
-            {
-                NPC.ai[3] = 1f; 
-            }
+                NPC.ai[3] = 1f;
 
             if (NPC.ai[3] == 1f)
             {
@@ -106,15 +97,11 @@ namespace TheSanity.NPCs
             if (NPC.ai[3] != 1f)
             {
                 if (maxLifetime == 0)
-                {
-                    maxLifetime = Main.rand.Next(1200, 2101); 
-                }
+                    maxLifetime = Main.rand.Next(1200, 2101);
 
                 lifetimeTimer++;
                 if (lifetimeTimer >= maxLifetime)
-                {
-                    NPC.ai[3] = 1f; 
-                }
+                    NPC.ai[3] = 1f;
             }
 
             // --- MEKANIK KONTROL CUACA HUJAN (ANTI-NYAMBER SAAT CERAH) ---
@@ -128,105 +115,77 @@ namespace TheSanity.NPCs
             else
             {
                 if (chosenCooldown == 0)
-                {
-                    chosenCooldown = Main.rand.Next(600, 901); 
-                }
+                    chosenCooldown = Main.rand.Next(600, 901);
 
                 if (NPC.ai[3] != 1f && !isFreezingPostLightning)
-                {
                     lightningCooldownTimer++;
-                }
 
                 if (lightningCooldownTimer >= (chosenCooldown - 60) && lightningCooldownTimer < chosenCooldown)
-                {
-                    isChargingLightning = true; 
-                }
+                    isChargingLightning = true;
 
                 if (lightningCooldownTimer >= chosenCooldown)
                 {
                     if (Main.netMode != NetmodeID.MultiplayerClient)
                     {
-                        // INITIALISASI SISTEM SMART-TARGETING UNIVERSAL
                         Vector2 finalTargetCenter = NPC.Center;
                         bool foundValidTarget = false;
                         float highestTargetScore = -1f;
 
-                        // [LOC] [VAL] RADIUS TARGETING JANGKAUAN (1 Blok = 16 Piksel)
-                        float scanRangeX = 20f * 16f; // Kunci 20 Blok ke kiri dan 20 Blok ke kanan (Total 320px)
-                        float scanRangeY = 1000f;     // Jangkauan vertikal ke bawah (Tetap jauh agar bisa mendeteksi tanah)
+                        float scanRangeX = 20f * 16f; 
+                        float scanRangeY = 1000f;     
 
-                        // 1. PEMINDAIAN BLOK FACTION PLAYER
+                        // Pindai Player
                         for (int i = 0; i < Main.maxPlayers; i++)
                         {
                             Player p = Main.player[i];
-                            if (p.active && !p.dead && !p.ghost)
+                            if (p.active && !p.dead && !p.ghost && p.Center.Y > NPC.Center.Y)
                             {
-                                // IMMUNITY CHECK: Harus berada di bawah koordinat Y awan
-                                if (p.Center.Y > NPC.Center.Y)
+                                float xDist = Math.Abs(p.Center.X - NPC.Center.X);
+                                float yDist = p.Center.Y - NPC.Center.Y;
+                                if (xDist <= scanRangeX && yDist <= scanRangeY)
                                 {
-                                    float xDist = Math.Abs(p.Center.X - NPC.Center.X);
-                                    float yDist = p.Center.Y - NPC.Center.Y;
-
-                                    if (xDist <= scanRangeX && yDist <= scanRangeY)
+                                    float currentScore = 2000f - yDist;
+                                    if (p.HasBuff(BuffID.Wet))
+                                        currentScore += 6000f;
+                                    if (currentScore > highestTargetScore)
                                     {
-                                        float currentScore = 2000f - yDist;
-
-                                        if (p.HasBuff(BuffID.Wet))
-                                        {
-                                            currentScore += 6000f; 
-                                        }
-
-                                        if (currentScore > highestTargetScore)
-                                        {
-                                            highestTargetScore = currentScore;
-                                            finalTargetCenter = p.Center;
-                                            foundValidTarget = true;
-                                        }
+                                        highestTargetScore = currentScore;
+                                        finalTargetCenter = p.Center;
+                                        foundValidTarget = true;
                                     }
                                 }
                             }
                         }
 
-                        // 2. PEMINDAIAN BLOK FACTION NPC (MENCAKUP: ENEMY, CRITTER, DAN TOWN NPC)
+                        // Pindai NPC lain
                         for (int i = 0; i < Main.maxNPCs; i++)
                         {
                             NPC n = Main.npc[i];
-                            if (n.active && n.whoAmI != NPC.whoAmI && n.type != NPC.type)
+                            if (n.active && n.whoAmI != NPC.whoAmI && n.type != NPC.type && n.Center.Y > NPC.Center.Y)
                             {
-                                // IMMUNITY CHECK: Abaikan NPC yang sejajar atau lebih tinggi dari awan
-                                if (n.Center.Y > NPC.Center.Y)
+                                float xDist = Math.Abs(n.Center.X - NPC.Center.X);
+                                float yDist = n.Center.Y - NPC.Center.Y;
+                                if (xDist <= scanRangeX && yDist <= scanRangeY)
                                 {
-                                    float xDist = Math.Abs(n.Center.X - NPC.Center.X);
-                                    float yDist = n.Center.Y - NPC.Center.Y;
-
-                                    if (xDist <= scanRangeX && yDist <= scanRangeY)
+                                    float currentScore = 2000f - yDist;
+                                    if (n.HasBuff(BuffID.Wet))
+                                        currentScore += 6000f;
+                                    if (currentScore > highestTargetScore)
                                     {
-                                        float currentScore = 2000f - yDist;
-
-                                        if (n.HasBuff(BuffID.Wet))
-                                        {
-                                            currentScore += 6000f; 
-                                        }
-
-                                        if (currentScore > highestTargetScore)
-                                        {
-                                            highestTargetScore = currentScore;
-                                            finalTargetCenter = n.Center;
-                                            foundValidTarget = true;
-                                        }
+                                        highestTargetScore = currentScore;
+                                        finalTargetCenter = n.Center;
+                                        foundValidTarget = true;
                                     }
                                 }
                             }
                         }
 
-                        // [LOC] [VAL] KONTROL ARAH + CEK FALLBACK JANGKAUAN PETIR
-                        Vector2 lightningVelocity = new Vector2(0f, 14f); // Kecepatan Petir (Default: 14f lurus ke bawah jika tidak ada target)
-                        
+                        Vector2 lightningVelocity = new Vector2(0f, 14f);
                         if (foundValidTarget)
                         {
                             Vector2 shootDirection = finalTargetCenter - NPC.Center;
                             shootDirection.Normalize();
-                            lightningVelocity = shootDirection * 14f; // Menembak serong mengarah ke target yang terkunci
+                            lightningVelocity = shootDirection * 14f;
                         }
                         
                         int pProj = Projectile.NewProjectile(
@@ -234,11 +193,11 @@ namespace TheSanity.NPCs
                             NPC.Center, 
                             lightningVelocity, 
                             ProjectileID.VortexLightning, 
-                            45, // [LOC] [VAL] Base Damage Petir Awan                   
+                            45,                   
                             0f, 
                             Main.myPlayer, 
                             lightningVelocity.ToRotation() 
-                        ); 
+                        );
                         
                         if (pProj < Main.maxProjectiles)
                         {
@@ -254,7 +213,7 @@ namespace TheSanity.NPCs
                     isChargingLightning = false;
                     isFreezingPostLightning = true;
                     postLightningFreezeTimer = 54; 
-                    lightningCooldownTimer = 0; 
+                    lightningCooldownTimer = 0;
                 }
 
                 if (isFreezingPostLightning)
@@ -262,182 +221,191 @@ namespace TheSanity.NPCs
                     postLightningFreezeTimer--;
                     if (postLightningFreezeTimer <= 0)
                     {
-                        isFreezingPostLightning = false; 
-                        chosenCooldown = Main.rand.Next(600, 901); 
+                        isFreezingPostLightning = false;
+                        chosenCooldown = Main.rand.Next(600, 901);
                     }
                 }
             }
 
-            // --- PLATFORM LOGIC BARU (SOLID DARI ATAS, GHOST DARI BAWAH, FIX HIGH-SPEED BYPASS & WORK KE MOUNT) ---
+            // --- GAYA FISIK BADAN UTAMA (SOLID BLOCK / ROCK PILLAR COLLISION STYLE) ---
             bool playerOnTop = false;
             for (int i = 0; i < Main.maxPlayers; i++)
             {
                 Player player = Main.player[i];
                 if (player.active && !player.dead)
                 {
-                    // Cek Jarak Horizontal: Memastikan player berada di area lebar awan
-                    if (player.position.X + player.width > NPC.position.X && player.position.X < NPC.position.X + NPC.width)
+                    // Cek apakah player sedang di-hook oleh awan ini
+                    bool isThisPlayerHooked = false;
+                    for (int j = 0; j < Main.maxProjectiles; j++)
                     {
-                        float playerBottom = player.position.Y + player.height;
-                        float playerOldBottom = player.oldPosition.Y + player.height;
-
-                        // [PANDUAN BALANCING: DETEKSI TOLERANSI TINGGI JATUH]
-                        // Menggunakan Math.Max agar player yang jatuh super cepat (atau pakai mount) tidak menembus awan dalam 1 frame
-                        float batasDeteksiDinamis = Math.Max(16f, player.velocity.Y + 2f);
-
-                        // Syarat menapak: Player jatuh dari atas awan (velocity.Y >= 0) dan kaki melewati batas atas koordinat awan
-                        if (playerBottom >= NPC.position.Y && playerOldBottom <= NPC.position.Y + batasDeteksiDinamis && player.velocity.Y >= 0)
+                        Projectile proj = Main.projectile[j];
+                        if (proj.active && Main.projHook[proj.type] && proj.owner == i)
                         {
-                            // Ambil kecepatan jatuh/hantaman murni sebelum di-reset ke 0
-                            float kecepatanHantaman = player.velocity.Y;
-
-                            playerOnTop = true;
-                            player.position.Y = NPC.position.Y - player.height;
-                            player.velocity.Y = 0;
-                            player.fallStart = (int)(player.position.Y / 16f); // Meng-negate fall damage total (Pemain aman)
-
-                            // FIX BUG 2 LOCATION: Mengaktifkan status menapak kustom pada ModPlayer agar visual animasi falling dipadamkan
-                            player.GetModPlayer<CloudyPlayerBlackout>().standingOnCloud = true;
-
-                            // Jika menggunakan mount, reset juga flight/jump time internal mount agar tidak glitching
-                            if (player.mount.Active)
+                            CloudyProjectileTracker tracker = proj.GetGlobalProjectile<CloudyProjectileTracker>();
+                            if (tracker.hookedNpcIndex == NPC.whoAmI)
                             {
-                                player.mount.ResetFlightTime(player.velocity.X); // Tweak Perbaikan Error CS7036
+                                isThisPlayerHooked = true;
+                                break;
                             }
+                        }
+                    }
+                    if (isThisPlayerHooked) continue;
 
-                            // Jendela deteksi 0.5 detik (30 Ticks) langsung diaktifkan saat landing
-                            if (landingWindowTimer == 0)
+                    if (player.Hitbox.Intersects(NPC.Hitbox))
+                    {
+                        float overlapX = Math.Min(player.position.X + player.width, NPC.position.X + NPC.width) - Math.Max(player.position.X, NPC.position.X);
+                        float overlapY = Math.Min(player.position.Y + player.height, NPC.position.Y + NPC.height) - Math.Max(player.position.Y, NPC.position.Y);
+
+                        if (overlapX < overlapY)
+                        {
+                            if (player.Center.X < NPC.Center.X)
+                                player.position.X -= overlapX;
+                            else
+                                player.position.X += overlapX;
+                            player.velocity.X = 0;
+                        }
+                        else
+                        {
+                            if (player.Center.Y < NPC.Center.Y)
                             {
-                                landingWindowTimer = 30;
+                                float kecepatanHantaman = player.velocity.Y;
+                                playerOnTop = true;
+                                player.position.Y -= overlapY;
+                                player.velocity.Y = 0;
+                                player.fallStart = (int)(player.position.Y / 16f);
+                                player.GetModPlayer<CloudyPlayerBlackout>().standingOnCloud = true;
+
+                                if (player.mount.Active)
+                                    player.mount.ResetFlightTime(player.velocity.X);
+
+                                if (landingWindowTimer == 0)
+                                    landingWindowTimer = 30;
+
+                                float batasKecepatanHancur = player.mount.Active ? 7.0f : 11.0f;
+                                if (kecepatanHantaman >= batasKecepatanHancur && landingWindowTimer > 0)
+                                    NPC.ai[3] = 1f;
                             }
-
-                            // [PANDUAN BALANCING: BATAS KECEPATAN HANTAMAN UNTUK MENGHANCURKAN AWAN]
-                            // Jika hantaman jatuh biasa atau menggunakan Mount melebihi batas kecepatan ini, awan langsung lenyap.
-                            float batasKecepatanHancur = player.mount.Active ? 7.0f : 11.0f;
-
-                            if (kecepatanHantaman >= batasKecepatanHancur && landingWindowTimer > 0)
+                            else
                             {
-                                NPC.ai[3] = 1f; // Langsung picu hilangnya awan secara estetik
+                                player.position.Y += overlapY;
+                                if (player.velocity.Y < 0)
+                                    player.velocity.Y = 0;
                             }
                         }
                     }
                 }
             }
 
-            // Kurangi timer jendela landing setiap frame
             if (landingWindowTimer > 0)
-            {
                 landingWindowTimer--;
-            }
 
-
-            // --- MEKANIK GRAPPLING HOOK CUSTOM (BISA DIHOOK DARI SEGALA ARAH & DI-ROTASI KE BAWAH AWAN) ---
+            // =====================================================================
+            // --- MEKANIK GRAPPLING HOOK (DENGAN TRACKER & POSTAI UNTUK UPDATE POSISI) ---
+            // =====================================================================
             bool adaHookMenempel = false;
             for (int j = 0; j < Main.maxProjectiles; j++)
             {
                 Projectile proj = Main.projectile[j];
-                // Pastikan projectile adalah Grappling Hook milik player yang aktif
                 if (proj.active && Main.projHook[proj.type])
                 {
-                    // Cek apakah ujung hook menyentuh area kotak tabrak awan
-                    if (proj.Hitbox.Intersects(NPC.Hitbox))
+                    Player playerHook = Main.player[proj.owner];
+                    CloudyProjectileTracker tracker = proj.GetGlobalProjectile<CloudyProjectileTracker>();
+
+                    // Jika hook belum menempel dan mengenai awan, kunci
+                    if (tracker.hookedNpcIndex == -1 && proj.ai[0] == 0f && proj.Hitbox.Intersects(NPC.Hitbox))
                     {
-                        // Paksa status AI hook menjadi '2' (Status internal Terraria yang berarti Hook telah berhasil mengunci/menempel di target)
-                        proj.ai[0] = 2f; 
-                        proj.Center = NPC.Center; // Kunci koordinat ujung tali hook tepat di tengah awan
-                        
+                        tracker.hookedNpcIndex = NPC.whoAmI;
+                        proj.ai[0] = 2f;
+                        proj.Center = NPC.Center;
+                        proj.netUpdate = true;
+                    }
+
+                    // Jika hook menempel pada awan ini
+                    if (tracker.hookedNpcIndex == NPC.whoAmI)
+                    {
                         adaHookMenempel = true;
 
-                        Player playerHook = Main.player[proj.owner];
                         if (playerHook.active && !playerHook.dead)
                         {
-                            // FIX BUG 1 LOCATION & BALANCING PULLING MECHANIC
-                            // Biarkan vanilla hook melakukan tarikan serong/lurus secara mulus terlebih dahulu.
-                            // Kita hanya memaksa posisi terbalik di bawah awan saat player sudah benar-benar dekat dengan inti tubuh awan.
-                            // [VAL] Jarak toleransi radius penarikan sebelum nempel total (Default: 54f piksel)
                             float jarakKeAwan = Vector2.Distance(playerHook.Center, NPC.Center);
                             if (jarakKeAwan < 54f)
                             {
-                                playerHook.position.X = NPC.Center.X - playerHook.width / 2f; // Otomatis center horizontal di bawah awan
-                                playerHook.position.Y = NPC.position.Y + NPC.height + 12f;  // Jarak gantung di bawah awan (12 piksel)
-                                playerHook.velocity = Vector2.Zero;                                          // Amankan pergerakan
+                                // Kunci posisi di bawah awan
+                                playerHook.position.X = NPC.Center.X - playerHook.width / 2f;
+                                playerHook.position.Y = NPC.position.Y + NPC.height + 12f;
+                                playerHook.velocity = Vector2.Zero;
+                            }
+                            else
+                            {
+                                // Tarik ke arah awan
+                                Vector2 arahTarik = NPC.Center - playerHook.Center;
+                                arahTarik.Normalize();
+                                float kecepatanTarik = 14f;
+                                playerHook.velocity = arahTarik * kecepatanTarik;
+                                playerHook.fallStart = (int)(playerHook.position.Y / 16f);
                             }
                         }
                     }
                 }
             }
 
-            // Jika ada hook terdeteksi menempel di awan ini
             if (adaHookMenempel)
             {
                 hookedLifetimeTimer++;
-                // [PANDUAN BALANCING: TIMER AWAN HILANG SAAT DIHOOK (300 Ticks = 5 Detik)]
                 if (hookedLifetimeTimer >= 300)
-                {
-                    NPC.ai[3] = 1f; // Picu fungsi menghilang estetik bawaan code
-                }
+                    NPC.ai[3] = 1f;
             }
             else
             {
-                // Reset timer ke 0 jika player melepaskan hook sebelum 5 detik selesai
                 hookedLifetimeTimer = 0;
             }
 
-
             // --- LOGIKA GERAKAN DINAMIS + ANGIN ---
             if (NPC.ai[1] == 0f)
-            {
-                NPC.ai[1] = Main.rand.NextBool() ? 1f : -1f; 
-            }
+                NPC.ai[1] = Main.rand.NextBool() ? 1f : -1f;
 
             if (NPC.collideX)
             {
-                NPC.ai[1] *= -1f; 
-                NPC.ai[3] = 1f;   
+                NPC.ai[1] *= -1f;
+                NPC.ai[3] = 1f;
             }
 
-            float baseSpeed = 1.8f; 
-            float windPushEffect = Main.windSpeedCurrent * 3.0f; 
+            float baseSpeed = 1.8f;
+            float windPushEffect = Main.windSpeedCurrent * 3.0f;
             float calculatedSpeedX = (NPC.ai[1] * baseSpeed) + windPushEffect;
 
-            if (NPC.ai[1] > 0f && calculatedSpeedX < 0.25f) calculatedSpeedX = 0.25f; 
-            if (NPC.ai[1] < 0f && calculatedSpeedX > -0.25f) calculatedSpeedX = -0.25f; 
+            if (NPC.ai[1] > 0f && calculatedSpeedX < 0.25f) calculatedSpeedX = 0.25f;
+            if (NPC.ai[1] < 0f && calculatedSpeedX > -0.25f) calculatedSpeedX = -0.25f;
 
             NPC.velocity.X = calculatedSpeedX;
 
             if (isChargingLightning || isFreezingPostLightning)
-            {
-                NPC.velocity = Vector2.Zero; 
-            }
+                NPC.velocity = Vector2.Zero;
             else if (playerOnTop)
-            {
-                NPC.velocity = Vector2.Zero; 
-            }
+                NPC.velocity = Vector2.Zero;
         }
 
         public override bool PreDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
         {
             Texture2D texture = TextureAssets.Projectile[ProjectileID.RainCloudRaining].Value;
             int totalFrames = Main.projFrames[ProjectileID.RainCloudRaining];
-            if (totalFrames <= 0) totalFrames = 4; 
+            if (totalFrames <= 0) totalFrames = 4;
             
             int frameHeight = texture.Height / totalFrames;
-            int animatedFrame = (int)(Main.GameUpdateCount / 7) % totalFrames; 
+            int animatedFrame = (int)(Main.GameUpdateCount / 7) % totalFrames;
             Rectangle sourceRectangle = new Rectangle(0, animatedFrame * frameHeight, texture.Width, frameHeight);
             Vector2 textureOrigin = sourceRectangle.Size() * 0.5f;
 
             Color cloudColor = drawColor * (1f - (NPC.alpha / 255f));
             if (Main.raining && Main.cloudAlpha >= 0.5f)
-            {
-                cloudColor = cloudColor * 0.40f; 
-            }
+                cloudColor = cloudColor * 0.40f;
 
             if (isChargingLightning && NPC.ai[3] != 1f)
             {
-                Color glowColor = Color.Cyan * 1f * (1f - (NPC.alpha / 255f)); 
+                Color glowColor = Color.Cyan * 1f * (1f - (NPC.alpha / 255f));
                 Vector2[] outlineOffsets = new Vector2[]
                 {
-                    new Vector2(-3, 0), new Vector2(3, 0), new Vector2(0, -3), new Vector2(0, 3),   
+                    new Vector2(-3, 0), new Vector2(3, 0), new Vector2(0, -3), new Vector2(0, 3),
                     new Vector2(-2, -2), new Vector2(2, -2), new Vector2(-2, 2), new Vector2(2, 2)
                 };
                 foreach (Vector2 offset in outlineOffsets)
@@ -447,12 +415,12 @@ namespace TheSanity.NPCs
             }
 
             spriteBatch.Draw(texture, NPC.Center - screenPos, sourceRectangle, cloudColor, NPC.rotation, textureOrigin, NPC.scale, SpriteEffects.None, 0f);
-            return false; 
+            return false;
         }
     }
 
     // =========================================================================
-    // 2. KODE KONTROL GLOBAL PROJECTILE (SISTEM IDENTITAS INDUK & FACTION NETRAL)
+    // 2. KODE KONTROL GLOBAL PROJECTILE (SISTEM IDENTITAS INDUK & HOOK TRACKER)
     // =========================================================================
     public class CloudyProjectileTracker : GlobalProjectile
     {
@@ -461,6 +429,9 @@ namespace TheSanity.NPCs
         public bool isFromCustomCloud = false;
         public bool isCustomCloudSpark = false;
         private bool hasSpawnedSparks = false;
+
+        // Indeks NPC awan tempat hook menempel (-1 = tidak menempel)
+        public int hookedNpcIndex = -1;
 
         public override void OnSpawn(Projectile projectile, IEntitySource source)
         {
@@ -483,10 +454,8 @@ namespace TheSanity.NPCs
             if ((isFromCustomCloud || isCustomCloudSpark))
             {
                 if (target.type == ModContent.NPCType<SpaceRainCloudNPC>())
-                {
-                    return false; 
-                }
-                return true; 
+                    return false;
+                return true;
             }
             return base.CanHitNPC(projectile, target);
         }
@@ -496,11 +465,8 @@ namespace TheSanity.NPCs
             if (isFromCustomCloud || isCustomCloudSpark)
             {
                 if (isFromCustomCloud)
-                {
-                    target.AddBuff(BuffID.Electrified, 180); 
-                }
+                    target.AddBuff(BuffID.Electrified, 180);
                 
-                // [LOC] [VAL] DURASI HITAM LEGAM PLAYER (180 Ticks = 3 Detik)
                 target.GetModPlayer<CloudyPlayerBlackout>().blackoutTimer = 180;
             }
         }
@@ -510,29 +476,61 @@ namespace TheSanity.NPCs
             if (isFromCustomCloud || isCustomCloudSpark)
             {
                 if (isFromCustomCloud)
-                {
-                    target.AddBuff(BuffID.Electrified, 180); 
-                }
+                    target.AddBuff(BuffID.Electrified, 180);
 
-                // [LOC] [VAL] DURASI HITAM LEGAM NPC (180 Ticks = 3 Detik)
                 if (target.TryGetGlobalNPC(out CloudyNPCBlackout npcBlackout))
-                {
                     npcBlackout.blackoutTimer = 180;
-                }
             }
         }
 
         public override bool OnTileCollide(Projectile projectile, Vector2 oldVelocity)
         {
             if (isFromCustomCloud)
-            {
                 TriggerSparkSpout(projectile);
-            }
             return base.OnTileCollide(projectile, oldVelocity);
         }
 
         public override void PostAI(Projectile projectile)
         {
+            // --- PEMBARUAN POSISI HOOK DAN KONDISI PELEPASAN ---
+            if (Main.projHook[projectile.type] && hookedNpcIndex != -1)
+            {
+                if (hookedNpcIndex >= 0 && hookedNpcIndex < Main.maxNPCs)
+                {
+                    NPC npc = Main.npc[hookedNpcIndex];
+                    if (npc.active && npc.type == ModContent.NPCType<SpaceRainCloudNPC>() && npc.ai[3] != 1f)
+                    {
+                        Player playerHook = Main.player[projectile.owner];
+                        // Lepas jika tombol lompat, mount, atau player mati/tidak aktif
+                        if (playerHook.controlJump || playerHook.mount.Active || !playerHook.active || playerHook.dead)
+                        {
+                            hookedNpcIndex = -1;
+                            projectile.ai[0] = 1f;
+                            projectile.netUpdate = true;
+                            return;
+                        }
+                        // Perbarui posisi hook ke tengah awan
+                        projectile.Center = npc.Center;
+                        projectile.ai[0] = 2f;
+                        projectile.netUpdate = true;
+                    }
+                    else
+                    {
+                        // Awan tidak aktif/mati, lepaskan
+                        hookedNpcIndex = -1;
+                        projectile.ai[0] = 1f;
+                        projectile.netUpdate = true;
+                    }
+                }
+                else
+                {
+                    hookedNpcIndex = -1;
+                    projectile.ai[0] = 1f;
+                    projectile.netUpdate = true;
+                }
+            }
+
+            // --- TRIGGER SPARK SAAT PETIR MENYENTUH TANAH ---
             if (isFromCustomCloud && !hasSpawnedSparks && (projectile.velocity.Y == 0f || Collision.SolidCollision(projectile.position, projectile.width, projectile.height)))
             {
                 TriggerSparkSpout(projectile);
@@ -547,28 +545,26 @@ namespace TheSanity.NPCs
             if (Main.netMode != NetmodeID.MultiplayerClient)
             {
                 int spawnCount = Main.rand.Next(4, 7);
-                
                 for (int i = 0; i < spawnCount; i++)
                 {
-                    int chosenProjType = ProjectileID.Spark;
                     Vector2 launchVelocity = new Vector2(Main.rand.NextFloat(-4f, 4f), Main.rand.NextFloat(-6f, -3f));
-                    int sparkDamage = projectile.damage / 2; 
+                    int sparkDamage = projectile.damage / 2;
 
                     int sparkProj = Projectile.NewProjectile(
-                        projectile.GetSource_FromThis(), 
-                        projectile.Center, 
-                        launchVelocity, 
-                        chosenProjType, 
-                        sparkDamage, 
-                        0f, 
+                        projectile.GetSource_FromThis(),
+                        projectile.Center,
+                        launchVelocity,
+                        ProjectileID.Spark,
+                        sparkDamage,
+                        0f,
                         Main.myPlayer
                     );
 
                     if (sparkProj < Main.maxProjectiles)
                     {
                         Main.projectile[sparkProj].hostile = true;
-                        Main.projectile[sparkProj].friendly = true; 
-                        Main.projectile[sparkProj].timeLeft = 120; 
+                        Main.projectile[sparkProj].friendly = true;
+                        Main.projectile[sparkProj].timeLeft = 120;
                         Main.projectile[sparkProj].netUpdate = true;
                     }
                 }
@@ -582,30 +578,24 @@ namespace TheSanity.NPCs
     public class CloudyPlayerBlackout : ModPlayer
     {
         public int blackoutTimer = 0;
-        
-        // FIX BUG 2 LOCATION: Menambahkan field kustom pelacak injakan awan
-        public bool standingOnCloud = false; 
+        public bool standingOnCloud = false;
 
         public override void ResetEffects()
         {
-            standingOnCloud = false; // Reset otomatis setiap awal frame baru
+            standingOnCloud = false;
         }
 
         public override void PostUpdateMiscEffects()
         {
             if (blackoutTimer > 0)
-            {
                 blackoutTimer--;
-            }
         }
 
-        // PERBAIKAN ERROR CS0115: Menggunakan hook resmi PreUpdateMovement menggantikan PostUpdateVelocity
-        // Menginterupsi perhitungan gravitasi tModLoader sesaat sebelum frame render dipilih
         public override void PreUpdateMovement()
         {
             if (standingOnCloud)
             {
-                Player.velocity.Y = 0f; // Sembuhkan jitter visual dan paksa mode Idle / Running biasa
+                Player.velocity.Y = 0f;
                 Player.fallStart = (int)(Player.position.Y / 16f);
             }
         }
@@ -615,14 +605,9 @@ namespace TheSanity.NPCs
             if (blackoutTimer > 0)
             {
                 float intensity = 1f;
-                
-                // [LOC] [VAL] AMBANG FADE OUT PLAYER (Mulai memudar di 30 tick / 0.5 detik terakhir)
                 if (blackoutTimer < 30)
-                {
                     intensity = blackoutTimer / 30f;
-                }
 
-                // Mengubah seluruh Cache data gambar player (Armor, Kulit, Rambut, Aksesoris) menjadi siluet hitam murni
                 for (int i = 0; i < drawInfo.DrawDataCache.Count; i++)
                 {
                     DrawData data = drawInfo.DrawDataCache[i];
@@ -644,9 +629,7 @@ namespace TheSanity.NPCs
         public override void PostAI(NPC npc)
         {
             if (blackoutTimer > 0)
-            {
                 blackoutTimer--;
-            }
         }
 
         public override bool PreDraw(NPC npc, SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
@@ -654,32 +637,21 @@ namespace TheSanity.NPCs
             if (blackoutTimer > 0)
             {
                 float intensity = 1f;
-
-                // [LOC] [VAL] AMBANG FADE OUT NPC (Mulai memudar di 30 tick / 0.5 detik terakhir)
                 if (blackoutTimer < 30)
-                {
                     intensity = blackoutTimer / 30f;
-                }
 
-                // Ambil data tekstur dan hitung titik tengah frame NPC
                 Texture2D texture = TextureAssets.Npc[npc.type].Value;
                 Vector2 drawOrigin = npc.frame.Size() / 2f;
 
-                // Tentukan arah hadap sprite NPC (Flipping)
                 SpriteEffects effects = SpriteEffects.None;
                 if (npc.spriteDirection == 1)
-                {
                     effects = SpriteEffects.FlipHorizontally;
-                }
 
-                // Hitung posisi rendering di layar (Termasuk kompensasi gfxOffY agar mulus saat menaiki block)
                 Vector2 drawPos = npc.Center - screenPos;
                 drawPos.Y += npc.gfxOffY;
 
-                // Campur warna lingkungan saat ini dengan warna hitam pekat berdasarkan intensitas timer
                 Color finalColor = Color.Lerp(drawColor, Color.Black, intensity);
 
-                // Gambar ulang NPC dengan warna siluet hitam legam
                 spriteBatch.Draw(
                     texture,
                     drawPos,
@@ -692,9 +664,9 @@ namespace TheSanity.NPCs
                     0f
                 );
 
-                return false; // Mengembalikan false agar sprite bawaan yang berwarna tidak ikut digambar ulang
+                return false;
             }
-            return true; // Kembali normal jika timer habis
+            return true;
         }
     }
 
@@ -707,11 +679,8 @@ namespace TheSanity.NPCs
         {
             if (Main.raining && (player.ZoneOverworldHeight || player.ZoneSkyHeight))
             {
-                // [LOC] [VAL] PANDUAN BALANCING: LOCK FREKUENSI SPAWN ABSOLUT
-                // Dengan memotong langsung variabel tanpa kondisi perbandingan 'if', kita memaksa game mengabaikan
-                // efek Battle/Calming Potion, Water/Peace Candle, Town NPC, mod lain, dan slider Journey Mode.
-                spawnRate = 140;  // Semakin kecil angkanya, semakin sering siklus spawn diperiksa
-                maxSpawns = 6;    // Batas maksimal slot musuh yang aktif di layar pada biome ini
+                spawnRate = 140;
+                maxSpawns = 6;
             }
         }
     }
