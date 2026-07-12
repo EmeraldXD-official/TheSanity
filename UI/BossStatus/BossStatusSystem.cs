@@ -2,7 +2,7 @@ using Microsoft.Xna.Framework;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq; 
+using System.Linq;
 using Terraria;
 using Terraria.DataStructures;
 using Terraria.ID;
@@ -314,7 +314,7 @@ namespace TheSanity.UI.BossStatus
             if (Main.netMode != NetmodeID.Server) { 
                 var rPlayer = Main.LocalPlayer.GetModPlayer<global::TheSanity.Interface.BossStatusPlayer>();
                 TimeSpan igtDuration = TimeSpan.FromSeconds(session.ElapsedTicks / 60.0);
-                string timeStr = string.Format("{0:02}:{1:02}", igtDuration.Minutes, igtDuration.Seconds);
+                string timeStr = string.Format("{0:00}:{1:00}:{2:00}", (int)igtDuration.TotalHours, igtDuration.Minutes, igtDuration.Seconds);
 
                 string bestWeaponName = "Unknown Source";
                 List<string> recordedWeapons = new List<string>();
@@ -333,7 +333,8 @@ namespace TheSanity.UI.BossStatus
                     }
                 }
 
-                int currentAttemptNumber = BossAttempts.ContainsKey(session.BossName) ? BossAttempts[session.BossName] : 1;
+                // --- PERUBAHAN: AttemptNumber dihitung dari record yang ada per player ---
+                int currentAttemptNumber = rPlayer.BossRecords.Where(r => r.BossName == session.BossName).Count() + 1;
                 int totalPlayerDmg = session.PlayerTotalDamage.ContainsKey(Main.LocalPlayer.name) ? session.PlayerTotalDamage[Main.LocalPlayer.name] : 0;
                 int totalPlayerHitsReceived = session.PlayerHitReceivedTracker.ContainsKey(Main.LocalPlayer.name) ? session.PlayerHitReceivedTracker[Main.LocalPlayer.name] : 0;
 
@@ -370,6 +371,8 @@ namespace TheSanity.UI.BossStatus
                     alasanMatiSaya = session.PlayerDeathReasonTracker[Main.LocalPlayer.name];
                 }
 
+                string worldName = Main.worldName ?? "Unknown World";
+
                 rPlayer.BossRecords.Add(new global::TheSanity.Interface.PlayerBossRecord {
                     BossName = session.BossName,
                     NpcType = session.NpcType,
@@ -384,7 +387,7 @@ namespace TheSanity.UI.BossStatus
                     BossHPPercent = hpPercent,
                     SlowdownPercent = slowdownPercent,
                     AvgFPS = avgFps,
-                    RtaStr = string.Format("{0:02}:{1:02}", rtaDuration.Minutes, rtaDuration.Seconds),
+                    RtaStr = string.Format("{0:00}:{1:00}:{2:00}", (int)rtaDuration.TotalHours, rtaDuration.Minutes, rtaDuration.Seconds),
                     PlayerRankNames = rankNames,
                     PlayerRankDamages = rankDamages,
                     PlayerRankHitsReceived = rankHitsReceived,
@@ -392,7 +395,8 @@ namespace TheSanity.UI.BossStatus
                     PlayerRankDeaths = rankDeaths,
                     GlobalDebuffTrapDamage = session.GlobalDebuffTrapDamage,
                     DeathReason = alasanMatiSaya,
-                    IsPinned = false 
+                    IsPinned = false,
+                    WorldName = worldName
                 });
 
                 rPlayer.HasUnreadRecords = true; 
@@ -436,8 +440,9 @@ namespace TheSanity.UI.BossStatus
                 }
             }
 
+            // --- PERUBAHAN: label Debuff/Trap/etc ---
             double debuffTrapPercent = ((double)session.GlobalDebuffTrapDamage / grandTotalDmg) * 100;
-            LogMessage($"Debuff/Trap: {session.GlobalDebuffTrapDamage} DMG ({debuffTrapPercent:0.0}%)", Color.Tomato);
+            LogMessage($"Debuff/Trap/etc: {session.GlobalDebuffTrapDamage} DMG ({debuffTrapPercent:0.0}%)", Color.Tomato);
 
             LogMessage("----------------------------------------", Color.Gray);
 
@@ -472,18 +477,16 @@ namespace TheSanity.UI.BossStatus
         }
     }
 
-    // --- BARU: TRACKER UNTUK MEREKAM SUMBER ITEM SENJATA PROYEKTIL SAAT DI-SPAWN ---
+    // --- TRACKER UNTUK MEREKAM SUMBER ITEM SENJATA PROYEKTIL SAAT DI-SPAWN ---
     public class BossStatusGlobalProjectile : GlobalProjectile
     {
         public override bool InstancePerEntity => true;
         public string SourceItemName = "";
 
         public override void OnSpawn(Projectile projectile, IEntitySource source) {
-            // Ambil nama senjata jika ditembakkan langsung menggunakan item item use
             if (source is EntitySource_ItemUse itemUse && itemUse.Item != null && !itemUse.Item.IsAir) {
                 SourceItemName = itemUse.Item.Name;
             }
-            // Jika proyektil di-spawn dari proyektil lain (anak proyektil), wariskan nama senjata induknya
             else if (source is EntitySource_Parent parentSource && parentSource.Entity is Projectile parentProj) {
                 if (parentProj.TryGetGlobalProjectile<BossStatusGlobalProjectile>(out var pGlobal)) {
                     SourceItemName = pGlobal.SourceItemName;
@@ -540,7 +543,6 @@ namespace TheSanity.UI.BossStatus
                 Player player = Main.player[projectile.owner];
                 string logSourceString = projectile.Name;
                 
-                // FIX: Membaca tracker penembak asli yang ditangkap saat OnSpawn tanpa menggunakan properti TryGetOwnerSource yang usang
                 if (projectile.TryGetGlobalProjectile<BossStatusGlobalProjectile>(out var pGlobal) && !string.IsNullOrEmpty(pGlobal.SourceItemName)) {
                     logSourceString = $"{projectile.Name} ({pGlobal.SourceItemName})";
                 }

@@ -1,0 +1,516 @@
+====================================================================
+ PANDUAN PEMAKAIAN - TheSanity.UI.DialogueSystem
+ (UIDialogueBox, DialogueLine, DialogueTheme, DialogueHistory, dkk)
+====================================================================
+
+DAFTAR ISI
+----------
+1. Setup awal (wiring dasar)
+2. Cara buka dialog (Open, format DialogueLine P1/P2)
+3. BGM / TypingSound / SoundEffect (rantai warisan & "NONE")
+4. Event buat di-hook (OnOpened, OnClosed, dkk)
+5. Kontrol manual (Next, Previous, Close, Skip, dsb)
+6. Tema warna & Palet
+7. DialogueClientConfig (setting yang muncul di Mod Config)
+8. Dialogue History (riwayat + GUI-nya, kesimpen PER-KARAKTER, cara GESER POSISI)
+9. Timer Dialog (durasi per-baris, garis indikator, hook)
+10. Efek Ambient per-Tema (daun, darah, ember, dst)
+11. Tampilan tombol & Name Tag (UPDATE terbaru)
+12. Catatan tambahan / gotcha
+
+
+====================================================================
+1. SETUP AWAL (WIRING DASAR)
+====================================================================
+Lihat contoh lengkap di DialogueUISystem_Example.cs. Intinya, di dalam
+sebuah ModSystem:
+
+    public UIDialogueBox DialogueBox;
+    private UserInterface _dialogueInterface;
+    private DialogueUIState _dialogueState;
+
+    private UserInterface _historyInterface;
+    private UIDialogueHistoryState _historyState;
+    private bool _historyOpen = false;
+
+    public override void Load()
+    {
+        if (Main.dedServ) return;
+
+        DialogueBox = new UIDialogueBox();
+        DialogueBox.Left.Set(-340, 0.5f);  // anchor tengah-horizontal; makin negatif = makin ke KIRI
+        DialogueBox.Top.Set(430, 0f);
+
+        _dialogueState = new DialogueUIState(DialogueBox);
+        _dialogueState.Activate();
+        _dialogueInterface = new UserInterface();
+        _dialogueInterface.SetState(_dialogueState);
+
+        _historyState = new UIDialogueHistoryState();
+        _historyState.Activate();
+        _historyInterface = new UserInterface();
+    }
+
+Jangan lupa panggil _dialogueInterface.Update() / .Draw() di
+UpdateUI() / ModifyInterfaceLayers() - contoh lengkapnya sudah ada
+di DialogueUISystem_Example.cs, tinggal copy-paste & sesuaikan nama
+layer/mod kamu.
+
+
+====================================================================
+2. CARA BUKA DIALOG
+====================================================================
+Bikin List<DialogueLine>, tiap DialogueLine punya P1 (kiri) dan/atau
+P2 (kanan, otomatis di-mirror).
+
+    var lines = new List<DialogueLine>
+    {
+        new DialogueLine
+        {
+            P1 = new SpeakerData
+            {
+                Active   = true,
+                Nametag  = "Sanity",
+                // Icon  = ModContent.Request<Texture2D>("Path/Ke/Texture"),
+                IconBleed = false,             // true = icon nembus ke atas border
+                Dialogue = "Halo!",
+            },
+            P2 = new SpeakerData
+            {
+                Active   = true,
+                Nametag  = "Traveler",
+                Dialogue = "",                 // kosong = P2 cuma nongol diam (opacity redup)
+            },
+        },
+    };
+
+    DialogueBox.Open(lines);          // buka dari baris index 0
+    DialogueBox.Open(lines, 2);       // atau langsung mulai dari baris ke-3
+
+Field penting di SpeakerData:
+- Active           : tampil atau tidak sama sekali di baris ini
+- Nametag          : nama yang muncul di name tag
+- Icon              : Asset<Texture2D>, null = kotak icon tetap kegambar tapi kosong
+- IconBleed        : icon nembus ke atas border panel atau nggak
+- IconOffsetX/Y    : null = auto-center. X positif = geser kanan,
+                      Y positif = geser bawah (Y negatif = ke atas)
+- Dialogue         : teks yang tampil kalau dia yang "berbicara"
+- IconOpacityOverride / NameOpacityOverride : override manual opacity
+  (null = ikut default sistem: 1f kalau ngomong, 0.3f kalau diam -
+  default diam ini bisa diubah lewat DialogueBox.InactiveSpeakerOpacity)
+- SpeaksFirst (P2First) : kalau P1 & P2 dua-duanya ngisi Dialogue di
+  baris yang sama, field ini di P2 yang menentukan siapa duluan yang
+  dianggap "ngomong" (pengaruh ke opacity).
+
+Siapa yang lagi "berbicara" ditentukan otomatis lewat
+DialogueLine.IsP2Speaking() / GetActiveText() - kamu ga perlu pikirin
+manual, sistem baca dari isi Dialogue tiap sisi.
+
+Field penting di DialogueLine sendiri (di luar P1/P2):
+- TimerDuration : float? nullable. null = ikut DefaultTimerDuration
+  punya DialogueBox (default 15 detik). Kasih nilai <= 0 kalau mau
+  timer OFF khusus baris ini. Detail lengkap ada di bagian 9.
+- InfiniteTime : bool (default false). True = waktu baris ini GA BISA
+  HABIS SENDIRI sama sekali, cuma lanjut kalau di-Next() manual. Kalau
+  True, TimerDuration di baris yang sama diabaikan. Detail di bagian 9.
+
+
+====================================================================
+3. BGM / TYPINGSOUND / SOUNDEFFECT
+====================================================================
+Tiga field di DialogueLine ini, KECUALI SoundEffect, memakai aturan
+"rantai warisan":
+
+    null              -> ikut nilai dari baris sebelumnya (inherit)
+    "NONE" (bebas besar-kecil huruf) -> berhenti/kosong mulai baris ini
+    "path/string lain" -> ganti ke itu, berlaku terus sampai diubah lagi
+
+    new DialogueLine { BGM = "TheSanity/Music/EmeraldTheme", ... }   // ganti musik
+    new DialogueLine { BGM = null, ... }                              // lanjut musik lama
+    new DialogueLine { BGM = DialogueLine.NoneToken, ... }            // musik stop
+
+SoundEffect BEDA SENDIRI: bukan warisan, cuma bunyi SEKALI saat baris
+itu pertama kali tampil.
+
+KeepBgmAfterClose (dulu "UnchangeBGM"): set true kalau musik harus
+tetap lanjut muter walau box-nya di-Close().
+
+
+====================================================================
+4. EVENT BUAT DI-HOOK
+====================================================================
+    DialogueBox.OnOpened        += box => { ... };
+    DialogueBox.OnClosed        += box => { ... };
+    DialogueBox.OnEntryChanged  += (box, index) => { ... }; // tiap baris baru tampil, termasuk saat Open()
+    DialogueBox.OnNextPressed   += box => { ... };
+    DialogueBox.OnPreviousPressed += box => { ... };
+
+    // ---- event TIMER (baru - lihat bagian 9 buat detail lengkap) ----
+    DialogueBox.OnTimerStarted  += box => { ... };            // pas timer baris baru mulai
+    DialogueBox.OnTimerTick     += (box, secondsLeft) => { ... }; // tiap frame timer jalan
+    DialogueBox.OnTimerExpired  += box => { ... };            // pas waktu abis (sebelum auto-advance)
+
+Contoh pemakaian nyata: DialogueUISystem_Example.cs pakai
+OnEntryChanged buat otomatis mencatat tiap baris yang tampil ke
+DialogueHistoryManager (lihat bagian 8), dan juga kasih contoh
+subscribe OnTimerExpired / OnTimerTick.
+
+
+====================================================================
+5. KONTROL MANUAL
+====================================================================
+    DialogueBox.Next();                    // pindah baris berikutnya (auto Close() kalau sudah baris terakhir)
+    DialogueBox.Previous();                // baris sebelumnya
+    DialogueBox.Close();                   // tutup (jalanin animasi tutup, reverse dari animasi buka)
+    DialogueBox.CompleteTypingInstantly(); // paksa selesaikan animasi ketik baris SEKARANG saja
+    DialogueBox.ToggleSkipTyping();        // ON/OFF mode skip-ketik permanen (baris ini & seterusnya)
+    DialogueBox.IsSkipTypingOn             // baca status skip saat ini
+    DialogueBox.SetText("Teks baru");      // ganti teks baris aktif on-the-fly (mis. buat teks dinamis)
+
+Tombol Next(">>>")/Previous("<<<")/Skip(">>") di UI sudah otomatis
+manggil method-method ini sendiri kalau di-klik player - kamu cuma
+perlu manggil manual kalau mau trigger dari kode (misal auto-advance
+lewat timer, atau tombol custom).
+
+
+====================================================================
+6. TEMA WARNA & PALET
+====================================================================
+10 tema siap pakai ada di DialogueThemes (DarkRetro, Dark, Blood,
+YellowOrangeSunset, GreenForest, BlueOcean, WhiteMoon, PurpleRoyal,
+CyberNeon, DesertSand). Default = ikut pilihan player di Mod Config,
+KECUALI kamu paksa lewat kode:
+
+    DialogueBox.SetTheme(DialogueThemes.Blood);   // paksa 1 tema penuh
+    DialogueBox.ClearForcedTheme();                // balikin ke pilihan player lagi
+
+Override satu warna saja (tetap di atas tema aktif):
+    DialogueBox.SetBackgroundColor(Color.Black);
+    DialogueBox.SetOutlineColor(new Color(200,0,0));
+    DialogueBox.SetNameTextColor(Color.Gold);
+    // dst: SetIconBackgroundColor, SetNameBarColor, SetDialogueTextColor, SetButtonColor
+
+PALET WARNA (fitur "hue-shift seluruh tema"):
+Hook cukup kasih 1 warna, SELURUH slot warna tema ikut geser Hue-nya
+ke warna itu, tapi Saturation & Lightness asli tiap elemen tetap
+dipertahankan. Jadi "Dark Retro" + palet "Red" hasilnya "Dark Red"
+(tetap gelap), bukan merah nyala norak.
+
+    DialogueBox.SetPaletteColorByName("Red");     // pakai nama: Red, Orange, Yellow, Green,
+                                                    // Blue, Purple, Pink, Cyan, Teal, White,
+                                                    // Black, Gray, Brown, Gold, Silver,
+                                                    // Magenta, Lime, Indigo (case-insensitive)
+    DialogueBox.SetPaletteColorRGB(new Color(255,80,80)); // atau RGB manual
+    DialogueBox.ClearPaletteColor();               // matikan efek palet
+
+Catatan: kalau nama & RGB dua-duanya ke-set, NAMA yang menang. Warna
+garis indikator timer (TimerBarColor, lihat bagian 9) ikut kegeser
+juga sama palet ini, jadi tetap konsisten sama tema hasil palet-nya.
+
+
+====================================================================
+7. DIALOGUECLIENTCONFIG (MOD CONFIG)
+====================================================================
+Otomatis muncul di menu Mod Config Terraria, ga perlu register manual.
+Isinya (bisa diubah player sendiri, atau jadi nilai fallback kalau
+hook ga pernah maksa lewat kode):
+
+- Theme                       : dropdown 10 tema (dipakai kalau hook
+                                 ga pernah panggil SetTheme())
+- EnableSkipTypingButton      : tampilkan/sembunyikan tombol ">>"
+- SkipTypingByDefault         : tiap dialog baru langsung skip-ketik
+- TypingSpeed (5-200)         : karakter per detik animasi ketik
+- DisableOpenCloseAnimation   : matikan animasi buka/tutup (instan)
+
+
+====================================================================
+8. DIALOGUE HISTORY (RIWAYAT + GUI-NYA)
+====================================================================
+-- Data (kelas statis DialogueHistoryManager) --
+
+    DialogueHistoryManager.Add(speakerName, text);   // biasanya otomatis
+                                                       // lewat OnEntryChanged
+                                                       // (lihat contoh di
+                                                       // DialogueUISystem_Example.cs)
+    DialogueHistoryManager.Remove(record);
+    DialogueHistoryManager.TogglePin(record);
+    DialogueHistoryManager.GetSorted();  // pinned dulu (baru->lama), lalu sisanya baru->lama
+    DialogueHistoryManager.Clear();
+
+>>> UPDATE: OTOMATIS ANTI-DUPLIKAT <<<
+Kalau Add() dipanggil buat baris yang PERSIS SAMA (speaker sama & teks
+sama) kayak salah satu yang udah ada di riwayat, sistem GA bikin entri
+baru/duplikat. Entri lama itu cukup di-refresh Timestamp-nya (jadi naik
+lagi ke paling atas di GetSorted()), status Pin-nya juga tetap
+dipertahankan. Jadi kalau pemain ngobrol ulang sama NPC yang sama &
+dapet baris dialog yang sama persis, riwayatnya ga numpuk jadi banyak
+baris identik - tetap 1 entri aja.
+
+>>> UPDATE: SEKARANG OTOMATIS KESIMPEN PER-KARAKTER <<<
+Riwayat dialog SEKARANG otomatis ikut ke-save & ke-load ke save file
+PLAYER (karakter), bukan cuma nyimpen selama 1 sesi main doang lagi.
+Jadi kalau kamu keluar world terus masuk lagi PAKAI KARAKTER YANG SAMA
+(world boleh beda, karakternya yang harus sama), riwayat obrolannya
+masih ada persis kayak sebelum keluar.
+
+Yang ngerjain ini: kelas DialogueHistoryPlayer (ModPlayer) di file
+DialogueHistory.cs - otomatis kepanggil sendiri sama tModLoader pas
+SaveData()/LoadData(), GA PERLU wiring tambahan apapun dari kamu,
+cukup pastiin file DialogueHistory.cs ikut di-include ke project.
+
+Poin penting:
+- Per-KARAKTER, bukan per-world: ganti karakter = riwayat ikut beda
+  (mulai dari kosong lagi kalau karakter itu belum pernah ngobrol).
+  Riwayat karakter A ga bakal ke-mix ke karakter B.
+- Client-only: cuma diproses buat local player (biar di multiplayer
+  save/load punya player lain ga nabrak sama punya kamu, soalnya
+  DialogueHistoryManager.Records itu satu List statis yang dipakai
+  bareng, bukan per-instance ModPlayer).
+- Ada batas DialogueHistoryManager.MaxPersistedRecords (default 300)
+  buat jaga-jaga save file ga bengkak kalau udah main ratusan jam.
+  Yang di-Pin SELALU ikut ke-save duluan; sisanya yang paling lama
+  (dan ga di-Pin) yang dibuang duluan kalau kelebihan batas. Naikin/
+  turunin angka ini sesuka kamu.
+- Record yang KEBUANG karena limit di atas cuma ilang dari yang
+  DI-SAVE ke file - selama sesi berjalan (belum keluar/masuk lagi)
+  semua tetap ada normal di DialogueHistoryManager.Records / GUI-nya.
+
+-- GUI-nya (UIDialogueHistoryState) --
+
+Buka/tutup lewat hotkey (default tombol "H", bisa diganti player di
+menu Keybinds Terraria) - lihat method ToggleHistory() di
+DialogueUISystem_Example.cs sebagai contoh wiring-nya.
+
+>>> UPDATE: SEKARANG BISA DIGESER-GESER <<<
+Panel Riwayat Dialog sudah ditambahin drag-handle. Klik-tahan bar
+judul di paling atas panel ("Riwayat Dialog (tahan & geser di sini)"),
+lalu geser mouse ke posisi yang kamu mau - panelnya ikut pindah.
+Posisi digeser otomatis terkunci di dalam batas layar (ga bisa sampai
+hilang total ke luar layar).
+
+Posisi DEFAULT-nya juga sudah diubah supaya ga nempel mepet ke pojok
+kanan seperti sebelumnya (dulu Left.Set(-260,1f), sekarang
+Left.Set(-250, 0.5f) + Top.Set(90, 0f) - jadi muncul agak ke
+tengah-atas layar).
+
+File yang berubah: UIDialogueHistoryState.cs (kelas UIDialogueHistoryState).
+Kalau mau posisi/ukuran default beda lagi, tinggal ubah dua baris ini
+di OnInitialize():
+
+    _mainPanel.Left.Set(-250, 0.5f);
+    _mainPanel.Top.Set(90, 0f);
+
+Catatan: posisi hasil geser HANYA berlaku sampai game ditutup/UI
+di-reload (belum di-save permanen, beda sama data riwayatnya sendiri
+yang udah otomatis ke-save di atas). Kalau nanti mau posisi panel ini
+ikut kesimpen juga, pola yang sama kayak DialogueHistoryPlayer bisa
+dipakai (simpan _mainPanel.Left.Pixels/_mainPanel.Top.Pixels ke
+TagCompound pas SaveData(), balikin lagi pas OnInitialize()/LoadData()).
+
+
+====================================================================
+9. TIMER DIALOG
+====================================================================
+Tiap baris dialog sekarang punya timer otomatis. Kalau waktu abis,
+DialogueBox otomatis pindah ke baris berikutnya (Next()) sendiri -
+sama kayak player nge-klik tombol ">>>", termasuk auto-Close() kalau
+itu baris terakhir.
+
+-- Indikator visual --
+Ada garis tipis di bagian PALING BAWAH panel (tepat sebelum border
+bawah) yang mengecil dari kiri-penuh ke kosong seiring waktu jalan.
+Warnanya otomatis ikut DialogueTheme.TimerBarColor (per tema beda -
+default-nya sama kayak warna outline tema itu kalau ga di-custom).
+Kalau timer buat baris itu di-OFF-in, garis ini otomatis ga digambar
+sama sekali.
+
+-- Cara atur durasi --
+Default GUI = 15 detik per baris (DialogueBox.DefaultTimerDuration).
+Bisa di-override PER-BARIS lewat DialogueLine.TimerDuration:
+
+    new DialogueLine
+    {
+        TimerDuration = 10f,   // baris ini dikasih waktu 10 detik
+        P1 = new SpeakerData { ... },
+    }
+
+    new DialogueLine
+    {
+        TimerDuration = 0f,    // <= 0 -> timer OFF, baris ini nunggu klik manual doang
+        P1 = new SpeakerData { ... },
+    }
+
+    new DialogueLine
+    {
+        // TimerDuration ga diisi (null) -> ikut DefaultTimerDuration box (15 detik / custom kamu)
+        P1 = new SpeakerData { ... },
+    }
+
+Ganti default global (berlaku ke semua baris yang TimerDuration-nya null):
+
+    DialogueBox.DefaultTimerDuration = 8f;
+
+-- InfiniteTime (waktu ga bisa habis sendiri) --
+Selain TimerDuration <= 0, ada juga field khusus DialogueLine.InfiniteTime
+yang lebih eksplisit buat kasus "baris ini nunggu keputusan player, jangan
+di-auto-advance sama sekali kecuali di-Next() manual":
+
+    new DialogueLine
+    {
+        InfiniteTime = true, // waktu ga akan pernah habis sendiri di baris ini,
+                              // garis indikator timer juga ga digambar sama sekali.
+                              // Baris cuma lanjut kalau di-Next() manual (klik ">" / lewat kode).
+        P1 = new SpeakerData { ... },
+    }
+
+Catatan: kalau InfiniteTime = true, TimerDuration di baris yang sama
+diabaikan (ga dipakai sama sekali) - jadi kamu ga perlu ngisi keduanya.
+
+Matiin auto-advance-nya kalau ga mau timer otomatis pindah baris
+(garis indikator tetap jalan & event tetap kepanggil, tapi Next()
+ga otomatis dipanggil - kamu yang handle sendiri lewat OnTimerExpired):
+
+    DialogueBox.TimerAutoAdvanceOnExpire = false;
+
+-- Kontrol manual dari kode --
+    DialogueBox.PauseTimer();          // jeda sementara (garis berhenti mengecil)
+    DialogueBox.ResumeTimer();         // lanjutin lagi dari sisa waktu terakhir
+    DialogueBox.ResetTimer();          // restart timer baris aktif dari awal lagi
+    DialogueBox.StopTimer();           // matiin total buat baris aktif (garis hilang)
+    DialogueBox.SetTimerDuration(15f); // paksa durasi custom langsung, override semuanya (termasuk override InfiniteTime)
+
+-- Baca status / hook dari luar --
+    DialogueBox.TimerRemaining   // float, sisa detik baris aktif sekarang
+    DialogueBox.TimerTotal       // float, total durasi baris aktif
+    DialogueBox.IsTimerRunning   // bool, true kalau lagi jalan & ga di-pause
+
+    DialogueBox.OnTimerStarted += box => { ... };
+    DialogueBox.OnTimerTick    += (box, secondsLeft) => { ... };
+    DialogueBox.OnTimerExpired += box => { ... }; // dipanggil SEBELUM auto-Next()
+
+Semua ini pure hook - kamu bebas mau dipakai apa kagak, ga wajib
+di-subscribe sama sekali kalau emang ga butuh kontrol tambahan.
+
+
+====================================================================
+10. EFEK AMBIENT PER-TEMA
+====================================================================
+Tiap dari 10 tema sekarang punya efek partikel ambient sendiri yang
+otomatis nyala di dalam panel dialog, sesuai DialogueTheme.Effect:
+
+    DarkRetro          -> StaticNoise   (kerlip noise kecil ala TV tabung)
+    Dark                -> (ga ada efek, polos)
+    Blood               -> BloodDrip    (tetesan darah jatuh dari atas)
+    YellowOrangeSunset  -> Embers       (percikan bara naik & bergoyang)
+    GreenForest         -> FallingLeaves(daun jatuh melayang-layang)
+    BlueOcean           -> Bubbles      (gelembung naik dari bawah)
+    WhiteMoon           -> Snowfall     (salju jatuh pelan)
+    PurpleRoyal         -> Sparkle      (kerlip bintang kecil)
+    CyberNeon           -> NeonGlitch   (garis neon kedap-kedip)
+    DesertSand          -> SandDrift    (pasir tertiup dari kiri ke kanan)
+
+Efek ini PURE VISUAL (digambar pakai kotak-kotak kecil, ga butuh
+asset gambar tambahan) dan otomatis ganti begitu tema aktif berubah -
+ga perlu setting apa-apa, tinggal pakai tema yang mana aja / pindah
+tema lewat SetTheme() atau palet, efeknya ikut nyesuain sendiri.
+
+Kalau mau ganti efek 1 tema manual (atau matiin efeknya), tinggal
+ubah field Effect di DialogueTheme sebelum di-set ke DialogueBox:
+
+    var custom = DialogueThemes.GreenForest;
+    custom.Effect = ThemeEffectKind.None;      // matiin efek daun
+    DialogueBox.SetTheme(custom);
+
+Semua jenis efek yang tersedia ada di enum ThemeEffectKind
+(DialogueThemeEffects.cs): None, FallingLeaves, BloodDrip, Embers,
+Bubbles, Snowfall, Sparkle, NeonGlitch, SandDrift, StaticNoise.
+
+
+====================================================================
+11. TAMPILAN TOMBOL, NAME TAG & UKURAN BOX (UPDATE TERBARU)
+====================================================================
+-- Tombol Prev("<")/Skip("S")/Next(">") sekarang punya background --
+Dulu tombol cuma nampilin simbolnya doang tanpa kotak latar. Sekarang
+ada kotak latar tipis di belakang tiap tombol, TAPI opacity-nya
+SENGAJA dibuat lebih tipis dibanding background panel dialog utama
+(sekitar setengahnya) - biar tombol tetap kebaca ada batasnya tanpa
+jadi lebih "tebal"/menonjol dari box dialog-nya sendiri. Warna kotak
+& border tipisnya ikut tema aktif (background & outline tema).
+
+-- Urutan & posisi tombol: digabung jadi satu & di-CENTER --
+Urutan dari kiri ke kanan sekarang: [ < ] [ S ] [ > ] - digabung jadi
+SATU kelompok yang di-CENTER secara horizontal di tengah bawah panel
+(sebelumnya Skip+Prev nempel ke pojok kiri, Next nempel ke pojok kanan,
+kelihatan ga center). Kalau mau atur jarak antar tombol, tinggal ubah
+variabel buttonGap di RecalculateLayout (UIDialogueBox.cs).
+
+-- Simbol tombol di-nudge dikit ke bawah --
+Font bawaan (MouseText) bikin simbol "<" / ">" / "S" keliatan kegeser
+dikit ke atas kalau cuma di-center matematis biasa (efek optik dari
+font metrics-nya). Sekarang ditambahin nudge kecil ke bawah pas gambar
+simbolnya, biar keliatan bener-bener center secara visual di dalam
+kotak tombolnya.
+
+-- Name Tag dinaikkan sedikit lagi --
+Name tag (bar nama miring) sekarang nongol lebih tinggi di atas panel
+dibanding sebelumnya. Diatur lewat UIDialogueBox.NameTagRaiseExtra
+(default 8px) - makin besar angkanya, makin tinggi tag-nya nongol
+dibanding badan panel.
+
+-- Arah kemiringan Name Tag P1 & P2 dibedakan --
+Sebelumnya bentuk tag P1 & P2 dibuat sama persis (cuma beda posisi).
+SEKARANG dibedakan arah miringnya:
+    P1 (kiri)  -> miring ke KIRI di bagian atas, bentuknya kayak "\"
+    P2 (kanan) -> miring ke KANAN di bagian atas, bentuknya kayak "/"
+Ini otomatis, ga perlu setting apa-apa dari hook - cukup isi P1/P2
+seperti biasa dan bentuknya udah kebeda sendiri sesuai sisi masing-masing.
+
+-- Tinggi (Y) panel & icon sekarang TETAP (fixed), cuma lebar (X) yang dinamis --
+Sebelumnya tinggi box ikut membesar/mengecil sesuai jumlah baris teks.
+SEKARANG tinggi panel (dan otomatis ukuran icon kiri/kanan, karena
+ukurannya ngikut tinggi panel) DIBUAT TETAP lewat UIDialogueBox.MinHeight
+(default dinaikkan jadi 190px - "agak besar" sesuai request). Yang masih
+menyesuaikan isi teks cuma LEBAR (X) panel, antara MinWidth s/d MaxWidth.
+Naikin/turunin MinHeight kalau mau box-nya lebih tinggi/pendek lagi.
+Catatan: karena tinggi sekarang fixed, baris teks yang KELEWAT PANJANG
+(banyak baris) berpotensi numpuk mepet ke baris tombol - kalau sering
+kejadian, naikin MinHeight atau perpendek teksnya.
+
+-- Posisi default Dialogue Box - cara geser ke kiri/kanan --
+Posisi default di DialogueUISystem_Example.cs pakai anchor
+tengah-horizontal: DialogueBox.Left.Set(-340, 0.5f). Anchor 0.5f
+artinya "tengah layar", terus -340 itu offset piksel dari titik tengah
+itu (biar box-nya nangkring agak ke kiri-tengah, ga mepet ke pojok kiri
+banget dan ga kelewat ke kanan juga).
+
+Mau geser SELURUH GUI dialogue box lebih ke kiri atau ke kanan lagi?
+Tinggal ubah angka itu doang:
+    - Makin NEGATIF (mis. -340 -> -420) = geser makin ke KIRI
+    - Makin ke arah 0 / positif (mis. -340 -> -200) = geser makin ke KANAN
+Kalau ganti MinWidth/MaxWidth jauh beda dari default, sesuaikan lagi
+angkanya (kira-kira setengah dari lebar box rata-rata kamu).
+
+
+
+====================================================================
+12. CATATAN TAMBAHAN / GOTCHA
+====================================================================
+- Ganti halaman (Next/Previous) TIDAK mengulang animasi buka box,
+  cuma reset animasi ketik teks. Animasi buka lengkap cuma jalan
+  sekali pas Open() pertama kali.
+- IconOffsetX konvensi: positif = ke KANAN. IconOffsetY: positif =
+  ke BAWAH, negatif = ke ATAS.
+- Kalau P1 & P2 dua-duanya Active tapi cuma satu yang ngisi Dialogue,
+  yang ngisi teks otomatis dianggap "sedang bicara" (opacity full),
+  yang lain otomatis redup (InactiveSpeakerOpacity).
+- Semua yang dijelaskan di bagian 6 (tema/palet) itu pure visual,
+  ga ngaruh ke data dialog / history sama sekali - aman dipanggil
+  kapan saja sebelum atau sesudah Open().
+- Timer (bagian 9) jalan per-baris & otomatis restart tiap Next()/
+  Previous()/Open() - kalau baris punya TimerDuration sendiri, itu
+  yang dipakai; kalau null, ikut DefaultTimerDuration box.
+- Efek ambient tema (bagian 10) & garis timer (bagian 9) sama-sama
+  PURE VISUAL, ga ngaruh ke data dialog / timer logic satu sama lain.
+- File baru DialogueThemeEffects.cs WAJIB ikut di-include ke project -
+  isinya enum ThemeEffectKind & renderer partikel yang dipakai
+  DialogueTheme.Effect dan UIDialogueBox.
