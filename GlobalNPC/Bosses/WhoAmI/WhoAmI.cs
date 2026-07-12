@@ -2,97 +2,63 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
 using Terraria;
 using Terraria.DataStructures;
-using Terraria.ID;
-using Terraria.ModLoader;
+using Terraria.GameContent;
 using Terraria.Graphics;
 using Terraria.Graphics.Shaders;
-using System.Reflection;
-using System.Linq;
+using Terraria.ID;
+using Terraria.ModLoader;
+using Luminance.Core.Graphics;
 
 namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 {
-    public class WhoAmISceneEffect : ModSceneEffect
-    {
-        public override SceneEffectPriority Priority => SceneEffectPriority.BossLow;
-        public override bool IsSceneEffectActive(Player player) => NPC.AnyNPCs(ModContent.NPCType<WhoAmI>());
-        public override int Music
-        {
-            get
-            {
-                int bossIndex = NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>());
-                if (bossIndex != -1)
-                {
-                    var boss = Main.npc[bossIndex].ModNPC as WhoAmI;
-                    if (boss != null && (boss.aiState == 100 || boss.aiState == 101 || boss.aiState == 102 || boss.aiState == 2))
-                        return 0;
-                }
-                return MusicLoader.GetMusicSlot(Mod, "Music/WhoAmITheme");
-            }
-        }
-    }
-
-    public class WhoAmICutscenePlayer : ModPlayer
-    {
-        public static float OriginalZoom = 1f;
-        private bool wasCutsceneActive = false;
-
-        public override void PostUpdateBuffs()
-        {
-            int bossIndex = NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>());
-            if (bossIndex != -1)
-            {
-                var boss = Main.npc[bossIndex].ModNPC as WhoAmI;
-                if (boss != null && boss.activePotionType == 1 && Main.npc[bossIndex].target == Player.whoAmI)
-                {
-                    Player.gravDir = -1f;
-                    return;
-                }
-            }
-            Player.gravDir = 1f;
-        }
-
-        public override void ModifyScreenPosition()
-        {
-            if (WhoAmI.IsCutsceneActive)
-            {
-                if (!wasCutsceneActive)
-                {
-                    OriginalZoom = Main.GameZoomTarget;
-                    wasCutsceneActive = true;
-                }
-                Main.screenPosition = WhoAmI.CutsceneCameraTarget - new Vector2(Main.screenWidth / 2f, Main.screenHeight / 2f);
-                if (WhoAmI.CutsceneShakeIntensity > 0f)
-                    Main.screenPosition += Main.rand.NextVector2Circular(WhoAmI.CutsceneShakeIntensity, WhoAmI.CutsceneShakeIntensity);
-                Main.GameZoomTarget = WhoAmI.CutsceneZoom;
-            }
-            else
-            {
-                if (wasCutsceneActive)
-                {
-                    Main.GameZoomTarget = OriginalZoom;
-                    wasCutsceneActive = false;
-                }
-            }
-        }
-    }
-
     [AutoloadBossHead]
-    public class WhoAmI : ModNPC
+    public partial class WhoAmI : ModNPC
     {
         public override string Texture => "TheSanity/GlobalNPC/Bosses/WhoAmI/WhoAmI";
 
-        // Banned weapons: Phantasm ditambahkan
         private static readonly int[] BannedWeapons = new int[] { ItemID.PiercingStarlight, ItemID.Celeb2, ItemID.Phantasm };
 
         public static bool IsCutsceneActive = false;
         public static Vector2 CutsceneCameraTarget = Vector2.Zero;
         public static float CutsceneShakeIntensity = 0f;
-        public static float CutsceneZoom = 1f;
 
         private static readonly FieldInfo TransformationMatrixField = typeof(SpriteViewMatrix).GetField("_transformationMatrix", BindingFlags.NonPublic | BindingFlags.Instance);
 
+        // ================== FIX: boss ga pernah despawn pas kita mati kebunuh dia ==================
+        // Root cause: NPC.boss = true (SetDefaults) sengaja bikin vanilla EncourageDespawn() jadi
+        // no-op buat NPC ini - flag boss itu "Prevents off-screen despawn" di vanilla. Jadi cabang
+        // "gak ada target valid" di AI() yang manggil NPC.EncourageDespawn(10) gak pernah beneran
+        // ngilangin boss-nya; begitu satu-satunya player mati (atau semua player di server mati),
+        // dia cuma diem/melayang di tempat selama-lamanya karena EncourageDespawn ditolak vanilla.
+        // Fix: hitung sendiri berapa lama berturut-turut gak ada target valid, dan begitu lewat
+        // ambang waktu tertentu, despawn manual & senyap (gak ngedrop loot, sama kayak pola
+        // EndFromDefeatMenu) alih-alih ngandelin EncourageDespawn yang emang gak jalan buat NPC
+        // ber-flag boss.
+        private const int NoValidTargetDespawnDelay = 120; // ~2 detik grace sebelum despawn paksa
+        private int noValidTargetTimer = 0;
+
+        // ================== BALANCING: damage senjata boss dikurangi bertingkat ==================
+        // Threshold ini nentuin seberapa besar damage MENTAH satu serangan (kontak NPC.damage atau
+        // projectile.damage - sebelum defense/modifier lain kepake) buat nentuin persentase
+        // pengurangannya, dipakai bareng di ModifyHitPlayer (kontak) & WhoAmIProjectileGuard
+        // (proyektil senjata yang di-mimic dari player).
+        //   <=50   dmg -> potong 20% (x0.8)
+        //   51-100 dmg -> potong 50% (x0.5)
+        //   101-150 dmg -> potong 80% (x0.2)
+        //   >150   dmg -> potong 90% (x0.1)
+        public static float GetWeaponDamageReductionMultiplier(int rawDamage)
+        {
+            if (rawDamage <= 50) return 0.8f;
+            if (rawDamage <= 100) return 0.5f;
+            if (rawDamage <= 150) return 0.2f;
+            return 0.1f;
+        }
+
+        // Core fields
         private bool initializedCutscene = false;
         private Item activeWeapon;
         private List<Item> weaponPool = new List<Item>();
@@ -111,12 +77,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private int teleportCooldownTimer = 0;
         private int dashAttackCooldownTimer = 0;
 
-        // Potion Logic
+        // Potion
         private int potionCooldownTimer = 300;
         public int activePotionType = 0;
         private int potionDurationTimer = 0;
 
-        // Movement / Combat
+        // Movement smooth
+        private Vector2 smoothVelocity = Vector2.Zero;
+        private float smoothTime = 0.06f;
+        private float maxSpeed = 14f;
+
+        // Combat & patterns
         private Vector2 tacticalTargetOffset;
         private Vector2 dashDirection = Vector2.Zero;
         private float wingFlapCycle = 0f;
@@ -134,8 +105,35 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private int meleeComboStep = 0;
         private int meleeComboTimer = 0;
         private float playerAggressionScore = 0f;
-        private int predictiveDodgeTimer = 0;
         private int lastPlayerHitTimer = 120;
+
+        // Pattern sub-state
+        private int archetypePatternIndex = 0;
+        private int archetypePatternTimer = 0;
+        private bool patternRequiresProjectile = false;
+
+        // Shared scratch fields for the extended pattern set (patterns 4-9, all archetypes)
+        private Vector2 flickerFlankStart = Vector2.Zero;
+        private Vector2 flickerFlankGoal = Vector2.Zero;
+        private Vector2 vortexAnchor = Vector2.Zero;
+        private float patternOrbitAngle = 0f;
+        private Vector2[] crossRainPoints = new Vector2[8];
+        private Vector2 meteorCleaveOrigin = Vector2.Zero;
+        private Vector2 meteorCleaveTarget = Vector2.Zero;
+
+        // ================== FIX: yoyo/boomerang numpuk & ga ilang pas balik ke boss ==================
+        // Proyektil yoyo & boomerang normalnya "ditangkap" balik lewat cek internal game
+        // (owner.itemAnimation == 0, dsb) - tapi owner-nya di sini adalah dummyPlayer palsu
+        // (proxySlot) yang itemAnimation-nya cuma dipakai buat VISUAL swing boss (lihat
+        // bossWeaponSwingTimer), bukan buat nandain "lagi pegang/lepas senjata" yang
+        // sebenarnya. Karena bossWeaponSwingTimer sering ke-refresh sama serangan lain yang
+        // menyusul, dummyPlayer.itemAnimation nyaris nggak pernah bener-bener balik ke 0 pas
+        // yoyo/boomerang-nya nyampe balik - jadi nggak pernah ke-Kill(), numpuk terus (ini
+        // penyebab keduanya: yoyo yang keliatan numpuk di gambar & boomerang yang gak ilang).
+        // Fix-nya: lacak sendiri tiap proyektil yoyo/boomerang yang boss lempar, terus tiap
+        // tick cek manual - begitu udah balik deket boss (lewat masa tenggang biar sempat
+        // "keluar" dulu), paksa Kill() nggak peduli state dummyPlayer-nya gimana.
+        private List<int> activeYoyoBoomerangProjectiles = new List<int>();
 
         // Constants
         private const int STATE_IDLE = 0;
@@ -147,9 +145,77 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private const int STATE_PARRY_STANCE = 6;
         private const int STATE_COUNTER_ATTACK = 7;
         private const int STATE_PREDICTIVE_DODGE = 8;
+        private const int STATE_DESPERATION_CUTSCENE = 103;
 
-        private Player dummyPlayer;
-        private int proxySlot => Main.maxPlayers - 1;
+        // ================== DESPERATION CUTSCENE FIELDS ==================
+        private bool desperationStarted = false;
+        private Vector2 groundTarget = Vector2.Zero;
+        private Vector2 bossFallStartPos = Vector2.Zero;
+        private Vector2 playerFallStartPos = Vector2.Zero;
+        private float fallProgress = 0f;
+        private int cutsceneStage = 0;
+        private float stageTimer = 0f;
+
+        private bool dialogueShown1 = false, dialogueShown2 = false, dialogueShown3 = false;
+
+        // Jarak horizontal antara boss & player pas cutscene desperation (dari titik tengah masing2
+        // ke groundTarget). Diperkecil dari 400 -> lebih deket biar keliatan berhadap-hadapan,
+        // nggak kejauhan kayak di dua ujung layar beda.
+        private const float DespGap = 170f;
+
+        // Speech bubble di atas kepala boss - dipakai supaya dialog kegambar via spriteBatch (PreDraw),
+        // bukan lewat CombatText.NewText yang IKUT KESEMBUNYIIN pas Main.hideUI = true (itu sebabnya
+        // dialog boss nggak pernah muncul selama cutscene desperation, karena hideUI di-set true).
+        private string activeDialogue = null;
+        private float dialogueTimeLeft = 0f;
+        private float dialogueTotalDuration = 0f;
+        private Color dialogueTint = Color.White;
+
+        private float swordScale = 1f;
+        private float targetSwordScale = 1f;
+        private float swordRotation = 0f;
+        private Vector2 swordPosition = Vector2.Zero;
+        private bool swordFullyCharged = false;
+        private float swordTargetAngle = 0f;
+        private float swordChargeWobble = 0f;
+
+        private float swingProgress = 0f;
+        private bool swingStarted = false;
+        private bool swingPaused = false;
+
+        // ================== FIELDS: PUSH-THROUGH (STAGE 6 REDESIGN) & NEW TERRA BLADE THROW ==================
+        // Pedang raksasa hasil rebutan (stage 5) SEKARANG nggak dipakai buat nebas boss langsung.
+        // Player malah MENDORONGnya sampai lepas dari tangan - pedangnya melesat nembus lewat boss
+        // sambil BERPUTAR, lalu berhenti/nancep di tanah DI BELAKANG boss (jadi cuma prop dekorasi
+        // buat sisa cutscene, bukan senjata pembunuh). Posisi akhirnya disimpan terpisah
+        // (pushedSwordRest*) supaya field swordPosition/Rotation/Scale yang lama bisa dipakai ulang
+        // buat animasi pedang BARU di bawah tanpa dua-duanya rebutan satu set field yang sama.
+        private Vector2 pushedSwordRestPosition = Vector2.Zero;
+        private float pushedSwordRestRotation = 0f;
+        private float pushedSwordRestScale = 1f;
+        private bool swordPushedThrough = false;
+
+        // Pedang Terra Blade BARU yang dikeluarkan player abis mendorong pedang lama - digambar
+        // ukuran normal (bukan raksasa) di tangan player, lalu dilempar berputar ke boss buat
+        // beneran ngebunuh dia.
+        private Vector2 newSwordPosition = Vector2.Zero;
+        private float newSwordRotation = 0f;
+        private float newSwordScale = 0f;
+        private bool newSwordVisible = false;
+        // Sudut putaran pedang selagi player memutarnya sendiri di tangan (windup) sebelum
+        // menikam - dipakai di STAGE 11 yang baru (spin-lalu-tikam), lihat catatan di sana.
+        private float newSwordSpinAngle = 0f;
+
+        private float qteBarPosition = 0.5f;
+        private int qteFramesToSurvive = 300;
+        private int qteSurvivedFrames = 0;
+        private int qteClickCount = 0;
+        private bool qteActive = false;
+        private bool qteSuccess = false;
+        private bool qteFailed = false;
+
+        private float glitchIntensity = 0f;
+        private bool executionDone = false;
 
         private enum WeaponArchetype { TrueMelee, ProjMelee, Ranged, Magic, Summon, Whip, Yoyo, Boomerang }
         private WeaponArchetype currentArchetype = WeaponArchetype.TrueMelee;
@@ -159,17 +225,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private float loadoutSpeedMultiplier = 1f;
         private bool isTrueMelee = false;
 
-        private int GetDeterministicRandom(int min, int max)
-        {
-            int seed = (int)(NPC.whoAmI * 1000 + aiTimer * 7 + NPC.life + Main.GameUpdateCount);
-            return new Random(seed).Next(min, max);
-        }
+        private Player dummyPlayer;
+        private int proxySlot => Main.maxPlayers - 1;
 
+        // ---------- SetStaticDefaults ----------
         public override void SetStaticDefaults()
         {
             NPCID.Sets.MustAlwaysDraw[NPC.type] = true;
             NPCID.Sets.BossBestiaryPriority.Add(Type);
-            NPCID.Sets.TrailCacheLength[NPC.type] = 12;
+            NPCID.Sets.TrailCacheLength[NPC.type] = 16;
             NPCID.Sets.TrailingMode[NPC.type] = 3;
         }
 
@@ -203,6 +267,19 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             writer.Write(meleeComboStep);
             writer.Write(parryCooldownTimer);
             writer.Write(lastPlayerHitTimer);
+            writer.Write(archetypePatternIndex);
+            writer.Write(archetypePatternTimer);
+
+            writer.Write(qteBarPosition);
+            writer.Write(qteSurvivedFrames);
+            writer.Write(qteSuccess);
+            writer.Write(qteFailed);
+            writer.Write(executionDone);
+            writer.Write(cutsceneStage);
+            writer.Write(stageTimer);
+            writer.Write(swordScale);
+            writer.Write(swingProgress);
+            writer.Write(fallProgress);
         }
 
         public override void ReceiveExtraAI(System.IO.BinaryReader reader)
@@ -218,6 +295,19 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             meleeComboStep = reader.ReadInt32();
             parryCooldownTimer = reader.ReadInt32();
             lastPlayerHitTimer = reader.ReadInt32();
+            archetypePatternIndex = reader.ReadInt32();
+            archetypePatternTimer = reader.ReadInt32();
+
+            qteBarPosition = reader.ReadSingle();
+            qteSurvivedFrames = reader.ReadInt32();
+            qteSuccess = reader.ReadBoolean();
+            qteFailed = reader.ReadBoolean();
+            executionDone = reader.ReadBoolean();
+            cutsceneStage = reader.ReadInt32();
+            stageTimer = reader.ReadSingle();
+            swordScale = reader.ReadSingle();
+            swingProgress = reader.ReadSingle();
+            fallProgress = reader.ReadSingle();
         }
 
         public override bool? CanBeHitByProjectile(Projectile projectile)
@@ -245,12 +335,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         public override bool CheckDead()
         {
-            if (aiState != 102)
+            if (aiState != STATE_DESPERATION_CUTSCENE && aiState != 102)
             {
                 NPC.life = 1;
                 NPC.dontTakeDamage = true;
                 NPC.damage = 0;
-                aiState = 102;
+                aiState = STATE_DESPERATION_CUTSCENE;
                 aiTimer = 0;
                 NPC.velocity = Vector2.Zero;
                 NPC.netUpdate = true;
@@ -311,6 +401,14 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             lastPlayerHitTimer = 0;
         }
 
+        // BALANCING: potongan damage bertingkat buat kontak langsung boss (NPC.damage) - lihat
+        // GetWeaponDamageReductionMultiplier buat tabel threshold-nya. Damage proyektil senjata
+        // yang di-mimic dari player ditangani terpisah di WhoAmIProjectileGuard.ModifyHitPlayer.
+        public override void ModifyHitPlayer(Player target, ref Player.HurtModifiers modifiers)
+        {
+            modifiers.FinalDamage *= GetWeaponDamageReductionMultiplier(NPC.damage);
+        }
+
         public override void ModifyHitByItem(Player player, Item item, ref NPC.HitModifiers modifiers)
         {
             if (isParrying)
@@ -335,6 +433,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             lastPlayerHitTimer = 0;
         }
 
+        // ======================== MAIN AI ========================
         public override void AI()
         {
             TargetClosestRealPlayer();
@@ -343,10 +442,21 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             {
                 NPC.velocity.Y -= 0.6f;
                 NPC.velocity.X *= 0.95f;
-                NPC.EncourageDespawn(10);
+
+                // NPC.EncourageDespawn(10) sengaja gak dipakai lagi di sini - no-op buat NPC
+                // ber-flag boss (lihat komentar di deklarasi noValidTargetTimer). Timer manual di
+                // bawah ini yang beneran nentuin kapan boss-nya hilang.
+                noValidTargetTimer++;
+                if (noValidTargetTimer >= NoValidTargetDespawnDelay)
+                {
+                    ForceDespawnNoValidTarget();
+                    return;
+                }
+
                 if (IsCutsceneActive) IsCutsceneActive = false;
                 return;
             }
+            noValidTargetTimer = 0;
 
             Player player = Main.player[NPC.target];
             NPC.netAlways = true;
@@ -366,7 +476,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 NPC.Center = player.Center - new Vector2(0, 700);
             }
 
-            if (!isPhase2 && NPC.life < NPC.lifeMax * 0.5f && aiState != 100 && aiState != 101 && aiState != 102)
+            if (!isPhase2 && NPC.life < NPC.lifeMax * 0.5f && aiState != 100 && aiState != 101 && aiState != 102 && aiState != STATE_DESPERATION_CUTSCENE)
             {
                 isPhase2 = true;
                 aiState = 2;
@@ -381,7 +491,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             tacticalDecisionTimer++;
             lastPlayerHitTimer++;
             if (lastPlayerHitTimer > 300) lastPlayerHitTimer = 300;
-
+           
             if (dodgeCooldownTimer > 0) dodgeCooldownTimer--;
             if (manualClickDelayTimer > 0) manualClickDelayTimer--;
             if (burstShotDelay > 0) burstShotDelay--;
@@ -390,11 +500,19 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             if (patternCooldown > 0) patternCooldown--;
             if (parryCooldownTimer > 0) parryCooldownTimer--;
             if (meleeComboTimer > 0) meleeComboTimer--;
+            if (archetypePatternTimer > 0) archetypePatternTimer--;
 
             if (playerAggressionScore > 0 && Main.GameUpdateCount % 30 == 0)
                 playerAggressionScore *= 0.98f;
 
-            HandlePotionLogic(player);
+            if (dialogueTimeLeft > 0f) dialogueTimeLeft -= 1f;
+            else activeDialogue = null;
+
+            if (aiState == STATE_DESPERATION_CUTSCENE)
+            {
+                HandleDesperationCutscene(player);
+                return;
+            }
 
             if (aiState == 100 || aiState == 101 || aiState == 102 || aiState == 2)
             {
@@ -415,12 +533,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             if (isTrueMelee)
             {
                 for (int i = 0; i < BuffID.Count; i++) NPC.buffImmune[i] = true;
-                teleportCooldownTimer = 9999;
+                // Dulu di sini teleportCooldownTimer dipaksa = 9999 lalu di-reset ke 0 begitu
+                // senjata ganti keluar dari true melee (carousel senjata ganti tiap ~3 detik).
+                // Efeknya, cooldown teleport asli ke-skip/ke-reset paksa tiap kali carousel
+                // keluar dari mode melee, jadi teleport keliatan "available lagi" padahal baru
+                // aja dipakai -> teleport berulang yang kerasa nggak jelas. Sekarang teleport
+                // cuma di-skip lewat kondisi !isTrueMelee di bawah, cooldown asli dibiarkan
+                // jalan apa adanya (tidak dipaksa reset).
             }
             else
             {
                 for (int i = 0; i < BuffID.Count; i++) NPC.buffImmune[i] = false;
-                if (teleportCooldownTimer == 9999) teleportCooldownTimer = 0;
             }
 
             if (aiState != STATE_DASH_ATTACK)
@@ -428,9 +551,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             if (bossWeaponSwingTimer > 0) bossWeaponSwingTimer--;
 
+            CleanupReturningYoyoBoomerangs();
+
             float distanceToPlayer = Vector2.Distance(NPC.Center, player.Center);
 
-            if (!isTrueMelee && (distanceToPlayer > 1600f || (distanceToPlayer > 950f && !Collision.CanHitLine(NPC.position, NPC.width, NPC.height, player.position, player.width, player.height))) && teleportCooldownTimer == 0 && aiState != STATE_DASH_ATTACK && aiState != STATE_MELEE_COMBO)
+            if (!isTrueMelee && (distanceToPlayer > 2200f || (distanceToPlayer > 1200f && !Collision.CanHitLine(NPC.position, NPC.width, NPC.height, player.position, player.width, player.height))) && teleportCooldownTimer == 0 && aiState != STATE_DASH_ATTACK && aiState != STATE_MELEE_COMBO)
             {
                 ExecuteGlitchTeleport(player);
             }
@@ -442,9 +567,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             {
                 case STATE_IDLE:
                     NPC.damage = 0;
-                    ExecuteHumanoidMovement(player);
+                    ExecuteSmoothMovement(player);
                     if (patternCooldown <= 0)
-                        SelectCombatPattern(player);
+                        SelectAndExecuteArchetypePattern(player);
                     else
                     {
                         if (currentArchetype != WeaponArchetype.TrueMelee)
@@ -454,7 +579,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
                 case STATE_DODGE:
                     NPC.damage = 0;
-                    if (aiTimer > 12)
+                    if (aiTimer > 15)
                     {
                         aiState = STATE_IDLE;
                         aiTimer = 0;
@@ -494,8 +619,58 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
 
             UpdateProxyPlayerVisuals(player);
+
+            ClampBossPosition(player);
         }
 
+        // ======================== SAFETY NET (ANTI KELUAR MAP) ========================
+        // Boss ini noTileCollide + noGravity, jadi ExecuteGlitchTeleport / ExecuteDashAttack
+        // bisa dorong dia nembus dinding arena kalau lagi apes (player deket pinggir arena/map).
+        // Fungsi ini dipanggil tiap tick (di luar cutscene) buat "narik balik" boss kalau
+        // posisinya kejauhan dari player, plus hard clamp ke batas dunia biar nggak pernah
+        // sampe nyasar ke void di luar map sama sekali.
+        private void ClampBossPosition(Player target)
+        {
+            const float maxDistanceFromPlayer = 900f;
+
+            // FIX: bug "boss kayak tp/dash gajelas" - clamp jarak ini dulu jalan TIAP TICK tanpa
+            // peduli state, padahal ExecuteDashAttack sengaja ngebut sampai 32px/tick (phase 2)
+            // nembus lewat player, yang gampang kelewat 1500px di TENGAH animasi dash. Begitu
+            // kelewat, boss langsung di-snap instan balik ke jarak 1500 - kelihatannya kayak
+            // teleport/glitch acak persis pas lagi dash. Sekarang clamp jarak-ke-player ini
+            // di-skip selama STATE_DASH_ATTACK (durasinya cuma ~35 tick jadi tetap aman); batas
+            // dunia (world bounds) di bawah tetap jalan di semua state buat jaga-jaga terakhir.
+            if (aiState != STATE_DASH_ATTACK)
+            {
+                Vector2 diff = NPC.Center - target.Center;
+                if (diff.Length() > maxDistanceFromPlayer)
+                {
+                    diff.Normalize();
+                    NPC.Center = target.Center + diff * maxDistanceFromPlayer;
+                    NPC.velocity *= 0.2f;
+                    NPC.netUpdate = true;
+                }
+            }
+
+            const float worldMargin = 200f;
+            float minX = worldMargin;
+            float maxX = (Main.maxTilesX * 16f) - worldMargin;
+            float minY = worldMargin;
+            float maxY = (Main.maxTilesY * 16f) - worldMargin;
+
+            Vector2 clampedCenter = NPC.Center;
+            clampedCenter.X = MathHelper.Clamp(clampedCenter.X, minX, maxX);
+            clampedCenter.Y = MathHelper.Clamp(clampedCenter.Y, minY, maxY);
+
+            if (clampedCenter != NPC.Center)
+            {
+                NPC.Center = clampedCenter;
+                NPC.velocity *= 0.2f;
+                NPC.netUpdate = true;
+            }
+        }
+
+        // ======================== CUTSCENES ========================
         private void HandleCutscenes(Player player)
         {
             IsCutsceneActive = true;
@@ -509,7 +684,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 Vector2 targetPos = player.Center - new Vector2(0, 250f);
                 NPC.velocity = (targetPos - NPC.Center) * 0.08f;
                 CutsceneShakeIntensity = 0f;
-                WhoAmI.CutsceneZoom = WhoAmICutscenePlayer.OriginalZoom;
 
                 if (aiTimer == 60) CombatText.NewText(NPC.getRect(), new Color(160, 110, 240), "Hello, my name is...", true);
                 if (aiTimer == 200) CombatText.NewText(NPC.getRect(), new Color(160, 110, 240), "Wait... Who am I? Why am I in this world?", true);
@@ -520,7 +694,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 NPC.velocity *= 0.85f;
                 float progress = MathHelper.Clamp(aiTimer / 360f, 0f, 1f);
                 CutsceneShakeIntensity = progress * 8.5f;
-                WhoAmI.CutsceneZoom = WhoAmICutscenePlayer.OriginalZoom * (1.0f + (progress * 0.45f));
 
                 if (aiTimer == 60) CombatText.NewText(NPC.getRect(), new Color(210, 70, 210), "Why... I look like you?", true);
                 if (aiTimer == 200) CombatText.NewText(NPC.getRect(), new Color(255, 40, 40), "Does that mean this is all your fault?!", true);
@@ -529,11 +702,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             else if (aiState == 2)
             {
                 NPC.velocity *= 0.6f;
-                WhoAmI.CutsceneZoom = WhoAmICutscenePlayer.OriginalZoom;
                 CutsceneShakeIntensity = MathHelper.Lerp(1f, 8f, aiTimer / 140f);
                 NPC.scale = MathHelper.Lerp(1f, 1.6f, aiTimer / 140f);
 
-                if (Main.rand.NextBool(2)) Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.Electric, Main.rand.NextFloat(-3f, 3f), Main.rand.NextFloat(-3f, 3f));
+                if (Main.rand.NextBool(2)) Dust.NewDust(NPC.position, NPC.width, NPC.height, 198, Main.rand.NextFloat(-3f, 3f), Main.rand.NextFloat(-3f, 3f));
                 if (aiTimer == 30) CombatText.NewText(NPC.getRect(), new Color(255, 25, 25), "IS THIS ALL YOU'VE GOT?!", true);
                 if (aiTimer == 90) CombatText.NewText(NPC.getRect(), new Color(180, 30, 255), "BEHOLD MY TRUE POWER!", true);
                 if (aiTimer >= 140) { IsCutsceneActive = false; NPC.dontTakeDamage = false; aiState = STATE_IDLE; aiTimer = 0; NPC.width = (int)(26 * NPC.scale); NPC.height = (int)(46 * NPC.scale); NPC.netUpdate = true; }
@@ -545,98 +717,1038 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 NPC.dontTakeDamage = true;
                 NPC.damage = 0;
                 NPC.alpha = (int)MathHelper.Lerp(0, 255, aiTimer / 160f);
-                if (Main.rand.NextBool(2)) Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.Electric, Main.rand.NextFloat(-3f, 3f), Main.rand.NextFloat(-3f, 3f));
+                if (Main.rand.NextBool(2)) Dust.NewDust(NPC.position, NPC.width, NPC.height, 198, Main.rand.NextFloat(-3f, 3f), Main.rand.NextFloat(-3f, 3f));
                 if (aiTimer >= 160) { for (int i = 0; i < 45; i++) Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.PurpleTorch, Main.rand.NextFloat(-9f, 9f), Main.rand.NextFloat(-9f, 9f), 100, default, 1.8f); NPC.life = 0; NPC.HitEffect(0, 0); NPC.active = false; }
             }
             UpdateCutsceneVisuals(player);
         }
-
-        private void SelectCombatPattern(Player player)
+        // Maksa pose tangan player biar keliatan lagi nahan pedang raksasa di atas kepala.
+        // itemAnimation/itemTime dijaga tetap > 0 tiap frame supaya game nggambar player
+        // dalam pose "sedang pakai item" terus (bukan idle), lengan terangkat ke arah boss.
+        private void ForcePlayerCatchPose(Player player)
         {
-            float dist = Vector2.Distance(NPC.Center, player.Center);
-            bool isClose = dist < 350f;
-            bool playerAttackingRecently = lastPlayerHitTimer < 90;
-            bool isAggressive = playerAggressionScore > 30f;
+            player.direction = (NPC.Center.X < player.Center.X) ? -1 : 1;
+            player.itemAnimation = 2;
+            player.itemTime = 2;
+            player.itemRotation = -MathHelper.PiOver2 * player.direction;
+            player.bodyFrame.Y = player.bodyFrame.Height * 2; // frame lengan terangkat, sesuaikan kalau spritesheet beda
+        }
 
-            bool canParry = parryCooldownTimer == 0 && isClose && playerAttackingRecently;
-            if (canParry)
+        // Titik di mana gagang (hilt) pedang raksasa "digenggam" oleh boss. INI FIXED ke tangan boss,
+        // bukan ke posisi player - supaya pedang keliatan dipegang, bukan "disummon" lalu terbang sendiri.
+        // Bug sebelumnya: posisi pedang dihitung pakai offset yang dikalikan swordScale (bisa sampai
+        // 10x), jadi makin gede pedangnya, makin jauh dia "terbang" dari tangan boss. Sekarang posisi
+        // gagang selalu tetap di tangan boss, dan cuma ROTASI + PANJANG (scale) yang berubah, jadi
+        // pedangnya keliatan bener-bener menjulur/tumbuh dari genggaman boss ke arah player.
+        private Vector2 GetSwordHiltAnchor()
+        {
+            return NPC.Center + new Vector2(NPC.direction * 18f, -34f);
+        }
+
+        // Hitung sudut rotasi supaya pedang (origin di gagang/bawah tekstur) mengarah dari titik hilt
+        // ke titik target manapun. rotation=0 dianggap "lurus ke atas".
+        private float GetAngleTowards(Vector2 from, Vector2 to)
+        {
+            Vector2 dir = to - from;
+            if (dir == Vector2.Zero) return 0f;
+            dir.Normalize();
+            return (float)Math.Atan2(dir.X, -dir.Y);
+        }
+
+        // Titik tangan player yang lagi ke-pose "menahan" (ForcePlayerCatchPose mengangkat lengan ke
+        // arah boss). Dipakai sebagai target ujung pedang, supaya pedang KELIATAN ditahan tepat di
+        // tangan player, bukan mengambang di titik acak di atas kepalanya.
+        private Vector2 GetPlayerHandAnchor(Player player)
+        {
+            int dir = (NPC.Center.X < player.Center.X) ? -1 : 1;
+            return player.Center + new Vector2(dir * 22f, -player.height * 0.6f);
+        }
+
+        // ====================== KALIBRASI JANGKAUAN & ARAH PEDANG ======================
+        // Dua angka ini yang KEMUNGKINAN BESAR perlu di-tweak manual sambil lihat hasilnya
+        // langsung di game, karena tekstur item Terra Blade kemungkinan udah digambar miring
+        // dari sononya (bukan lurus vertikal polos), jadi nggak bisa dihitung murni dari
+        // ukuran piksel tekstur - harus dikalibrasi visual.
+        //
+        // SwordReachPerScaleUnit = berapa pixel jangkauan bilah per 1.0 unit swordScale.
+        //   - Kalau ujung pedang masih berhenti SEBELUM nyampe tangan player -> KECILKAN
+        //     angka ini (misal 34f -> 22f), supaya scale yang dihitung jadi lebih besar.
+        //   - Kalau ujung pedang malah KELEWATAN/terlalu panjang -> BESARKAN angka ini.
+        private const float SwordReachPerScaleUnit = 34f;
+
+        // SwordRotationOffset = koreksi sudut (radian) kalau arah pedang meleset dari target
+        // (misal ujung pedang selalu geser ke arah yang sama, konsisten, bukan acak - itu
+        // tandanya tekstur punya "sudut natural" sendiri yang belum dikompensasi).
+        //   - Coba nilai kecil dulu: 0.2f, -0.2f, 0.4f, -0.4f, MathHelper.PiOver4 (~0.78f),
+        //     -MathHelper.PiOver4, dst, sampai ujungnya pas nunjuk ke tangan player.
+        private const float SwordRotationOffset = 12f;
+
+        // Sesuaikan panjang (scale) pedang raksasa supaya UJUNGnya persis nyampe ke titik target
+        // (tangan player), berapa pun jarak boss-player-nya. Gagang tetap fixed di tangan boss
+        // (swordPosition); cuma scale yang dihitung ulang tiap frame biar nggak kependekan/kepanjangan.
+        private void MatchSwordLengthToHand(Vector2 handTarget)
+        {
+            float desiredLength = Vector2.Distance(swordPosition, handTarget);
+            float neededScale = desiredLength / SwordReachPerScaleUnit;
+            swordScale = MathHelper.Clamp(neededScale, 1f, 100f);
+            targetSwordScale = swordScale;
+        }
+
+        // Nentuin rank berdasarkan jumlah klik valid yang udah didaratkan player selama QTE.
+        // Makin tinggi rank, makin "niat" warnanya (dari abu2 polos -> emas -> pelangi berputar)
+        // dan makin banyak lapisan glow di belakang teksnya.
+        private (string label, Color color, int glowLayers) GetQteRank(int clicks)
+        {
+            if (clicks >= 170) return ("SSS", Color.White, 5); // warna asli di-override rainbow pas digambar
+            if (clicks >= 130) return ("SS", new Color(255, 90, 60), 4);
+            if (clicks >= 90) return ("S", new Color(255, 205, 60), 3);
+            if (clicks >= 55) return ("A", new Color(140, 110, 255), 2);
+            if (clicks >= 25) return ("B", new Color(90, 200, 255), 1);
+            return ("C", new Color(190, 190, 190), 0);
+        }
+
+        // Gambar bubble chat sederhana (kotak + ekor kecil nunjuk ke kepala boss) buat dialog boss,
+        // supaya kelihatan beneran ada "yang ngomong", bukan cuma teks lewat doang. Digambar via
+        // spriteBatch langsung di PreDraw jadi TETAP muncul walau Main.hideUI = true.
+        private void DrawSpeechBubble(SpriteBatch spriteBatch, Vector2 screenPos)
+        {
+            if (string.IsNullOrEmpty(activeDialogue) || dialogueTimeLeft <= 0f) return;
+
+            var font = FontAssets.MouseText.Value;
+            float textScale = 0.92f;
+            float maxLineWidth = 340f;
+
+            List<string> lines = new List<string>();
+            string[] words = activeDialogue.Split(' ');
+            string currentLine = "";
+            foreach (string w in words)
             {
-                int parryChance = 20 + (int)(playerAggressionScore * 0.25f);
-                if (parryChance > 45) parryChance = 45;
-                if (GetDeterministicRandom(0, 100) < parryChance)
+                string test = string.IsNullOrEmpty(currentLine) ? w : currentLine + " " + w;
+                if (font.MeasureString(test).X * textScale > maxLineWidth && !string.IsNullOrEmpty(currentLine))
                 {
-                    aiState = STATE_PARRY_STANCE;
-                    aiTimer = 0;
-                    patternCooldown = 40;
-                    parryCooldownTimer = isPhase2 ? 750 : 900;
+                    lines.Add(currentLine);
+                    currentLine = w;
+                }
+                else currentLine = test;
+            }
+            if (!string.IsNullOrEmpty(currentLine)) lines.Add(currentLine);
+
+            float lineHeight = font.MeasureString("Ay").Y * textScale;
+            float padding = 14f;
+            float bubbleWidth = 0f;
+            foreach (string l in lines) bubbleWidth = Math.Max(bubbleWidth, font.MeasureString(l).X * textScale);
+            bubbleWidth += padding * 2f;
+            float bubbleHeight = lines.Count * lineHeight + padding * 2f;
+
+            // Fade in cepat, fade out di 12 frame terakhir.
+            float alpha = MathHelper.Clamp((dialogueTotalDuration - dialogueTimeLeft) / 8f, 0f, 1f);
+            alpha = Math.Min(alpha, MathHelper.Clamp(dialogueTimeLeft / 12f, 0f, 1f));
+
+            Vector2 headScreenPos = NPC.Top - screenPos + new Vector2(0f, -46f);
+            Vector2 bubbleCenter = headScreenPos - new Vector2(0f, bubbleHeight / 2f);
+            Rectangle bubbleRect = new Rectangle(
+                (int)(bubbleCenter.X - bubbleWidth / 2f),
+                (int)(bubbleCenter.Y - bubbleHeight / 2f),
+                (int)bubbleWidth,
+                (int)bubbleHeight);
+
+            Texture2D pixel = TextureAssets.MagicPixel.Value;
+
+            // Panel bubble utama
+            spriteBatch.Draw(pixel, bubbleRect, null, new Color(20, 14, 30) * 0.82f * alpha, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+
+            // Border tipis warna sesuai tint dialog
+            int bt = 2;
+            spriteBatch.Draw(pixel, new Rectangle(bubbleRect.X - bt, bubbleRect.Y - bt, bubbleRect.Width + bt * 2, bt), null, dialogueTint * alpha, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+            spriteBatch.Draw(pixel, new Rectangle(bubbleRect.X - bt, bubbleRect.Y + bubbleRect.Height, bubbleRect.Width + bt * 2, bt), null, dialogueTint * alpha, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+            spriteBatch.Draw(pixel, new Rectangle(bubbleRect.X - bt, bubbleRect.Y - bt, bt, bubbleRect.Height + bt * 2), null, dialogueTint * alpha, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+            spriteBatch.Draw(pixel, new Rectangle(bubbleRect.X + bubbleRect.Width, bubbleRect.Y - bt, bt, bubbleRect.Height + bt * 2), null, dialogueTint * alpha, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+
+            // Ekor kecil nunjuk turun ke kepala boss (deretan rectangle menyempit = segitiga sederhana)
+            int tailSteps = 10;
+            for (int i = 0; i < tailSteps; i++)
+            {
+                float t = i / (float)tailSteps;
+                int w = (int)MathHelper.Lerp(16f, 2f, t);
+                Rectangle row = new Rectangle((int)(headScreenPos.X - w / 2f), bubbleRect.Y + bubbleRect.Height + i, w, 2);
+                spriteBatch.Draw(pixel, row, null, new Color(20, 14, 30) * 0.82f * alpha, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+            }
+
+            // Teks isi dialog, center per baris
+            for (int i = 0; i < lines.Count; i++)
+            {
+                Vector2 linePos = new Vector2(bubbleCenter.X, bubbleRect.Y + padding + i * lineHeight + lineHeight / 2f);
+                Utils.DrawBorderString(spriteBatch, lines[i], linePos, Color.White * alpha, textScale, 0.5f, 0.5f);
+            }
+        }
+
+        // Set dialog aktif buat digambar sebagai speech bubble di atas kepala boss.
+        private void ShowBossDialogue(string text, Color tint, float durationFrames = 150f)
+        {
+            activeDialogue = text;
+            dialogueTint = tint;
+            dialogueTimeLeft = durationFrames;
+            dialogueTotalDuration = durationFrames;
+        }
+
+        // ======================== DESPERATION CUTSCENE (DODGE/QTE MEKANIK) ========================
+        // Ditulis ulang dari nol: kamera TIDAK zoom sewaktu pedang membesar (cuma pan biasa),
+        // dan matematika QTE dibikin ulang biar spam klik beneran kerasa naikin bar-nya.
+        private void HandleDesperationCutscene(Player player)
+        {
+            IsCutsceneActive = true;
+            NPC.dontTakeDamage = true;
+            NPC.damage = 0;
+
+            player.controlLeft = false;
+            player.controlRight = false;
+            player.controlUp = false;
+            player.controlDown = false;
+            player.controlJump = false;
+            player.controlUseItem = false;
+            player.controlUseTile = false;
+            player.controlThrow = false;
+            player.itemAnimation = 0;
+            player.itemTime = 0;
+            Main.hideUI = true;
+
+            // Zoom dikunci normal sepanjang cutscene ini, kecuali dinaikkan manual di suatu stage.
+
+            // Deteksi klik tunggal (bukan ditahan) supaya "spam klik" beneran berarti nge-klik berkali-kali.
+            bool freshClick = Main.mouseLeft && Main.mouseLeftRelease;
+
+            // ========== STAGE 0: JATUH KE TANAH ==========
+            if (cutsceneStage == 0)
+            {
+                if (!desperationStarted)
+                {
+                    desperationStarted = true;
+                    Vector2 startPos = player.Center;
+                    float groundY = startPos.Y;
+                    for (int y = (int)startPos.Y; y < Main.maxTilesY * 16; y += 2)
+                    {
+                        Point tilePos = new Point((int)(startPos.X / 16), y / 16);
+                        if (WorldGen.SolidTile(tilePos.X, tilePos.Y))
+                        {
+                            groundY = tilePos.Y * 16;
+                            break;
+                        }
+                    }
+                    groundTarget = new Vector2(startPos.X, groundY);
+
+                    // Dua-duanya jatuh dari ATAS ground target (offset Y negatif = di atas, karena
+                    // Y makin besar = makin ke bawah di Terraria). Sebelumnya player offset-nya
+                    // positif (+580) yang artinya start dari BAWAH tanah, makanya keliatan aneh.
+                    bossFallStartPos = groundTarget - new Vector2(DespGap, 600);
+                    playerFallStartPos = groundTarget + new Vector2(DespGap, -600);
+
+                    NPC.Center = bossFallStartPos;
+                    player.Center = playerFallStartPos;
+
+                    CutsceneCameraTarget = groundTarget;
+                    CutsceneShakeIntensity = 0f;
+                    NPC.velocity = Vector2.Zero;
+                    player.velocity = Vector2.Zero;
+                    fallProgress = 0f;
+                    stageTimer = 0f;
+                    dialogueShown1 = dialogueShown2 = dialogueShown3 = false;
+                }
+
+                stageTimer += 1f;
+
+                float fallSpeed = 0.02f + (stageTimer / 300f) * 0.06f;
+                fallProgress += fallSpeed;
+                if (fallProgress > 1f) fallProgress = 1f;
+
+                Vector2 bossTarget = groundTarget - new Vector2(DespGap, 30);
+                Vector2 playerTarget = groundTarget + new Vector2(DespGap, -20);
+                NPC.Center = Vector2.Lerp(bossFallStartPos, bossTarget, fallProgress);
+                player.Center = Vector2.Lerp(playerFallStartPos, playerTarget, fallProgress);
+                CutsceneCameraTarget = Vector2.Lerp(CutsceneCameraTarget, groundTarget, 0.08f);
+
+                // Nggak ada shake selama jatuh - shake cuma muncul pas QTE spam klik (stage 4).
+                CutsceneShakeIntensity = 0f;
+
+                if (Main.rand.NextBool(3))
+                    Dust.NewDust(NPC.Center - new Vector2(20, 20), 40, 40, 198, Main.rand.NextFloat(-2f, 2f), Main.rand.NextFloat(4f, 8f), 100, default, 1.5f);
+
+                if (fallProgress >= 1f || Math.Abs(NPC.Center.Y - groundTarget.Y) < 30f)
+                {
+                    for (int i = 0; i < 60; i++)
+                        Dust.NewDust(NPC.Center - new Vector2(60, 60), 120, 120, DustID.BlueTorch, Main.rand.NextFloat(-10f, 10f), Main.rand.NextFloat(-10f, 10f), 100, default, 2f);
+                    Terraria.Audio.SoundEngine.PlaySound(SoundID.Item14, NPC.Center);
+
+                    NPC.Center = groundTarget - new Vector2(DespGap, 30);
+                    player.Center = groundTarget + new Vector2(DespGap, -20);
+                    cutsceneStage = 1;
+                    stageTimer = 0f;
                     NPC.netUpdate = true;
+                }
+                return;
+            }
+
+            // ========== STAGE 1: DIALOG ==========
+            if (cutsceneStage == 1)
+            {
+                stageTimer += 1f;
+
+                NPC.Center = groundTarget - new Vector2(DespGap, 30);
+                player.Center = groundTarget + new Vector2(DespGap, -20);
+                // Boss ada di KIRI (groundTarget - DespGap) jadi harus menghadap KANAN (+1) ke player,
+                // dan sebaliknya. Sebelumnya kebalik (-1/1) jadi boss keliatan membelakangi player,
+                // yang bikin anchor gagang pedang (NPC.direction*18f) juga sedikit salah arah.
+                NPC.direction = (player.Center.X < NPC.Center.X) ? -1 : 1;
+                dummyPlayer.direction = NPC.direction;
+
+                if (stageTimer >= 30 && !dialogueShown1)
+                {
+                    dialogueShown1 = true;
+                    ShowBossDialogue("This all cannot be happening...", new Color(255, 100, 100), 110f);
+                }
+                if (stageTimer >= 150 && !dialogueShown2)
+                {
+                    dialogueShown2 = true;
+                    ShowBossDialogue("I am undefeatable... but why... why could you defeat me...", new Color(200, 150, 255), 120f);
+                }
+                if (stageTimer >= 280 && !dialogueShown3)
+                {
+                    dialogueShown3 = true;
+                    ShowBossDialogue("Then take THIS!", new Color(100, 200, 255), 100f);
+                }
+
+                if (stageTimer >= 400)
+                {
+                    cutsceneStage = 2;
+                    stageTimer = 0f;
+                    swordScale = 1f;
+                    targetSwordScale = 1f;
+                    swordFullyCharged = false;
+                    swordPosition = GetSwordHiltAnchor();
+                    swordRotation = 0f;
+                    swordChargeWobble = 0f;
+                    activeWeapon = new Item();
+                    activeWeapon.SetDefaults(ItemID.TerraBlade);
+                    NPC.netUpdate = true;
+                }
+                return;
+            }
+
+            // ========== STAGE 2: PEDANG MEMBESAR (TANPA ZOOM) ==========
+            if (cutsceneStage == 2)
+            {
+                stageTimer += 1f;
+
+                NPC.Center = groundTarget - new Vector2(DespGap, 30);
+                player.Center = groundTarget + new Vector2(DespGap, -20);
+
+                targetSwordScale = 1f + stageTimer * 0.04f;
+                if (targetSwordScale > 10f) targetSwordScale = 10f; // Pedang jadi jauh lebih besar
+                swordScale = MathHelper.Lerp(swordScale, targetSwordScale, 0.1f);
+
+                // Gagang pedang TETAP di tangan boss selama charging - cuma panjangnya (scale) yang
+                // nambah, jadi keliatan kayak lagi "menumbuhkan" pedang di tangan, bukan summon di udara.
+                swordPosition = GetSwordHiltAnchor();
+                swordChargeWobble += 0.05f;
+                swordRotation = (float)Math.Sin(swordChargeWobble) * 0.12f; // sedikit bergetar pas ngecas
+
+                // Kamera cuma pan pelan ngikutin titik tengah boss & player, TIDAK zoom sama sekali.
+                Vector2 desiredCamTarget = (NPC.Center + player.Center) * 0.5f;
+                CutsceneCameraTarget = Vector2.Lerp(CutsceneCameraTarget, desiredCamTarget, 0.08f);
+
+                if (Main.rand.NextBool(2))
+                    Dust.NewDust(swordPosition - new Vector2(10, 10), 20, 20, 198, Main.rand.NextFloat(-1f, 1f), Main.rand.NextFloat(-3f, -1f), 100, default, 1.4f);
+
+                if (stageTimer >= 180)
+                {
+                    swordFullyCharged = true;
+                    cutsceneStage = 3;
+                    stageTimer = 0f;
+                    swingProgress = 0f;
+                    swingStarted = false;
+                    swingPaused = false;
+                    NPC.netUpdate = true;
+                }
+                return;
+            }
+
+            // ========== STAGE 3: SWING & TERTAHAN ==========
+            if (cutsceneStage == 3)
+            {
+                stageTimer += 1f;
+
+                NPC.Center = groundTarget - new Vector2(DespGap, 30);
+                player.Center = groundTarget + new Vector2(DespGap, -20);
+                CutsceneCameraTarget = Vector2.Lerp(CutsceneCameraTarget, (NPC.Center + player.Center) * 0.5f, 0.08f);
+
+                if (!swingStarted)
+                {
+                    swingStarted = true;
+                    swingProgress = 0f;
+                    swingPaused = false;
+                }
+
+                if (!swingPaused)
+                {
+                    swingProgress += 0.02f; // Swing cepat
+                    if (swingProgress > 1f) swingProgress = 1f;
+
+                    // Gagang pedang TETAP di tangan boss - yang berubah cuma rotasinya, dari posisi
+                    // "diangkat lurus ke atas" (rotation 0) menuju "mengarah ke player" (swordTargetAngle).
+                    // Ini yang bikin keliatan boss beneran MENGAYUNKAN pedangnya ke player, bukan
+                    // pedangnya kabur/terbang sendiri ke suatu titik acak di udara (bug sebelumnya).
+                    swordPosition = GetSwordHiltAnchor();
+                    Vector2 clashPoint = GetPlayerHandAnchor(player);
+                    swordTargetAngle = GetAngleTowards(swordPosition, clashPoint) + SwordRotationOffset;
+                    float swingEase = 1f - (float)Math.Pow(1f - swingProgress, 3); // ease-out biar hentakan di akhir kerasa
+                    swordRotation = MathHelper.Lerp(-0.5f, swordTargetAngle, swingEase);
+
+                    if (swingProgress >= 0.7f)
+                    {
+                        swingPaused = true;
+                        swordRotation = swordTargetAngle;
+                        // Pedang tertahan mengarah ke player - gagangnya tetap di tangan boss, dan
+                        // panjang pedang (scale) dihitung ulang tiap saat biar UJUNGnya persis
+                        // nyampe ke tangan player, bukan cuma nebak-nebak scale dari charge awal.
+                        swordPosition = GetSwordHiltAnchor();
+                        MatchSwordLengthToHand(clashPoint);
+
+                        CutsceneShakeIntensity = 0f; // shake baru mulai pas QTE spam klik, bukan di momen tertahan ini
+                        Terraria.Audio.SoundEngine.PlaySound(SoundID.Item71, swordPosition);
+                        ForcePlayerCatchPose(player);
+
+                        cutsceneStage = 4;
+                        stageTimer = 0f;
+                        qteActive = true;
+                        qteBarPosition = 0.5f;
+                        qteSurvivedFrames = 0;
+                        qteClickCount = 0;
+                        qteSuccess = false;
+                        qteFailed = false;
+                        qteFramesToSurvive = 1200; // ~20 detik bertahan
+                        NPC.netUpdate = true;
+                    }
+                }
+                return;
+            }
+
+            // ========== STAGE 4: QTE SPAM KLIK (SUDAH DISEIMBANGKAN ULANG) ==========
+            if (cutsceneStage == 4)
+            {
+                NPC.Center = groundTarget - new Vector2(DespGap, 30);
+                player.Center = groundTarget + new Vector2(DespGap, -20);
+                // Gagang tetap di tangan boss, ujung pedang mengarah ke titik clash di atas player.
+                // Ditambah getaran kecil yang makin parah pas bar makin turun (makin kepepet).
+                swordPosition = GetSwordHiltAnchor();
+                float dangerShake = MathHelper.Clamp(1f - qteBarPosition, 0f, 1f);
+                swordRotation = swordTargetAngle + (float)Math.Sin(Main.GameUpdateCount * 0.9f) * 0.02f * dangerShake;
+                CutsceneCameraTarget = (NPC.Center + player.Center) * 0.5f;
+                ForcePlayerCatchPose(player); // dipertahankan tiap frame selama QTE
+                MatchSwordLengthToHand(GetPlayerHandAnchor(player)); // ujung pedang tetap nempel di tangan player
+
+                if (qteActive && !qteSuccess && !qteFailed)
+                {
+                    // Setiap klik SUNGGUHAN (edge, bukan ditahan) ngasih dorongan tetap ke atas.
+                    if (freshClick)
+                    {
+                        string previousRankLabel = GetQteRank(qteClickCount).label;
+                        qteBarPosition += 0.045f;
+                        qteClickCount++;
+                        string currentRankLabel = GetQteRank(qteClickCount).label;
+                        if (currentRankLabel != previousRankLabel)
+                            Terraria.Audio.SoundEngine.PlaySound(new Terraria.Audio.SoundStyle("TheSanity/Sounds/RankTing") { Volume = 0.7f, Pitch = 0.0f }, NPC.Center);
+
+                        ScreenShakeSystem.StartShakeAtPoint(swordPosition, 5f, 0.2f); // shake kecil tiap klik biar berasa "nahan"
+                        for (int i = 0; i < 3; i++)
+                            LuminanceUtilities.SpawnParticle(player.Center + Main.rand.NextVector2Circular(30, 30), Main.rand.NextVector2Circular(1, 1), Color.Gold, 15, 0.8f, ParticleType.Spark);
+                    }
+
+                    // Gravitasi/beban naik pelan-pelan seiring waktu, TAPI jauh lebih ringan dari versi lama
+                    // supaya spam klik ritme normal (~6-8 klik/detik) masih bisa menang.
+                    float progress01 = MathHelper.Clamp(stageTimer / qteFramesToSurvive, 0f, 1f);
+                    float baseDrop = MathHelper.Lerp(0.0018f, 0.006f, progress01);
+                    qteBarPosition -= baseDrop;
+                    qteBarPosition = MathHelper.Clamp(qteBarPosition, 0f, 1f);
+
+                    if (qteBarPosition <= 0.01f) // Terjatuh ke area merah
+                    {
+                        // Bug lama: player langsung dibunuh di sini tanpa ada animasi apa-apa (instant
+                        // death, gak ada feedback visual). Sekarang cuma nge-trigger stage baru yang
+                        // nunjukkin boss narik pedangnya balik ke atas lalu beneran menebas player -
+                        // kill-nya baru terjadi PAS tebasan itu kena (lihat STAGE 8).
+                        qteFailed = true;
+                        qteActive = false;
+                        ShowBossDialogue("PATHETIC.", Color.Red, 90f);
+                        cutsceneStage = 8;
+                        stageTimer = 0f;
+                        swingStarted = false;
+                        swingPaused = false;
+                        swingProgress = 0f;
+                        NPC.netUpdate = true;
+                        return;
+                    }
+
+                    qteSurvivedFrames++;
+                    if (qteSurvivedFrames >= qteFramesToSurvive && qteBarPosition > 0.1f)
+                    {
+                        qteSuccess = true;
+                        qteActive = false;
+                        ShowBossDialogue("YOU OVERPOWERED HIM!", Color.Green, 100f);
+                        Terraria.Audio.SoundEngine.PlaySound(SoundID.Item92, NPC.Center);
+                        cutsceneStage = 5;
+                        stageTimer = 0f;
+                        NPC.netUpdate = true;
+                        return;
+                    }
+                }
+
+                stageTimer += 1f;
+                CutsceneShakeIntensity = 6f + (1f - qteBarPosition) * 12f;
+                // FIX: layar "ngegeser" konsisten ke kanan di detik-detik terakhir QTE (bar rendah).
+                // Penyebabnya StartShakeAtPoint dipanggil TIAP FRAME selama qteBarPosition < 0.3f
+                // (bisa ratusan frame berturut-turut kalau player lama bertahan di zona bahaya).
+                // ScreenShakeSystem mendorong kamera MENJAUH dari titik yang dikasih (swordPosition,
+                // yang nempel di tangan boss di sisi KIRI arena) - jadi tiap kali dipanggil ulang
+                // sebelum shake sebelumnya sempat decay, dorongannya numpuk ke arah yang sama
+                // (menjauh dari boss = ke KANAN) alih-alih terasa sebagai guncangan acak.
+                // Fix: retrigger tiap beberapa frame aja biar ada jeda buat decay, bukan tiap tick.
+                if (qteBarPosition < 0.3f && Main.GameUpdateCount % 10 == 0)
+                    ScreenShakeSystem.StartShakeAtPoint(swordPosition, 16f * (1f - qteBarPosition), 0.5f);
+
+                return;
+            }
+
+            // ========== STAGE 5 (MENANG): PEDANG BERPINDAH TANGAN, BOSS -> PLAYER ==========
+            // Gagang pedang animasinya "berjalan" dari tangan boss ke tangan player (posisi & rotasi
+            // di-lerp), sambil mengecil dari ukuran raksasa charge (~10x) ke ukuran yang masih dramatis
+            // tapi keliatan bisa digenggam player (~3.5x). Ini yang bikin keliatan player BENERAN
+            // ngerebut pedangnya, bukan cuma boss tiba-tiba meledak sendiri.
+            if (cutsceneStage == 5)
+            {
+                stageTimer += 1f;
+
+                NPC.Center = groundTarget - new Vector2(DespGap, 30);
+                player.Center = groundTarget + new Vector2(DespGap, -20);
+                CutsceneCameraTarget = Vector2.Lerp(CutsceneCameraTarget, (NPC.Center + player.Center) * 0.5f, 0.08f);
+                CutsceneShakeIntensity = 0f;
+                NPC.velocity = Vector2.Zero;
+
+                const float transferDuration = 45f;
+                float t = MathHelper.Clamp(stageTimer / transferDuration, 0f, 1f);
+                float ease = 1f - (float)Math.Pow(1f - t, 3);
+
+                Vector2 bossHilt = GetSwordHiltAnchor();
+                Vector2 playerHilt = GetPlayerHandAnchor(player);
+                swordPosition = Vector2.Lerp(bossHilt, playerHilt, ease);
+
+                // FIX: arah pedang di animasi kemenangan (rebut pedang) meleset - lupa pakai
+                // SwordRotationOffset yang dipakai konsisten di stage 3 & 8 buat kalibrasi tekstur.
+                float raisedAngle = GetAngleTowards(playerHilt, NPC.Center) + SwordRotationOffset - 0.6f;
+                swordRotation = MathHelper.Lerp(swordTargetAngle, raisedAngle, ease);
+
+                const float startScale = 10f;
+                const float heldScale = 3.5f;
+                swordScale = MathHelper.Lerp(startScale, heldScale, ease);
+                targetSwordScale = swordScale;
+
+                // Player pelan-pelan pindah dari pose "nahan" ke pose "menggenggam" pedangnya sendiri.
+                player.direction = (NPC.Center.X < player.Center.X) ? -1 : 1;
+                player.itemAnimation = 2;
+                player.itemTime = 2;
+                // FIX: player.itemRotation vanilla pakai konvensi "0 = lurus ke kanan", sedangkan
+                // swordRotation/raisedAngle kita pakai konvensi "0 = lurus ke atas" (lihat
+                // GetAngleTowards). Lerp dari -PiOver2 (udah konvensi kanan, benar) ke raisedAngle
+                // (masih konvensi atas, salah) bikin senjata kecil di tangan player muter ke arah
+                // yang salah di pertengahan sampai akhir animasi - makanya keliatan "kebalik".
+                // Konversi raisedAngle dulu (-PiOver2) biar dua ujung lerp-nya satu konvensi.
+                player.itemRotation = MathHelper.Lerp(-MathHelper.PiOver2, raisedAngle - MathHelper.PiOver2, ease) * player.direction;
+                player.bodyFrame.Y = player.bodyFrame.Height * 2;
+
+                if (Main.rand.NextBool(2))
+                    Dust.NewDust(swordPosition - new Vector2(8, 8), 16, 16, DustID.GoldFlame, Main.rand.NextFloat(-1f, 1f), Main.rand.NextFloat(-2f, 0f), 100, default, 1.2f);
+
+                if (t >= 1f)
+                {
+                    Terraria.Audio.SoundEngine.PlaySound(SoundID.Item29, playerHilt);
+                    ShowBossDialogue("N-no... impossible...", new Color(200, 150, 255), 90f);
+                    cutsceneStage = 6;
+                    stageTimer = 0f;
+                    swingStarted = false;
+                    swingPaused = false;
+                    swingProgress = 0f;
+                    NPC.netUpdate = true;
+                }
+                return;
+            }
+
+            // ========== STAGE 6 (MENANG): PLAYER MENDORONG PEDANG - MELESAT BERPUTAR LEWAT
+            // BOSS, NANCEP DI BELAKANGNYA ==========
+            // Diganti dari versi lama (player langsung nebas boss pakai pedang raksasa hasil
+            // rebutan): sekarang pedang raksasa itu cuma DIDORONG lepas dari tangan player -
+            // melesat NEMBUS/LEWAT boss sambil berputar-putar di udara, terus berhenti/nancep di
+            // tanah DI BELAKANG boss (jadi bukan senjata pembunuhnya, cuma prop). Pembunuhan
+            // sebenarnya baru kejadian di STAGE 10/11 lewat pedang Terra Blade BARU yang
+            // dikeluarkan & dilempar player.
+            if (cutsceneStage == 6)
+            {
+                NPC.Center = groundTarget - new Vector2(DespGap, 30);
+                player.Center = groundTarget + new Vector2(DespGap, -20);
+                CutsceneCameraTarget = (NPC.Center + player.Center) * 0.5f;
+
+                Vector2 playerHilt = GetPlayerHandAnchor(player);
+                player.direction = (NPC.Center.X < player.Center.X) ? -1 : 1;
+                player.itemAnimation = 2;
+                player.itemTime = 2;
+                player.bodyFrame.Y = player.bodyFrame.Height * 2;
+
+                float windupAngle = GetAngleTowards(playerHilt, NPC.Center) + SwordRotationOffset - 0.6f;
+                float pushAngle = GetAngleTowards(playerHilt, NPC.Center) + SwordRotationOffset + 1.0f;
+
+                // Titik istirahat di tanah, DI BELAKANG boss (menjauh dari player), tempat pedang
+                // raksasa ini bakal nancep & berhenti buat sisa cutscene.
+                int pastBossDir = (playerHilt.X < NPC.Center.X) ? 1 : -1;
+                Vector2 restPoint = NPC.Center + new Vector2(pastBossDir * 150f, 40f);
+
+                const int holdDuration = 16;   // ancang-ancang, pedang masih di tangan
+                const int thrustDuration = 10; // dorongan pendek sebelum lepas dari tangan
+                const int flightDuration = 42; // melesat berputar lewat boss sampai ke titik istirahat
+
+                if (!swingStarted)
+                {
+                    swingStarted = true;
+                    swingProgress = 0f;
+                    swingPaused = false;
+                    swordPushedThrough = false;
+                    stageTimer = 0f;
+                }
+
+                if (!swingPaused)
+                {
+                    stageTimer += 1f;
+
+                    if (stageTimer <= holdDuration)
+                    {
+                        // Jeda ancang-ancang - pedang tertahan di posisi terangkat, masih di tangan.
+                        swordPosition = playerHilt;
+                        swordRotation = windupAngle;
+                        swordScale = MathHelper.Lerp(swordScale, 3.8f, 0.15f);
+                        targetSwordScale = swordScale;
+                    }
+                    else if (stageTimer <= holdDuration + thrustDuration)
+                    {
+                        // Dorongan singkat ke arah boss - pedang masih di tangan, cuma nunjukin
+                        // gerakan "mendorong" sebelum beneran dilepas.
+                        float thrustT = MathHelper.Clamp((stageTimer - holdDuration) / thrustDuration, 0f, 1f);
+                        float ease = (float)Math.Pow(thrustT, 2);
+                        swordPosition = playerHilt;
+                        swordRotation = MathHelper.Lerp(windupAngle, pushAngle, ease);
+                        swordScale = MathHelper.Lerp(3.8f, 4.4f, ease);
+                        targetSwordScale = swordScale;
+
+                        if (thrustT >= 1f)
+                        {
+                            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item1, NPC.Center);
+                            ScreenShakeSystem.StartShakeAtPoint(NPC.Center, 14f, 0.4f);
+                            CutsceneShakeIntensity = 14f;
+                        }
+                    }
+                    else if (stageTimer <= holdDuration + thrustDuration + flightDuration)
+                    {
+                        // Lepas dari tangan - melesat NEMBUS boss, berputar-putar kencang di udara,
+                        // sambil mengecil dari raksasa (~4.4x) ke ukuran istirahat (~1.6x).
+                        float flightT = MathHelper.Clamp((stageTimer - holdDuration - thrustDuration) / flightDuration, 0f, 1f);
+                        float ease = 1f - (float)Math.Pow(1f - flightT, 2); // ease-out, melambat pas mau berhenti
+                        swordPosition = Vector2.Lerp(playerHilt, restPoint, ease);
+                        swordRotation += 1.15f; // spin cepat & terus-menerus sepanjang penerbangan
+                        swordScale = MathHelper.Lerp(4.4f, 1.6f, ease);
+                        targetSwordScale = swordScale;
+
+                        // Nyerempet boss pas melintas tengah lintasan - efek kecil biar kerasa
+                        // "lewat", bukan malah nabrak & berhenti di badannya.
+                        if (!swordPushedThrough && flightT >= 0.5f)
+                        {
+                            swordPushedThrough = true;
+                            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item71, NPC.Center);
+                            ScreenShakeSystem.StartShakeAtPoint(NPC.Center, 10f, 0.3f);
+                            for (int i = 0; i < 12; i++)
+                                Dust.NewDust(NPC.Center - new Vector2(10, 10), 20, 20, DustID.Electric, Main.rand.NextFloat(-4f, 4f), Main.rand.NextFloat(-4f, 4f), 100, default, 1.6f);
+                        }
+
+                        if (flightT >= 1f)
+                        {
+                            swingPaused = true; // dipakai sebagai flag "pedang udah nancep & berhenti"
+
+                            // Sudut istirahat akhir yang dikunci - "nancep miring" di tanah, bukan
+                            // masih berputar selamanya.
+                            pushedSwordRestPosition = restPoint;
+                            pushedSwordRestRotation = 0.55f * pastBossDir;
+                            pushedSwordRestScale = 1.6f;
+
+                            Terraria.Audio.SoundEngine.PlaySound(SoundID.Tink, restPoint);
+                            ScreenShakeSystem.StartShakeAtPoint(restPoint, 12f, 0.35f);
+                            for (int i = 0; i < 20; i++)
+                                Dust.NewDust(restPoint - new Vector2(10, 10), 20, 20, DustID.Stone, Main.rand.NextFloat(-3f, 3f), Main.rand.NextFloat(-4f, -1f), 100, default, 1.5f);
+
+                            ShowBossDialogue("W-what are you doing...?", new Color(200, 150, 255), 80f);
+
+                            stageTimer = 0f;
+                            cutsceneStage = 10;
+                            swingStarted = false;
+                            swingPaused = false;
+                            swingProgress = 0f;
+                            NPC.netUpdate = true;
+                            return;
+                        }
+                    }
+
+                    // FIX sama seperti stage 5: itemRotation vanilla konvensinya "0 = kanan",
+                    // swordRotation kita "0 = atas" - kurangi PiOver2 biar konsisten. Cuma berlaku
+                    // selagi pedang masih di tangan player (belum lepas terbang).
+                    if (stageTimer <= holdDuration + thrustDuration)
+                        player.itemRotation = (swordRotation - MathHelper.PiOver2) * player.direction;
+                }
+                return;
+            }
+
+            // ========== STAGE 10 (MENANG): PLAYER MENGELUARKAN PEDANG TERRA BLADE BARU ==========
+            // Setelah pedang raksasa lama nancep di tanah di belakang boss, player ngangkat tangan
+            // dan MEMUNCULKAN pedang Terra Blade baru (ukuran normal) - flourish singkat sebelum
+            // dilempar ke boss di stage berikutnya.
+            if (cutsceneStage == 10)
+            {
+                stageTimer += 1f;
+
+                NPC.Center = groundTarget - new Vector2(DespGap, 30);
+                player.Center = groundTarget + new Vector2(DespGap, -20);
+                CutsceneCameraTarget = (NPC.Center + player.Center) * 0.5f;
+
+                player.direction = (NPC.Center.X < player.Center.X) ? -1 : 1;
+                player.itemAnimation = 2;
+                player.itemTime = 2;
+                player.bodyFrame.Y = player.bodyFrame.Height * 2;
+
+                Vector2 playerHilt = GetPlayerHandAnchor(player);
+                newSwordVisible = true;
+                newSwordPosition = playerHilt;
+
+                const int summonDuration = 22;
+                const int holdDuration = 16;
+
+                if (stageTimer <= summonDuration)
+                {
+                    // Flourish: pedang baru "muncul"/tumbuh dari genggaman player, sedikit berputar
+                    // pas keluar biar kerasa dramatis, bukan cuma pop-in.
+                    float t = MathHelper.Clamp(stageTimer / summonDuration, 0f, 1f);
+                    float ease = 1f - (float)Math.Pow(1f - t, 3);
+                    newSwordScale = MathHelper.Lerp(0f, 1.25f, ease);
+                    newSwordRotation = MathHelper.Lerp(MathHelper.TwoPi * 1.5f, -MathHelper.PiOver2 * (player.direction), ease);
+
+                    if ((int)stageTimer == 1)
+                    {
+                        Terraria.Audio.SoundEngine.PlaySound(SoundID.Item29, playerHilt);
+                        for (int i = 0; i < 3; i++)
+                            LuminanceUtilities.SpawnParticle(playerHilt, Main.rand.NextVector2Circular(2, 2), Color.Gold, 20, 1f, ParticleType.Spark);
+                    }
+                    if (Main.rand.NextBool(2))
+                        Dust.NewDust(playerHilt - new Vector2(6, 6), 12, 12, DustID.GoldFlame, Main.rand.NextFloat(-1f, 1f), Main.rand.NextFloat(-2f, 0f), 100, default, 1.1f);
+                }
+                else if (stageTimer <= summonDuration + holdDuration)
+                {
+                    // Jeda ancang-ancang singkat, pedang baru sudah digenggam penuh, siap dilempar.
+                    newSwordRotation = -MathHelper.PiOver2 * player.direction;
+                    newSwordScale = 1.25f;
+
+                    if ((int)stageTimer == summonDuration + 1)
+                        ShowBossDialogue("W-wait-", Color.Red, 60f);
+                }
+                else
+                {
+                    stageTimer = 0f;
+                    cutsceneStage = 11;
+                    swingStarted = false;
+                    swingPaused = false;
+                    swingProgress = 0f;
+                    newSwordSpinAngle = 0f;
+                    NPC.netUpdate = true;
+                    return;
+                }
+
+                player.itemRotation = (newSwordRotation - MathHelper.PiOver2) * player.direction;
+                return;
+            }
+
+            // ========== STAGE 11 (MENANG): PLAYER MUTER PEDANGNYA LALU MENIKAM BOSS ==========
+            // FIX: sebelumnya di sini pedang cuma di-Lerp lurus dari tangan player ke NPC.Center
+            // (garis lurus) - kelihatannya kayak pedang DILEMPAR horizontal kayak lembing, bukan
+            // player yang menyerang. Sekarang dipecah jadi 2 sub-fase yang beneran kelihatan
+            // seperti player yang menyerang:
+            //   (A) SPIN - pedang berputar penuh DI TANGAN player (orbit kecil di sekitar
+            //       genggaman, kecepatan putar di-ease supaya makin cepat/dramatis) sebagai
+            //       ancang-ancang, player masih diam di tempat.
+            //   (B) THRUST - player sendiri MELANGKAH MAJU sambil menikam lurus ke dada boss
+            //       (pedang tetap nempel di tangan/GetPlayerHandAnchor, bukan lepas terbang
+            //       sendirian) - ini yang beneran "nancep" dan memicu STAGE 12.
+            if (cutsceneStage == 11)
+            {
+                stageTimer += 1f;
+
+                NPC.Center = groundTarget - new Vector2(DespGap, 30);
+                Vector2 playerAnchorPos = groundTarget + new Vector2(DespGap, -20);
+                newSwordVisible = true;
+
+                const int spinDuration = 24;
+                const int thrustDuration = 14;
+
+                if (stageTimer <= spinDuration)
+                {
+                    // ---- FASE A: SPIN DI TANGAN ----
+                    player.Center = playerAnchorPos;
+                    player.direction = (NPC.Center.X < player.Center.X) ? -1 : 1;
+                    CutsceneCameraTarget = (NPC.Center + player.Center) * 0.5f;
+
+                    Vector2 playerHilt = GetPlayerHandAnchor(player);
+                    float t = stageTimer / spinDuration;
+                    float spinSpeed = EaseFloat(0.3f, 1.5f, t, EasingCurves.Quadratic, EasingType.In);
+                    newSwordSpinAngle += spinSpeed;
+                    float spinRadius = 24f;
+                    Vector2 spinOffset = new Vector2((float)Math.Cos(newSwordSpinAngle), (float)Math.Sin(newSwordSpinAngle)) * spinRadius;
+
+                    newSwordPosition = playerHilt + spinOffset;
+                    newSwordRotation = newSwordSpinAngle + MathHelper.PiOver2;
+                    newSwordScale = 1.25f;
+
+                    if ((int)stageTimer % 4 == 0)
+                        LuminanceUtilities.SpawnParticle(newSwordPosition, Vector2.Zero, Color.White, 12, 0.8f, ParticleType.Spark);
+                    if ((int)stageTimer == 1)
+                        Terraria.Audio.SoundEngine.PlaySound(SoundID.Item29, playerHilt);
+
+                    player.itemRotation = (newSwordRotation - MathHelper.PiOver2) * player.direction;
+                    return;
+                }
+                else
+                {
+                    // ---- FASE B: LANGKAH MAJU + TIKAM ----
+                    float t = MathHelper.Clamp((stageTimer - spinDuration) / thrustDuration, 0f, 1f);
+                    float ease = (float)Math.Pow(t, 2); // ease-in - whoosh makin cepat pas mendekati boss
+
+                    Vector2 lungeTarget = NPC.Center + new Vector2(-player.direction * 42f, 0f);
+                    player.Center = Vector2.Lerp(playerAnchorPos, lungeTarget, ease);
+                    CutsceneCameraTarget = (NPC.Center + player.Center) * 0.5f;
+
+                    Vector2 playerHilt = GetPlayerHandAnchor(player);
+                    Vector2 thrustDir = NPC.Center - playerHilt;
+                    if (thrustDir != Vector2.Zero) thrustDir.Normalize();
+                    else thrustDir = new Vector2(player.direction, 0f);
+
+                    newSwordRotation = thrustDir.ToRotation() + MathHelper.PiOver2;
+                    newSwordPosition = Vector2.Lerp(playerHilt, NPC.Center, ease);
+                    newSwordScale = MathHelper.Lerp(1.25f, 1.4f, ease);
+                    player.itemRotation = (newSwordRotation - MathHelper.PiOver2) * player.direction;
+
+                    if ((int)stageTimer % 2 == 0)
+                        LuminanceUtilities.SpawnParticle(newSwordPosition, -thrustDir * 2f, Color.Cyan, 14, 0.9f, ParticleType.Spark);
+
+                    if (!swingPaused && t >= 1f)
+                    {
+                        swingPaused = true; // flag "tikaman udah kena"
+
+                        Terraria.Audio.SoundEngine.PlaySound(SoundID.Item1, NPC.Center);
+                        Terraria.Audio.SoundEngine.PlaySound(SoundID.NPCHit4, NPC.Center);
+                        ScreenShakeSystem.StartShakeAtPoint(NPC.Center, 24f, 0.6f);
+                        CutsceneShakeIntensity = 24f;
+                        for (int i = 0; i < 35; i++)
+                            Dust.NewDust(NPC.Center - new Vector2(20, 20), 40, 40, DustID.Blood, Main.rand.NextFloat(-8f, 8f), Main.rand.NextFloat(-8f, 8f), 100, default, 2f);
+
+                        ShowBossDialogue("GAAAAHHH!!", Color.Red, 90f);
+
+                        stageTimer = 0f;
+                        cutsceneStage = 12;
+                        NPC.netUpdate = true;
+                        return;
+                    }
                     return;
                 }
             }
 
-            if (currentArchetype == WeaponArchetype.Whip)
+            // ========== STAGE 12 (MENANG): BOSS GLITCH & MELEDAK, MATI ==========
+            // (Sebelumnya STAGE 7 - dinomori ulang jadi 12 karena pembunuhan sekarang kejadian
+            // lewat pedang Terra Blade baru yang dilempar di STAGE 11, bukan tebasan langsung
+            // pakai pedang raksasa hasil rebutan.) Pedang baru tetap digambar nancep di dada boss
+            // (ngikutin NPC.Center) selagi dia glitch, biar kelihatan itu yang beneran nembus dia.
+            if (cutsceneStage == 12)
             {
-                if (dist > 350f)
-                    aiState = STATE_IDLE;
-                else
+                newSwordVisible = true;
+                newSwordPosition = NPC.Center;
+                newSwordRotation = 0.4f * ((player.Center.X < NPC.Center.X) ? -1 : 1);
+                newSwordScale = 1.4f;
+
+                if (!executionDone)
                 {
-                    if (GetDeterministicRandom(0, 100) < 70)
-                        aiState = STATE_MELEE_COMBO;
-                    else
-                        aiState = STATE_DASH_ATTACK;
+                    stageTimer += 1f;
+                    glitchIntensity = MathHelper.Min(1f, stageTimer / 60f);
+                    CutsceneShakeIntensity = 25f * glitchIntensity;
+                    ScreenShakeSystem.StartShakeAtPoint(NPC.Center, 25f * glitchIntensity, 1f);
+
+                    // Efek glitch
+                    if (stageTimer % 2 == 0)
+                    {
+                        NPC.Center += Main.rand.NextVector2Circular(15, 15);
+                    }
+
+                    for (int i = 0; i < 8; i++)
+                    {
+                        Vector2 dustPos = NPC.Center + Main.rand.NextVector2Circular(100, 100);
+                        Dust.NewDust(dustPos - new Vector2(4, 4), 8, 8, DustID.Electric, Main.rand.NextFloat(-5f, 5f), Main.rand.NextFloat(-5f, 5f), 100, default, 1.5f);
+                        LuminanceUtilities.SpawnParticle(dustPos, Main.rand.NextVector2Circular(5, 5), Color.Red, 30, 2f, ParticleType.Spark);
+                    }
+
+                    if (stageTimer >= 90)
+                    {
+                        for (int i = 0; i < 100; i++)
+                            Dust.NewDust(NPC.Center - new Vector2(60, 60), 120, 120, DustID.Blood, Main.rand.NextFloat(-15f, 15f), Main.rand.NextFloat(-15f, 15f), 100, default, 3f);
+
+                        Terraria.Audio.SoundEngine.PlaySound(SoundID.NPCDeath10, NPC.Center);
+                        ScreenShakeSystem.StartShakeAtPoint(NPC.Center, 40f, 1.5f);
+                        CutsceneShakeIntensity = 40f;
+
+                        NPC.life = 0;
+                        NPC.HitEffect(0, 0);
+                        NPC.active = false;
+                        executionDone = true;
+                        IsCutsceneActive = false;
+                        Main.hideUI = false;
+
+                        // Kembalikan control player
+                        player.controlLeft = true;
+                        player.controlRight = true;
+                        player.controlUp = true;
+                        player.controlDown = true;
+                        player.controlJump = true;
+                        player.controlUseItem = true;
+                        player.controlUseTile = true;
+                        player.controlThrow = true;
+                        OnKill();
+                    }
                 }
-                patternCooldown = isPhase2 ? 20 : 35;
-                aiTimer = 0;
-                isCurrentlyChanneling = false;
-                NPC.netUpdate = true;
                 return;
             }
 
-            int patternChoice;
-            if (isTrueMelee)
+            // ========== STAGE 8 (KALAH): BOSS NARIK PEDANG NAIK LAGI LALU MENEBAS PLAYER ==========
+            // Ini yang sebelumnya HILANG (bug): player dulu langsung mati instan di STAGE 4 tanpa ada
+            // animasi apa-apa. Sekarang boss keliatan narik pedangnya balik ke atas, jeda sesaat buat
+            // ancang-ancang, lalu beneran menebas ke player - kill baru terjadi PAS tebasannya kena.
+            if (cutsceneStage == 8)
             {
-                if (isClose)
+                stageTimer += 1f;
+
+                NPC.Center = groundTarget - new Vector2(DespGap, 30);
+                player.Center = groundTarget + new Vector2(DespGap, -20);
+                CutsceneCameraTarget = (NPC.Center + player.Center) * 0.5f;
+
+                swordPosition = GetSwordHiltAnchor();
+                Vector2 clashPoint = GetPlayerHandAnchor(player);
+                ForcePlayerCatchPose(player); // player masih di pose nahan sampai kena tebas
+
+                float raisedAngle = -0.15f; // pedang diangkat lurus ke atas lagi, menjauh dari player
+                float killAngle = GetAngleTowards(swordPosition, clashPoint) + SwordRotationOffset + 0.35f; // tebas lebih dalam dari tahanan sebelumnya
+
+                const int raiseDuration = 40;
+                const int holdDuration = 20;
+                const int slashDuration = 18;
+
+                if (!swingStarted)
                 {
-                    patternChoice = GetDeterministicRandom(0, 100);
-                    if (patternChoice < 60) aiState = STATE_MELEE_COMBO;
-                    else if (patternChoice < 85) aiState = STATE_DASH_ATTACK;
-                    else aiState = STATE_PREDICTIVE_DODGE;
+                    swingStarted = true;
+                    swingProgress = 0f;
+                    swingPaused = false;
                 }
-                else
+
+                if (stageTimer <= raiseDuration)
                 {
-                    if (teleportCooldownTimer == 0 && GetDeterministicRandom(0, 100) < 50)
-                        ExecuteGlitchTeleport(player);
-                    else
-                        aiState = STATE_DASH_ATTACK;
+                    // Boss narik pedangnya balik ke atas, menjauh dari player.
+                    float raiseT = MathHelper.Clamp(stageTimer / raiseDuration, 0f, 1f);
+                    float ease = 1f - (float)Math.Pow(1f - raiseT, 3);
+                    swordRotation = MathHelper.Lerp(swordTargetAngle, raisedAngle, ease);
+                    MatchSwordLengthToHand(swordPosition + new Vector2(0f, -260f)); // pedang jadi lebih pendek pas diangkat
                 }
-            }
-            else
-            {
-                if (isClose && teleportCooldownTimer == 0)
+                else if (stageTimer <= raiseDuration + holdDuration)
                 {
-                    patternChoice = GetDeterministicRandom(0, 100);
-                    if (patternChoice < 30) ExecuteGlitchTeleport(player);
-                    else aiState = STATE_RANGED_BARRAGE;
+                    // Jeda sesaat di atas - kesan ancang-ancang sebelum menebas.
+                    swordRotation = raisedAngle;
+                    if ((int)stageTimer == raiseDuration + 1)
+                    {
+                        ShowBossDialogue("DIE!", Color.Red, 60f);
+                        Terraria.Audio.SoundEngine.PlaySound(SoundID.Roar, NPC.Center);
+                    }
                 }
-                else if (dist > 700f)
+                else if (stageTimer <= raiseDuration + holdDuration + slashDuration)
                 {
-                    aiState = STATE_RANGED_BARRAGE;
+                    float slashT = MathHelper.Clamp((stageTimer - raiseDuration - holdDuration) / slashDuration, 0f, 1f);
+                    float ease = (float)Math.Pow(slashT, 2); // ease-in - tebasan makin cepet & mendadak di akhir
+                    swordRotation = MathHelper.Lerp(raisedAngle, killAngle, ease);
+                    MatchSwordLengthToHand(clashPoint);
+                    CutsceneShakeIntensity = 10f + slashT * 25f;
+
+                    if (!swingPaused && slashT >= 1f)
+                    {
+                        swingPaused = true; // dipakai sebagai flag "tebasan sudah kena"
+
+                        Terraria.Audio.SoundEngine.PlaySound(SoundID.NPCHit4, player.Center);
+                        Terraria.Audio.SoundEngine.PlaySound(SoundID.DD2_KoboldExplosion, player.Center);
+                        ScreenShakeSystem.StartShakeAtPoint(player.Center, 30f, 0.8f);
+                        CutsceneShakeIntensity = 35f;
+                        for (int i = 0; i < 60; i++)
+                            Dust.NewDust(player.Center - new Vector2(20, 20), 40, 40, DustID.Blood, Main.rand.NextFloat(-10f, 10f), Main.rand.NextFloat(-10f, 10f), 100, default, 2.5f);
+
+                        ShowBossDialogue("YOU FAILED!", Color.Red, 90f);
+                        // Dulu KillMe() dipanggil LANGSUNG di sini pas tebasan kena, dan di frame yang
+                        // sama STAGE 9 lama juga langsung nyetel IsCutsceneActive = false - makanya
+                        // kamera kelihatan "ngesot"/lompat pas detik-detik terakhir cutscene, soalnya
+                        // kontrol kamera lepas ke vanilla PAS MASIH KEGAMBAR DI LAYAR. Sekarang boss
+                        // cuma ditahan sekarat (life=1, dontTakeDamage=true dari CheckDead), lalu
+                        // fade-ke-hitam + menu restart diurus WhoAmIDefeatMenuSystem - kamera baru
+                        // beneran dilepas SETELAH layar hitam total, jadi lompatannya gak kelihatan.
+
+                        stageTimer = 0f;
+                        cutsceneStage = 9;
+                        NPC.netUpdate = true;
+                        return;
+                    }
                 }
-                else
-                {
-                    if (GetDeterministicRandom(0, 100) < 75)
-                        aiState = STATE_RANGED_BARRAGE;
-                    else
-                        aiState = STATE_IDLE;
-                }
+                return;
             }
 
-            patternCooldown = isPhase2 ? 25 : 45;
-            aiTimer = 0;
-            isCurrentlyChanneling = false;
-            NPC.netUpdate = true;
+            // ========== STAGE 9 (KALAH): FADE KE HITAM + MENU RESTART ==========
+            // Boss ditahan sekarat di sini (life=1 & dontTakeDamage=true, dari CheckDead + preamble
+            // di atas fungsi ini). Fade-ke-hitam, munculin menu, dan keputusan Yes/No-nya SENGAJA
+            // diurus di WhoAmIDefeatMenuSystem (bukan di sini) - itu jalan independen dari AI boss
+            // ini, jadi walaupun bossnya nanti beneran dimatiin (pilihan "No"), proses fade-nya
+            // tetep lanjut mulus sampai selesai, gak ikut kepotong pas NPC.active jadi false.
+            if (cutsceneStage == 9)
+            {
+                if (!WhoAmIDefeatMenuSystem.SequenceActive)
+                {
+                    WhoAmIDefeatMenuSystem.SequenceActive = true;
+                    WhoAmIDefeatMenuSystem.FadeAlpha = 0f;
+                    WhoAmIDefeatMenuSystem.MenuActive = false;
+                    WhoAmIDefeatMenuSystem.Choice = -1;
+                    WhoAmIDefeatMenuSystem.Resolved = false;
+                }
+
+                // FIX: mulai stage 9, WhoAmIDefeatMenuSystem yang pegang kendali hideUI (biar
+                // fade-hitam & menu Yes/No-nya beneran kegambar). Preamble HandleDesperationCutscene
+                // di atas maksa Main.hideUI = true tiap tick selama masih STATE_DESPERATION_CUTSCENE,
+                // jadi kalau dibiarkan bakal terus nimpa balik ke true dan nge-block gambar menu.
+                Main.hideUI = false;
+
+                NPC.velocity = Vector2.Zero;
+                CutsceneCameraTarget = (NPC.Center + player.Center) * 0.5f;
+                CutsceneShakeIntensity = 0f;
+                return;
+            }
         }
 
+
+        // ======================== STATE METHODS ========================
         private void ExecuteMeleeCombo(Player target)
         {
             NPC.damage = isPhase2 ? 110 : 70;
@@ -678,7 +1790,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             {
                 Main.projectile[p].hostile = true;
                 Main.projectile[p].friendly = false;
-                Main.projectile[p].timeLeft = 8;
+                Main.projectile[p].timeLeft = 10;
                 Main.projectile[p].scale = 1.8f;
                 Main.projectile[p].rotation = angle;
                 Main.projectile[p].width = 80;
@@ -687,6 +1799,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 Main.projectile[p].penetrate = -1;
                 Main.projectile[p].aiStyle = 0;
                 Main.projectile[p].tileCollide = false;
+
+                for (int i = 0; i < 5; i++)
+                    LuminanceUtilities.SpawnParticle(Main.projectile[p].Center + Main.rand.NextVector2Circular(40, 40), Main.rand.NextVector2Circular(2, 2), Color.Cyan, 20, 0.8f, ParticleType.Spark);
             }
         }
 
@@ -773,11 +1888,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 if (dir != Vector2.Zero) dir.Normalize();
                 Vector2 dodge = new Vector2(-dir.Y, dir.X);
                 if (Main.rand.NextBool()) dodge = -dodge;
-                float speed = isPhase2 ? 16f : 12f;
+                float speed = isPhase2 ? 18f : 14f;
                 dodge *= speed * loadoutSpeedMultiplier;
                 NPC.velocity = dodge + new Vector2(0, -3f);
                 Terraria.Audio.SoundEngine.PlaySound(SoundID.Item15, NPC.Center);
-                for (int i = 0; i < 10; i++) Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.PurpleTorch, -NPC.velocity.X * 0.5f, -NPC.velocity.Y * 0.5f);
+                for (int i = 0; i < 10; i++)
+                    LuminanceUtilities.SpawnParticle(NPC.Center, Main.rand.NextVector2Circular(3, 3), Color.Purple, 25, 1f, ParticleType.Spark);
             }
 
             if (aiTimer > 18) NPC.velocity *= 0.9f;
@@ -800,16 +1916,30 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 dashDirection = predicted - NPC.Center;
                 if (dashDirection != Vector2.Zero) dashDirection.Normalize();
                 else dashDirection = new Vector2(NPC.direction, 0f);
-                if (Main.rand.NextBool(2)) Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.Electric, Main.rand.NextFloat(-3f, 3f), Main.rand.NextFloat(-3f, 3f));
+                if (Main.rand.NextBool(2))
+                    LuminanceUtilities.SpawnParticle(NPC.Center, Main.rand.NextVector2Circular(2, 2), Color.Cyan, 20, 1f, ParticleType.Spark);
             }
             else if (aiTimer == 21)
             {
-                float speed = isPhase2 ? 28f : 20f;
+                float speed = isPhase2 ? 32f : 24f;
                 NPC.velocity = dashDirection * speed * loadoutSpeedMultiplier;
                 NPC.damage = isPhase2 ? 130 : 90;
                 bossWeaponSwingTimer = bossWeaponSwingMax;
                 Terraria.Audio.SoundEngine.PlaySound(SoundID.Item74, NPC.Center);
                 if (!isTrueMelee) FireAttackProjectile(target);
+                // FIX: senjata true melee ("ngasih damage lewat swing sword") sebelumnya SAMA SEKALI
+                // nggak punya hitbox tebasan pas dash - satu-satunya sumber damage-nya cuma body
+                // contact NPC.damage, yang gampang ke-skip karena boss ngebut 24-32px/tick (bisa
+                // "nembus" lewat player dalam satu tick tanpa collision-nya sempat kedeteksi -
+                // classic tunneling). Sekarang tiap dash beneran nyebar hitbox slash (SpawnMeleeSlash)
+                // di titik mulai dash, biar ada damage garansi walau body-contact-nya miss.
+                if (isTrueMelee) SpawnMeleeSlash(target, 0f);
+                for (int i = 0; i < 20; i++)
+                {
+                    LuminanceUtilities.SpawnParticle(NPC.Center + Main.rand.NextVector2Circular(10, 10), Main.rand.NextVector2Circular(5, 5), Color.Cyan, 30, 1.5f, ParticleType.Spark);
+                    if (Main.rand.NextBool(2))
+                        LuminanceUtilities.SpawnParticle(NPC.Center + Main.rand.NextVector2Circular(8, 8), -NPC.velocity * 0.15f, Color.Magenta, 22, 1.3f, ParticleType.Spark);
+                }
             }
             else if (aiTimer > 21 && aiTimer <= 35)
             {
@@ -821,7 +1951,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     float diff = MathHelper.WrapAngle(newDir.ToRotation() - NPC.velocity.ToRotation());
                     NPC.velocity = NPC.velocity.RotatedBy(MathHelper.Clamp(diff, -0.4f, 0.4f));
                 }
-                Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.PurpleTorch, -NPC.velocity.X * 0.3f, -NPC.velocity.Y * 0.3f, 100, default, 1.5f);
+                // FIX (lanjutan): sepanjang badan dash (bukan cuma di titik awal) juga disebar
+                // hitbox slash tiap beberapa tick, biar sepanjang lintasan dash yang cepet itu
+                // ada jendela damage yang beneran nyusul posisi boss, bukan cuma sekali di awal.
+                if (isTrueMelee && aiTimer % 4 == 0)
+                    SpawnMeleeSlash(target, 0f);
+                LuminanceUtilities.SpawnParticle(NPC.Center, Main.rand.NextVector2Circular(3, 3), Color.Purple, 20, 1f, ParticleType.Spark);
             }
             else if (aiTimer > 35 && aiTimer <= 50)
             {
@@ -838,487 +1973,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
         }
 
-        private void HandlePotionLogic(Player player)
-        {
-            if (aiState == 100 || aiState == 101 || aiState == 102 || aiState == 2) return;
-            if (potionCooldownTimer > 0) potionCooldownTimer--;
-            if (activePotionType > 0)
-            {
-                potionDurationTimer--;
-                if (activePotionType == 1 && Main.rand.NextBool(4)) Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.WitherLightning, 0, 2, 120, default, 0.9f);
-                if (potionDurationTimer <= 0)
-                {
-                    activePotionType = 0;
-                    potionCooldownTimer = isPhase2 ? Main.rand.Next(480, 720) : Main.rand.Next(720, 1080);
-                    NPC.netUpdate = true;
-                }
-            }
-            if (potionCooldownTimer <= 0 && activePotionType == 0)
-            {
-                activePotionType = Main.rand.Next(1, 4);
-                if (activePotionType == 1) potionDurationTimer = 1200;
-                else potionDurationTimer = Main.rand.Next(240, 360);
-                Terraria.Audio.SoundEngine.PlaySound(SoundID.Item3, NPC.Center);
-                string txt = activePotionType == 1 ? "Gravity Linked!" : activePotionType == 2 ? "Ironskin Brew!" : "Swiftness Brew!";
-                CombatText.NewText(NPC.getRect(), activePotionType == 1 ? Color.MediumPurple : activePotionType == 2 ? Color.Khaki : Color.LightGreen, txt, true);
-                for (int i = 0; i < 15; i++) Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.ManaRegeneration, Main.rand.NextFloat(-2f, 2f), Main.rand.NextFloat(-2f, 2f));
-                NPC.netUpdate = true;
-            }
-        }
-
-        private void ExecuteGlitchTeleport(Player target)
-        {
-            teleportCooldownTimer = isPhase2 ? 180 : 300;
-            for (int i = 0; i < 20; i++) Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.Electric, Main.rand.NextFloat(-5f, 5f), Main.rand.NextFloat(-5f, 5f));
-            Vector2 off = new Vector2(Main.rand.Next(450, 650) * (Main.rand.NextBool() ? 1 : -1), Main.rand.Next(-250, -100));
-            NPC.Center = target.Center + off;
-            NPC.velocity = (target.Center - NPC.Center) * 0.05f;
-            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item92, NPC.Center);
-            for (int i = 0; i < 20; i++) Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.PurpleTorch, Main.rand.NextFloat(-4f, 4f), Main.rand.NextFloat(-4f, 4f));
-            NPC.netUpdate = true;
-        }
-
-        private void ExecuteHumanoidMovement(Player target)
-        {
-            float dist = Vector2.Distance(NPC.Center, target.Center);
-
-            // ---- WHIP SPECIFIC: langsung ke target jika di luar range ----
-            if (currentArchetype == WeaponArchetype.Whip)
-            {
-                // Hitung range whip berdasarkan useAnimation (fallback)
-                float whipRange = 300f;
-                if (activeWeapon != null)
-                {
-                    whipRange = 300f + activeWeapon.useAnimation * 2.2f;
-                    if (whipRange < 250f) whipRange = 250f;
-                    if (whipRange > 600f) whipRange = 600f;
-                }
-
-                float minRange = whipRange * 0.5f;
-                float maxRange = whipRange * 1.0f;
-
-                if (dist > maxRange)
-                {
-                    Vector2 toTarget = target.Center - NPC.Center;
-                    if (toTarget != Vector2.Zero) toTarget.Normalize();
-                    NPC.velocity += toTarget * 2.5f * loadoutSpeedMultiplier;
-                    if (NPC.velocity.Length() > 12f * loadoutSpeedMultiplier)
-                        NPC.velocity = Vector2.Normalize(NPC.velocity) * 12f * loadoutSpeedMultiplier;
-                }
-                else if (dist < minRange && dist > 50f)
-                {
-                    Vector2 esc = NPC.Center - target.Center;
-                    if (esc != Vector2.Zero) esc.Normalize();
-                    NPC.velocity += esc * 1.5f;
-                }
-            }
-
-            // ---- MELEE APPROACH ----
-            if (dist > 300f && (currentArchetype == WeaponArchetype.TrueMelee || currentArchetype == WeaponArchetype.ProjMelee) && aiState == STATE_IDLE)
-            {
-                Vector2 toTarget = target.Center - NPC.Center;
-                if (toTarget != Vector2.Zero) toTarget.Normalize();
-                NPC.velocity += toTarget * 1.8f;
-            }
-            // ---- RANGED RETREAT ----
-            else if (dist < 280f && currentArchetype != WeaponArchetype.TrueMelee && currentArchetype != WeaponArchetype.ProjMelee && currentArchetype != WeaponArchetype.Whip && aiState == STATE_IDLE)
-            {
-                Vector2 esc = NPC.Center - target.Center;
-                if (esc != Vector2.Zero) esc.Normalize();
-                NPC.velocity += esc * 1.2f;
-            }
-
-            // ---- BASE MOVEMENT ----
-            Vector2 wave = Vector2.Zero;
-            if (currentArchetype == WeaponArchetype.TrueMelee || currentArchetype == WeaponArchetype.ProjMelee)
-            {
-                wave.X = (float)Math.Sin(aiTimer * 0.03f) * 15f;
-                wave.Y = (float)Math.Cos(aiTimer * 0.04f) * 10f;
-            }
-            else if (currentArchetype == WeaponArchetype.Magic || currentArchetype == WeaponArchetype.Ranged || currentArchetype == WeaponArchetype.Whip)
-            {
-                wave.X = (float)Math.Sin(aiTimer * 0.04f) * 60f;
-                wave.Y = (float)Math.Cos(aiTimer * 0.05f) * 30f;
-            }
-
-            Vector2 goal = target.Center + tacticalTargetOffset + wave;
-
-            float ax = 0.5f * loadoutSpeedMultiplier;
-            float maxX = 9.5f * loadoutSpeedMultiplier;
-            float ay = 0.45f;
-            float maxY = 10f;
-            if (activePotionType == 3) { ax *= 1.3f; maxX *= 1.3f; }
-            if (isPhase2) { ax *= 1.4f; maxX *= 1.4f; ay *= 1.4f; maxY *= 1.4f; }
-
-            if (NPC.Center.X < goal.X) { NPC.velocity.X += ax; if (NPC.velocity.X < 0) NPC.velocity.X += ax * 0.6f; }
-            else { NPC.velocity.X -= ax; if (NPC.velocity.X > 0) NPC.velocity.X -= ax * 0.6f; }
-
-            if (NPC.Center.Y > goal.Y) { NPC.velocity.Y -= ay; if (NPC.velocity.Y > 0) NPC.velocity.Y *= 0.8f; if (loadoutHasWings) wingFlapCycle += 0.5f; }
-            else { NPC.velocity.Y += ay; if (NPC.velocity.Y < 0) NPC.velocity.Y *= 0.8f; wingFlapCycle *= 0.85f; }
-
-            NPC.velocity.X = MathHelper.Clamp(NPC.velocity.X, -maxX, maxX);
-            NPC.velocity.Y = MathHelper.Clamp(NPC.velocity.Y, -maxY, maxY);
-
-            if (Vector2.Distance(NPC.Center, goal) < 40f) NPC.velocity *= 0.85f;
-        }
-
-        private void CalculateTacticalPosition(Player target)
-        {
-            if (tacticalDecisionTimer >= 60)
-            {
-                tacticalDecisionTimer = GetDeterministicRandom(0, 12);
-                float weaponVel = activeWeapon != null && activeWeapon.shootSpeed > 0 ? activeWeapon.shootSpeed : 10f;
-                switch (currentArchetype)
-                {
-                    case WeaponArchetype.TrueMelee:
-                        tacticalTargetOffset = new Vector2(GetDeterministicRandom(200, 350) * (Main.rand.NextBool() ? 1 : -1), GetDeterministicRandom(-30, 20));
-                        break;
-                    case WeaponArchetype.ProjMelee:
-                        tacticalTargetOffset = new Vector2(GetDeterministicRandom(300, 500) * (Main.rand.NextBool() ? 1 : -1), GetDeterministicRandom(-60, -10));
-                        break;
-                    case WeaponArchetype.Whip:
-                        tacticalTargetOffset = new Vector2(GetDeterministicRandom(50, 150) * (Main.rand.NextBool() ? 1 : -1), GetDeterministicRandom(-40, 0));
-                        break;
-                    default:
-                        float dist = MathHelper.Clamp(weaponVel * 46f, 550f, 950f);
-                        tacticalTargetOffset = new Vector2(GetDeterministicRandom((int)dist - 90, (int)dist + 90) * (Main.rand.NextBool() ? 1 : -1), GetDeterministicRandom(-140, -40));
-                        break;
-                }
-                NPC.netUpdate = true;
-            }
-        }
-
-        private void HandleReactiveDodging(Player target)
-        {
-            if (dodgeCooldownTimer > 0 || aiState == STATE_DODGE || aiState == STATE_DASH_ATTACK || aiState == STATE_PREDICTIVE_DODGE) return;
-
-            for (int i = 0; i < Main.maxProjectiles; i++)
-            {
-                Projectile proj = Main.projectile[i];
-                if (!proj.active || !proj.friendly || proj.hostile || proj.damage <= 0) continue;
-
-                Vector2 pred = proj.Center + proj.velocity * 12f;
-                float d = Vector2.Distance(NPC.Center, pred);
-
-                if (d < 180f)
-                {
-                    Vector2 toBoss = NPC.Center - proj.Center;
-                    if (Vector2.Dot(proj.velocity, toBoss) > 0)
-                    {
-                        Vector2 dir = new Vector2(-proj.velocity.Y, proj.velocity.X);
-                        if (dir != Vector2.Zero) dir.Normalize();
-                        else dir = -Vector2.UnitY;
-                        if (Main.rand.NextBool()) dir = -dir;
-
-                        if (loadoutHasDashAccessory)
-                        {
-                            NPC.velocity = dir * 18f;
-                            aiState = STATE_PREDICTIVE_DODGE;
-                            aiTimer = 0;
-                            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item15, NPC.Center);
-                            dodgeCooldownTimer = isPhase2 ? 30 : 50;
-                        }
-                        else if (loadoutHasWings)
-                        {
-                            NPC.velocity = dir * 12f - Vector2.UnitY * 6f;
-                            aiState = STATE_DODGE;
-                            aiTimer = 0;
-                            dodgeCooldownTimer = isPhase2 ? 45 : 70;
-                            wingFlapCycle = 20f;
-                        }
-                        else
-                        {
-                            NPC.velocity = dir * 8f - Vector2.UnitY * 4f;
-                            aiState = STATE_DODGE;
-                            aiTimer = 0;
-                            dodgeCooldownTimer = isPhase2 ? 60 : 90;
-                        }
-                        NPC.netUpdate = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        private void ScanAndSelectWeapon(Player player)
-        {
-            scanCooldownTimer++;
-            if (scanCooldownTimer >= 60 || weaponPool.Count == 0)
-            {
-                scanCooldownTimer = 0;
-                weaponPool.Clear();
-                HashSet<int> unique = new HashSet<int>();
-
-                Item held = player.inventory[player.selectedItem];
-                if (held != null && !held.IsAir && held.damage > 0 && !BannedWeapons.Contains(held.type))
-                {
-                    bool isTome = held.Name == "Tome of Eclipsa" || (held.ModItem != null && held.ModItem.Name == "TomeOfEclipsa");
-                    if (!isTome) { Item w = new Item(); w.SetDefaults(held.type); weaponPool.Add(w); unique.Add(held.type); }
-                }
-
-                for (int i = 0; i < 50; i++)
-                {
-                    Item item = player.inventory[i];
-                    if (item == null || item.IsAir || item.damage <= 0 || BannedWeapons.Contains(item.type)) continue;
-                    if (item.Name == "Tome of Eclipsa" || (item.ModItem != null && item.ModItem.Name == "TomeOfEclipsa")) continue;
-                    if (item.CountsAsClass(DamageClass.Summon) && !(item.shoot > 0 && ProjectileID.Sets.IsAWhip[item.shoot])) continue;
-                    if (!unique.Contains(item.type)) { Item w = new Item(); w.SetDefaults(item.type); weaponPool.Add(w); unique.Add(item.type); }
-                }
-
-                if (weaponPool.Count == 0) { Item d = new Item(); d.SetDefaults(ItemID.CopperShortsword); weaponPool.Add(d); }
-            }
-
-            if (weaponPool.Count > 0)
-            {
-                weaponCarouselTimer++;
-                float dist = Vector2.Distance(NPC.Center, player.Center);
-                bool preferClose = dist < 500f;
-
-                if (weaponCarouselTimer >= weaponSwapThreshold || activeWeapon == null)
-                {
-                    weaponCarouselTimer = 0;
-                    weaponSwapThreshold = GetDeterministicRandom(180, 301);
-                    isCurrentlyChanneling = false;
-
-                    List<Item> ideal = new List<Item>();
-                    foreach (var item in weaponPool)
-                    {
-                        if (BannedWeapons.Contains(item.type)) continue;
-                        bool isMelee = item.CountsAsClass(DamageClass.Melee) || (item.shoot > 0 && ProjectileID.Sets.IsAWhip[item.shoot]);
-                        if (preferClose == isMelee) ideal.Add(item);
-                    }
-                    Item selected = null;
-                    if (ideal.Count > 0) selected = ideal[GetDeterministicRandom(0, ideal.Count)];
-                    else { var safe = weaponPool.Where(w => !BannedWeapons.Contains(w.type)).ToList(); if (safe.Count > 0) { currentPoolIndex = (currentPoolIndex + 1) % safe.Count; selected = safe[currentPoolIndex]; } else selected = weaponPool[0]; }
-
-                    if (selected != null) { Item w = new Item(); w.SetDefaults(selected.type); activeWeapon = w; }
-                    else { Item f = new Item(); f.SetDefaults(ItemID.EnchantedSword); activeWeapon = f; }
-                    if (BannedWeapons.Contains(activeWeapon.type)) { Item f = new Item(); f.SetDefaults(ItemID.EnchantedSword); activeWeapon = f; }
-                    burstShotCounter = 0;
-                    NPC.netUpdate = true;
-                }
-            }
-
-            if (activeWeapon == null || activeWeapon.type == ItemID.None || BannedWeapons.Contains(activeWeapon.type))
-            {
-                Item held = player.inventory[player.selectedItem];
-                if (held != null && !held.IsAir && !BannedWeapons.Contains(held.type))
-                {
-                    bool isTome = held.Name == "Tome of Eclipsa" || (held.ModItem != null && held.ModItem.Name == "TomeOfEclipsa");
-                    bool isMinion = held.CountsAsClass(DamageClass.Summon) && (held.shoot <= 0 || !ProjectileID.Sets.IsAWhip[held.shoot]);
-                    if (!isMinion && !isTome) { Item w = new Item(); w.SetDefaults(held.type); activeWeapon = w; }
-                }
-                if (activeWeapon == null || activeWeapon.type == ItemID.None || BannedWeapons.Contains(activeWeapon.type)) { Item f = new Item(); f.SetDefaults(ItemID.CopperShortsword); activeWeapon = f; }
-            }
-        }
-
-        private void AnalyzeWeaponArchetype()
-        {
-            isTrueMelee = false;
-            if (activeWeapon != null && !activeWeapon.IsAir && activeWeapon.type != ItemID.None)
-            {
-                if (activeWeapon.useStyle == ItemUseStyleID.HoldUp && activeWeapon.shoot > 0 && !ProjectileID.Sets.IsAWhip[activeWeapon.shoot]) { currentArchetype = WeaponArchetype.Yoyo; return; }
-                if (activeWeapon.useStyle == ItemUseStyleID.Swing && activeWeapon.shoot > 0)
-                {
-                    int t = activeWeapon.shoot;
-                    if (t == ProjectileID.EnchantedBoomerang || t == ProjectileID.LightDisc || t == ProjectileID.Bananarang || t == ProjectileID.ThornChakram || t == ProjectileID.FruitcakeChakram || t == ProjectileID.IceBoomerang || t == ProjectileID.Flamarang || t == ProjectileID.WoodenBoomerang) { currentArchetype = WeaponArchetype.Boomerang; return; }
-                }
-                if (activeWeapon.shoot > 0 && ProjectileID.Sets.IsAWhip[activeWeapon.shoot]) currentArchetype = WeaponArchetype.Whip;
-                else if (activeWeapon.CountsAsClass(DamageClass.Ranged)) currentArchetype = WeaponArchetype.Ranged;
-                else if (activeWeapon.CountsAsClass(DamageClass.Magic)) currentArchetype = WeaponArchetype.Magic;
-                else if (activeWeapon.CountsAsClass(DamageClass.Summon)) currentArchetype = WeaponArchetype.Summon;
-                else
-                {
-                    bool swing = activeWeapon.useStyle == ItemUseStyleID.Swing;
-                    bool hasProj = activeWeapon.shoot > 0;
-                    if (swing && !hasProj) { currentArchetype = WeaponArchetype.TrueMelee; isTrueMelee = true; }
-                    else currentArchetype = WeaponArchetype.ProjMelee;
-                }
-            }
-        }
-
-        private void IndependentBossAttack(Player target)
-        {
-            if (activeWeapon == null || activeWeapon.IsAir || activeWeapon.type == ItemID.None)
-            {
-                isCurrentlyChanneling = false;
-                return;
-            }
-
-            if (currentArchetype == WeaponArchetype.TrueMelee)
-            {
-                isCurrentlyChanneling = false;
-                if (dashAttackCooldownTimer > 0 || aiState == STATE_MELEE_COMBO) return;
-                attackDelayTimer++;
-                int threshold = (activeWeapon.useTime > 0 ? activeWeapon.useTime : 30) * 2;
-                if (attackDelayTimer >= threshold && aiState == STATE_IDLE)
-                {
-                    attackDelayTimer = 0;
-                    aiState = STATE_MELEE_COMBO;
-                    aiTimer = 0;
-                    meleeComboStep = 0;
-                    NPC.velocity = Vector2.Zero;
-                    NPC.netUpdate = true;
-                }
-                return;
-            }
-
-            float dist = Vector2.Distance(NPC.Center, target.Center);
-            bool canUse = false;
-            float range = 1000f;
-
-            if (currentArchetype == WeaponArchetype.ProjMelee)
-                range = MathHelper.Clamp((activeWeapon.shootSpeed > 0 ? activeWeapon.shootSpeed : 10f) * 42f, 400f, 750f);
-            else if (currentArchetype == WeaponArchetype.Whip)
-            {
-                float whipRange = 300f;
-                if (activeWeapon != null)
-                {
-                    whipRange = 300f + activeWeapon.useAnimation * 2.2f;
-                    if (whipRange < 250f) whipRange = 250f;
-                    if (whipRange > 600f) whipRange = 600f;
-                }
-                range = whipRange * 1.2f;
-            }
-            else
-                range = MathHelper.Clamp((activeWeapon.shootSpeed > 0 ? activeWeapon.shootSpeed : 10f) * 65f, 500f, 1350f);
-
-            if (dist <= range) canUse = true;
-
-            if (!canUse) { isCurrentlyChanneling = false; attackDelayTimer = 0; return; }
-
-            int speed = Math.Max(activeWeapon.useTime > 0 ? activeWeapon.useTime : 25, 14);
-            if (isPhase2) speed = (int)(speed * 0.75f);
-            if (speed < 8) speed = 8;
-
-            if (currentArchetype == WeaponArchetype.Ranged && !activeWeapon.channel)
-            {
-                isCurrentlyChanneling = false;
-                attackDelayTimer++;
-                if (attackDelayTimer >= speed * 2 && burstShotCounter == 0) { burstShotCounter = isPhase2 ? 4 : 3; attackDelayTimer = 0; }
-                if (burstShotCounter > 0 && burstShotDelay == 0) { burstShotCounter--; burstShotDelay = 5; bossWeaponSwingTimer = bossWeaponSwingMax; FireAttackProjectile(target); }
-                return;
-            }
-
-            if (activeWeapon.channel)
-            {
-                bool exists = false;
-                if (activeWeapon.shoot > 0) for (int i = 0; i < Main.maxProjectiles; i++) { if (Main.projectile[i].active && Main.projectile[i].owner == proxySlot && Main.projectile[i].type == activeWeapon.shoot) { exists = true; break; } }
-                if (!exists) { attackDelayTimer = 0; bossWeaponSwingTimer = bossWeaponSwingMax; FireAttackProjectile(target); isCurrentlyChanneling = true; }
-                else isCurrentlyChanneling = true;
-            }
-            else if (!activeWeapon.autoReuse)
-            {
-                isCurrentlyChanneling = false;
-                if (manualClickDelayTimer > 0) return;
-                attackDelayTimer++;
-                if (attackDelayTimer >= speed) { attackDelayTimer = 0; bossWeaponSwingTimer = bossWeaponSwingMax; FireAttackProjectile(target); manualClickDelayTimer = isPhase2 ? GetDeterministicRandom(3, 8) : GetDeterministicRandom(8, 18); }
-            }
-            else
-            {
-                isCurrentlyChanneling = false;
-                attackDelayTimer++;
-                if (attackDelayTimer >= speed) { attackDelayTimer = 0; bossWeaponSwingTimer = bossWeaponSwingMax; FireAttackProjectile(target); }
-            }
-        }
-
-        private int CalculateScaledDamage(Item weapon)
-        {
-            int raw = weapon.damage;
-            float mult = raw > 100 ? 0.2f : raw > 80 ? 0.5f : 1f;
-            int dmg = (int)(raw * mult);
-            if (isPhase2) dmg = (int)(dmg * 1.25f);
-            return Math.Max(1, dmg);
-        }
-
-        private void FireAttackProjectile(Player target)
-        {
-            Vector2 aim = target.Center - NPC.Center;
-            if (aim != Vector2.Zero) aim.Normalize();
-            else aim = new Vector2(NPC.direction, 0f);
-
-            int dmg = CalculateScaledDamage(activeWeapon);
-            float speed = activeWeapon.shootSpeed > 0 ? activeWeapon.shootSpeed : 11f;
-            Vector2 vel = aim * speed;
-
-            int projType = activeWeapon.shoot;
-            if (projType <= 0) projType = ContentSamples.ItemsByType[activeWeapon.type].shoot;
-            if (projType <= 0) projType = ProjectileID.EnchantedBeam;
-
-            if (activeWeapon.type == ItemID.TerraBlade || activeWeapon.type == ItemID.TrueNightsEdge || activeWeapon.type == ItemID.TrueExcalibur)
-            {
-                projType = (activeWeapon.type == ItemID.TerraBlade) ? ProjectileID.TerraBeam : (activeWeapon.type == ItemID.TrueNightsEdge) ? ProjectileID.NightBeam : ProjectileID.LightBeam;
-                Vector2 a = target.Center - NPC.Center; if (a != Vector2.Zero) a.Normalize();
-                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, a * speed, projType, dmg, 0f, proxySlot);
-                if (p >= 0 && p < 1000) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; }
-                return;
-            }
-
-            if (currentArchetype == WeaponArchetype.Magic) vel = aim * speed;
-            else if (currentArchetype == WeaponArchetype.Ranged)
-            {
-                if (activeWeapon.type == ItemID.SniperRifle) vel = aim * (speed * 1.5f);
-                else vel = aim.RotatedBy(MathHelper.ToRadians(GetDeterministicRandom(-5, 5))) * speed;
-            }
-            else if (currentArchetype == WeaponArchetype.ProjMelee)
-            {
-                Vector2 a = target.Center - NPC.Center; if (a != Vector2.Zero) a.Normalize();
-                vel = a.RotatedBy(MathHelper.ToRadians(GetDeterministicRandom(-2, 2))) * speed;
-            }
-            else if (currentArchetype == WeaponArchetype.Yoyo)
-            {
-                int count = 4; float step = MathHelper.TwoPi / count; float baseAngle = Main.GameUpdateCount * 0.02f;
-                for (int i = 0; i < count; i++)
-                {
-                    float angle = baseAngle + i * step;
-                    Vector2 dir = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle));
-                    int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, dir * speed, projType, dmg, 0f, proxySlot);
-                    if (p >= 0 && p < 1000) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; Main.projectile[p].timeLeft = 180; }
-                }
-                return;
-            }
-            else if (currentArchetype == WeaponArchetype.Boomerang)
-            {
-                int count = activeWeapon.damage > 80 ? 3 : 1;
-                for (int i = 0; i < count; i++)
-                {
-                    Vector2 a = target.Center - NPC.Center; if (a != Vector2.Zero) a.Normalize();
-                    a = a.RotatedBy(MathHelper.ToRadians(GetDeterministicRandom(-10, 10)));
-                    int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, a * speed, projType, dmg, 0f, proxySlot);
-                    if (p >= 0 && p < 1000) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; }
-                }
-                return;
-            }
-
-            int countP = 1; float spread = 0f; bool linear = false;
-            string name = activeWeapon.Name.ToLower();
-            if (projType == ProjectileID.ApprenticeStaffT3Shot || activeWeapon.type == ItemID.ApprenticeStaffT3) { countP = 3; spread = MathHelper.ToRadians(14f); linear = true; projType = ProjectileID.ApprenticeStaffT3Shot; }
-            else if (projType == ProjectileID.SkyFracture) { countP = 3; spread = MathHelper.ToRadians(9f); linear = true; }
-            else if (projType == ProjectileID.Phantasm) { countP = 5; spread = MathHelper.ToRadians(7f); linear = true; }
-            else if (activeWeapon.CountsAsClass(DamageClass.Ranged))
-            {
-                if (name.Contains("shotgun") || name.Contains("blaster") || name.Contains("cannon")) { countP = name.Contains("tactical") ? 6 : 4; spread = MathHelper.ToRadians(16f); linear = false; }
-                else if (name.Contains("shotbow") || name.Contains("harpy") || activeWeapon.useAnimation > activeWeapon.useTime * 2) { countP = 3; spread = MathHelper.ToRadians(8f); linear = false; }
-            }
-            else if (activeWeapon.CountsAsClass(DamageClass.Magic))
-            {
-                if ((name.Contains("staff") || name.Contains("book") || name.Contains("tome")) && activeWeapon.rare >= ItemRarityID.Yellow) { countP = 3; spread = MathHelper.ToRadians(12f); linear = true; }
-            }
-
-            for (int i = 0; i < countP; i++)
-            {
-                Vector2 fVel = vel;
-                if (countP > 1)
-                {
-                    if (linear) fVel = vel.RotatedBy(MathHelper.Lerp(-spread, spread, (float)i / (countP - 1)));
-                    else fVel = vel.RotatedBy(MathHelper.ToRadians(GetDeterministicRandom((int)(-MathHelper.ToDegrees(spread)), (int)(MathHelper.ToDegrees(spread)))));
-                }
-                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, fVel, projType, dmg, 0f, proxySlot);
-                if (p >= 0 && p < 1000) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; }
-            }
-            if (activeWeapon.UseSound != null) Terraria.Audio.SoundEngine.PlaySound(activeWeapon.UseSound, NPC.Center);
-        }
-
+        // ======================== PROXY PLAYER VISUALS ========================
         private void UpdateProxyPlayerVisuals(Player target)
         {
             if (dummyPlayer == null) dummyPlayer = new Player();
@@ -1364,7 +2019,27 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             dummyPlayer.velocity = NPC.velocity;
             dummyPlayer.direction = NPC.direction;
 
-            if (activeWeapon != null && aiState != 102)
+            bool isDesperation = (aiState == STATE_DESPERATION_CUTSCENE && cutsceneStage >= 2);
+            if (isDesperation)
+            {
+                if (dummyPlayer.inventory == null || dummyPlayer.inventory.Length < 58)
+                {
+                    dummyPlayer.inventory = new Item[58];
+                    for (int i = 0; i < dummyPlayer.inventory.Length; i++) dummyPlayer.inventory[i] = new Item();
+                }
+                // PENTING: jangan kasih dummyPlayer pegang Terra Blade versi NORMAL di tangannya di sini.
+                // Pedang raksasa udah digambar terpisah (anchored ke tangan) di PreDraw. Kalau di sini
+                // juga dikasih Terra Blade biasa, hasilnya keliatan ada DUA pedang - satu kecil normal
+                // di tangan, satu lagi raksasa - itu yang bikin efeknya kayak "nyumon pedang" / bug.
+                dummyPlayer.inventory[0] = new Item(); // tangan kosong, biar cuma ada 1 pedang (yang raksasa)
+                dummyPlayer.selectedItem = 0;
+                dummyPlayer.itemAnimation = 0;
+                dummyPlayer.itemAnimationMax = 0;
+                dummyPlayer.itemTime = 0;
+                // Pose lengan terangkat seolah lagi menggenggam pedang raksasa ke atas.
+                dummyPlayer.bodyFrame.Y = dummyPlayer.bodyFrame.Height * 2;
+            }
+            else if (activeWeapon != null && aiState != 102)
             {
                 if (dummyPlayer.inventory == null || dummyPlayer.inventory.Length < 58)
                 {
@@ -1397,7 +2072,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             dummyPlayer.legFrame = target.legFrame;
             dummyPlayer.headFrame = target.headFrame;
-            dummyPlayer.bodyFrame = target.bodyFrame;
+            // Selama desperation cutscene (stage 2+) pertahankan pose lengan terangkat yang di-set di
+            // atas - jangan ditimpa balik ke bodyFrame biasa punya target player.
+            if (!isDesperation) dummyPlayer.bodyFrame = target.bodyFrame;
             Main.player[proxySlot] = dummyPlayer;
         }
 
@@ -1447,162 +2124,299 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         {
             if (Main.player[proxySlot] != null && Main.player[proxySlot].whoAmI == proxySlot) Main.player[proxySlot] = new Player();
             IsCutsceneActive = false;
+            Main.hideUI = false;
         }
 
+        // Dipanggil dari WhoAmIDefeatMenuSystem pas player mencet "Yes" (restart dari 50% HP)
+        // di menu kekalahan. Boss dilanjutin dari STATE_IDLE fase 2 (karena 50% HP itu sendiri
+        // yang jadi ambang trigger fase 2), semua state cutscene desperation direset biar bisa
+        // ke-trigger lagi kalau player kalah lagi nanti.
+        public void ResumeFromDefeatMenu()
+        {
+            NPC.life = NPC.lifeMax / 2;
+            NPC.dontTakeDamage = false;
+            NPC.damage = 0;
+            isPhase2 = true;
+            aiState = STATE_IDLE;
+            aiTimer = 0;
+
+            cutsceneStage = 0;
+            stageTimer = 0f;
+            desperationStarted = false;
+            fallProgress = 0f;
+            executionDone = false;
+            dialogueShown1 = dialogueShown2 = dialogueShown3 = false;
+            swingStarted = false;
+            swingPaused = false;
+            swingProgress = 0f;
+            qteActive = false;
+            qteSuccess = false;
+            qteFailed = false;
+            swordPushedThrough = false;
+            newSwordVisible = false;
+            newSwordScale = 0f;
+
+            if (NPC.target != -1 && Main.player[NPC.target] != null && Main.player[NPC.target].active)
+                NPC.Center = Main.player[NPC.target].Center - new Vector2(0, 250f);
+            NPC.velocity = Vector2.Zero;
+            NPC.netUpdate = true;
+        }
+
+        // Dipanggil dari WhoAmIDefeatMenuSystem pas player mencet "No" - bossnya ilang tanpa
+        // ngedrop loot/reward (sama kayak perilaku lama), player-nya dimatiin & respawn normal
+        // lewat WhoAmIDefeatMenuSystem sendiri.
+        public void EndFromDefeatMenu()
+        {
+            if (NPC.active)
+            {
+                NPC.life = 0;
+                NPC.HitEffect(0, 0);
+                NPC.active = false;
+            }
+        }
+
+        // Dipanggil dari AI() pas gak ada target valid (player mati / keluar) dalam waktu cukup
+        // lama - lihat komentar di deklarasi noValidTargetTimer buat root cause-nya. Senyap & gak
+        // ngedrop loot, sama kayak EndFromDefeatMenu, plus beres-beres state cutscene/proxy player
+        // biar gak nyangkut kalau boss-nya kebetulan lagi di tengah cutscene pas ini kejadian.
+        private void ForceDespawnNoValidTarget()
+        {
+            if (Main.player[proxySlot] != null && Main.player[proxySlot].whoAmI == proxySlot)
+                Main.player[proxySlot] = new Player();
+            IsCutsceneActive = false;
+            Main.hideUI = false;
+
+            if (NPC.active)
+            {
+                NPC.life = 0;
+                NPC.HitEffect(0, 0);
+                NPC.active = false;
+            }
+        }
+
+        // ======================== DRAW ========================
         public override bool PreDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
         {
             if (dummyPlayer == null || NPC.oldPos == null) return false;
 
-            spriteBatch.End();
-            Matrix originalMatrix = Main.GameViewMatrix.TransformationMatrix;
-
-            if (aiState != 100 && aiState != 101 && aiState != 102 && aiState != 2)
+            if (aiState != 100 && aiState != 101 && aiState != 102 && aiState != 2 && aiState != STATE_DESPERATION_CUTSCENE)
             {
-                if (NPC.oldPos != null && NPC.oldPos.Length > 0)
+                int limit = Math.Min(NPC.oldPos.Length, NPCID.Sets.TrailCacheLength[NPC.type]);
+                for (int i = 0; i < limit; i++)
                 {
-                    int limit = Math.Min(NPC.oldPos.Length, NPCID.Sets.TrailCacheLength[NPC.type]);
-                    for (int i = 0; i < limit; i++)
-                    {
-                        if (NPC.oldPos[i] == Vector2.Zero) continue;
-                        Vector2 drawCenter = NPC.oldPos[i] + new Vector2(NPC.width / 2f, NPC.height / 2f);
-                        Matrix scaleMatrix = Matrix.CreateTranslation(new Vector3(-drawCenter.X, -drawCenter.Y, 0)) * Matrix.CreateScale(NPC.scale) * Matrix.CreateTranslation(new Vector3(drawCenter.X, drawCenter.Y, 0));
-                        Matrix final = scaleMatrix * originalMatrix;
-                        if (TransformationMatrixField != null) TransformationMatrixField.SetValue(Main.GameViewMatrix, final);
-
-                        spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, RasterizerState.CullCounterClockwise, null, final);
-                        dummyPlayer.invis = false;
-                        Vector2 origPos = dummyPlayer.position;
-                        dummyPlayer.position = NPC.oldPos[i] + new Vector2(NPC.width / 2f - dummyPlayer.width / 2f, NPC.height / 2f - dummyPlayer.height / 2f);
-                        float shadow = Math.Max(0.04f, 0.35f - (i * 0.03f));
-                        Main.PlayerRenderer.DrawPlayer(Main.Camera, dummyPlayer, dummyPlayer.position, dummyPlayer.fullRotation, dummyPlayer.fullRotationOrigin, shadow);
-                        dummyPlayer.position = origPos;
-                        spriteBatch.End();
-                    }
+                    if (NPC.oldPos[i] == Vector2.Zero) continue;
+                    float alpha = 1f - (i / (float)limit) * 0.8f;
+                    Vector2 drawPos = NPC.oldPos[i] + new Vector2(NPC.width / 2f - dummyPlayer.width / 2f, NPC.height / 2f - dummyPlayer.height / 2f);
+                    dummyPlayer.invis = false;
+                    dummyPlayer.position = drawPos;
+                    Main.PlayerRenderer.DrawPlayer(Main.Camera, dummyPlayer, dummyPlayer.position, dummyPlayer.fullRotation, dummyPlayer.fullRotationOrigin, alpha * 0.3f);
+                    dummyPlayer.invis = true;
                 }
             }
 
-            Vector2 glitch = (aiState == 101 || aiState == 102 || aiState == 2) ? Main.rand.NextVector2Circular(3f, 3f) : Vector2.Zero;
-            Vector2 center = NPC.Center + glitch;
-            Matrix mainScale = Matrix.CreateTranslation(new Vector3(-center.X, -center.Y, 0)) * Matrix.CreateScale(NPC.scale) * Matrix.CreateTranslation(new Vector3(center.X, center.Y, 0));
-            Matrix finalMain = mainScale * originalMatrix;
-            if (TransformationMatrixField != null) TransformationMatrixField.SetValue(Main.GameViewMatrix, finalMain);
-
-            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, RasterizerState.CullCounterClockwise, null, finalMain);
             dummyPlayer.invis = false;
-            dummyPlayer.position = NPC.Center - new Vector2(dummyPlayer.width / 2f, dummyPlayer.height / 2f) + glitch;
+            dummyPlayer.position = NPC.Center - new Vector2(dummyPlayer.width / 2f, dummyPlayer.height / 2f);
             Main.PlayerRenderer.DrawPlayer(Main.Camera, dummyPlayer, dummyPlayer.position, dummyPlayer.fullRotation, dummyPlayer.fullRotationOrigin, 0f);
             dummyPlayer.invis = true;
-            spriteBatch.End();
 
-            if (TransformationMatrixField != null) TransformationMatrixField.SetValue(Main.GameViewMatrix, originalMatrix);
-            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, RasterizerState.CullCounterClockwise, null, originalMatrix);
+            // Gambar Terra Blade raksasa - gagangnya di-anchor ke tangan boss (swordPosition = hilt),
+            // jadi yang tumbuh/memanjang cuma bagian bilahnya (via scale) ke arah swordRotation.
+            // Ini yang bikin keliatan "boss memegang & mengarahkan pedang", bukan pedang nyummon sendiri.
+            if (aiState == STATE_DESPERATION_CUTSCENE && ((cutsceneStage >= 2 && cutsceneStage <= 6) || cutsceneStage == 8))
+            {
+                Texture2D terraBladeTex = TextureAssets.Item[ItemID.TerraBlade].Value;
+                // Origin di BAWAH tekstur (gagang), bukan di tengah - supaya scale memanjangkan
+                // bilah menjauh dari tangan, bukan menggelembung merata dari titik tengah.
+                Vector2 origin = new Vector2(terraBladeTex.Width / 2f, terraBladeTex.Height * 0.88f);
+                float scale = swordScale * 0.8f;
+                Vector2 drawPos = swordPosition - screenPos;
+
+                // Warna bilah: putih-kebiruan pas charging, lalu nge-blend merah->cyan sesuai
+                // seberapa kepepet player pas QTE (merah = hampir kalah, cyan = hampir menang).
+                // Pas udah direbut player (stage 5/6) jadi emas-keputihan ("heroic"), dan pas boss
+                // narik balik buat nebas player menang (stage 8) jadi merah pekat ("danger").
+                Color bladeColor = Color.Lerp(Color.White, Color.Cyan, 0.4f);
+                if (cutsceneStage == 4)
+                    bladeColor = Color.Lerp(Color.OrangeRed, Color.Cyan, qteBarPosition);
+                else if (cutsceneStage == 5 || cutsceneStage == 6)
+                    bladeColor = Color.Lerp(Color.White, Color.Gold, 0.5f);
+                else if (cutsceneStage == 8)
+                    bladeColor = Color.Lerp(Color.OrangeRed, Color.Red, 0.6f);
+
+                // Trail/streak warna-warni di belakang bilah waktu masih mengayun (stage 3) - kesan
+                // energi berputar seperti referensi, bukan cuma glow polos satu warna.
+                if (cutsceneStage == 3 && !swingPaused)
+                {
+                    Color[] trailColors = { Color.MediumPurple, Color.DeepSkyBlue, Color.Cyan };
+                    for (int i = 1; i <= 3; i++)
+                    {
+                        float trailAngle = swordRotation - i * 0.06f;
+                        float trailAlpha = 0.22f - i * 0.05f;
+                        spriteBatch.Draw(terraBladeTex, drawPos, null, trailColors[i - 1] * trailAlpha, trailAngle, origin, scale, SpriteEffects.None, 0f);
+                    }
+                }
+
+                // Glow berlapis warna-warni (ungu -> cyan -> putih) biar nggak keliatan polos.
+                float pulse = 0.75f + 0.25f * (float)Math.Sin(Main.GameUpdateCount * 0.15f);
+                spriteBatch.Draw(terraBladeTex, drawPos, null, Color.MediumPurple * 0.18f * pulse, swordRotation, origin, scale * 1.35f, SpriteEffects.None, 0f);
+                spriteBatch.Draw(terraBladeTex, drawPos, null, Color.DeepSkyBlue * 0.22f * pulse, swordRotation, origin, scale * 1.2f, SpriteEffects.None, 0f);
+                spriteBatch.Draw(terraBladeTex, drawPos, null, Color.Cyan * 0.28f, swordRotation, origin, scale * 1.08f, SpriteEffects.None, 0f);
+
+                // Bilah utama
+                spriteBatch.Draw(terraBladeTex, drawPos, null, bladeColor, swordRotation, origin, scale, SpriteEffects.None, 0f);
+
+                // Kilau tajam di bagian ujung bilah biar keliatan "hidup"/berenergi
+                spriteBatch.Draw(terraBladeTex, drawPos, null, Color.White * 0.5f * pulse, swordRotation, origin, scale * 0.97f, SpriteEffects.None, 0f);
+            }
+
+            // Pedang raksasa lama yang udah didorong lepas & nancep di tanah di belakang boss
+            // (STAGE 6 selesai) - cuma prop diem buat sisa cutscene (stage 10/11/12), nggak
+            // ngikutin swordPosition lagi karena field itu sekarang dipakai animasi pedang baru.
+            if (aiState == STATE_DESPERATION_CUTSCENE && (cutsceneStage == 10 || cutsceneStage == 11 || cutsceneStage == 12) && swordPushedThrough)
+            {
+                Texture2D terraBladeTex = TextureAssets.Item[ItemID.TerraBlade].Value;
+                Vector2 origin = new Vector2(terraBladeTex.Width / 2f, terraBladeTex.Height * 0.88f);
+                Vector2 drawPos = pushedSwordRestPosition - screenPos;
+                float restScale = pushedSwordRestScale * 0.8f;
+
+                spriteBatch.Draw(terraBladeTex, drawPos, null, Color.DeepSkyBlue * 0.18f, pushedSwordRestRotation, origin, restScale * 1.15f, SpriteEffects.None, 0f);
+                spriteBatch.Draw(terraBladeTex, drawPos, null, Color.Lerp(Color.White, Color.Gold, 0.5f), pushedSwordRestRotation, origin, restScale, SpriteEffects.None, 0f);
+            }
+
+            // Pedang Terra Blade BARU - dikeluarkan player di stage 10, dilempar di stage 11, lalu
+            // digambar nancep di dada boss selagi dia glitch & mati di stage 12.
+            if (aiState == STATE_DESPERATION_CUTSCENE && newSwordVisible && newSwordScale > 0.01f)
+            {
+                Texture2D terraBladeTex = TextureAssets.Item[ItemID.TerraBlade].Value;
+                Vector2 origin = new Vector2(terraBladeTex.Width / 2f, terraBladeTex.Height * 0.88f);
+                Vector2 drawPos = newSwordPosition - screenPos;
+                float pulse = 0.75f + 0.25f * (float)Math.Sin(Main.GameUpdateCount * 0.2f);
+
+                spriteBatch.Draw(terraBladeTex, drawPos, null, Color.Cyan * 0.3f * pulse, newSwordRotation, origin, newSwordScale * 1.2f, SpriteEffects.None, 0f);
+                spriteBatch.Draw(terraBladeTex, drawPos, null, Color.White, newSwordRotation, origin, newSwordScale, SpriteEffects.None, 0f);
+            }
+
+            // ===================== QTE BAR (REDESIGN LEBIH COLORFUL) =====================
+            if (aiState == STATE_DESPERATION_CUTSCENE && cutsceneStage == 4)
+            {
+                Texture2D pixel = TextureAssets.MagicPixel.Value;
+
+                // Posisi bar di KANAN layar - digeser lebih ke pinggir (bukan cuma sedikit dari
+                // tengah) supaya nggak nutupin boss & player yang lagi ada di tengah scene.
+                Vector2 barPos = new Vector2(Main.screenWidth * 0.83f, Main.screenHeight / 2f);
+                float barWidth = 42f;
+                float barHeight = 360f;
+                Rectangle bgRect = new Rectangle((int)(barPos.X - barWidth / 2f), (int)(barPos.Y - barHeight / 2f), (int)barWidth, (int)barHeight);
+
+                float dangerT = MathHelper.Clamp(1f - qteBarPosition, 0f, 1f);
+                float pulse = 0.75f + 0.25f * (float)Math.Sin(Main.GameUpdateCount * 0.25f);
+
+                // --- Panel gelap semi-transparan di belakang bar biar kontras ---
+                Rectangle panelRect = new Rectangle(bgRect.X - 22, bgRect.Y - 55, bgRect.Width + 44, bgRect.Height + 110);
+                spriteBatch.Draw(pixel, panelRect, null, Color.Black * 0.45f, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+
+                // --- Latar bar: gradasi vertikal merah (bawah/bahaya) -> oranye -> emas (atas/menang) ---
+                int gradSteps = 24;
+                for (int i = 0; i < gradSteps; i++)
+                {
+                    float t = i / (float)(gradSteps - 1);
+                    Color stepColor = t < 0.5f
+                        ? Color.Lerp(new Color(140, 10, 20), new Color(255, 110, 20), t / 0.5f)
+                        : Color.Lerp(new Color(255, 110, 20), new Color(255, 215, 40), (t - 0.5f) / 0.5f);
+                    int stripH = (int)Math.Ceiling(bgRect.Height / (float)gradSteps) + 1;
+                    Rectangle stripRect = new Rectangle(bgRect.X, bgRect.Y + bgRect.Height - (int)((i + 1) * bgRect.Height / (float)gradSteps), bgRect.Width, stripH);
+                    spriteBatch.Draw(pixel, stripRect, null, stepColor * 0.85f, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+                }
+
+                // --- Fill terang (progress player) di atas gradasi, warna cyan/putih berenergi ---
+                int fillHeight = (int)(bgRect.Height * qteBarPosition);
+                Rectangle fillRect = new Rectangle(bgRect.X, bgRect.Y + bgRect.Height - fillHeight, bgRect.Width, fillHeight);
+                Color fillColor = Color.Lerp(Color.DeepSkyBlue, Color.White, 0.25f * pulse);
+                spriteBatch.Draw(pixel, fillRect, null, fillColor * 0.55f, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+
+                // --- Chevron/anak-panah kecil menunjuk ke atas sepanjang bar (gaya "OVERPOWER") ---
+                for (int c = 0; c < 6; c++)
+                {
+                    float cy = bgRect.Y + bgRect.Height - ((c + 0.5f) / 6f) * bgRect.Height - (Main.GameUpdateCount * 1.1f) % (bgRect.Height / 6f);
+                    if (cy < bgRect.Y || cy > bgRect.Y + bgRect.Height) continue;
+                    Color chevronColor = Color.Gold * (0.5f + 0.3f * pulse);
+                    for (int w = 0; w < 5; w++)
+                    {
+                        int halfW = 3 + w;
+                        spriteBatch.Draw(pixel, new Rectangle((int)(barPos.X - halfW), (int)cy - (4 - w), halfW * 2, 2), null, chevronColor, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+                    }
+                }
+
+                // --- Border neon berdenyut, warna berubah tergantung seberapa bahaya ---
+                Color borderColor = Color.Lerp(Color.Cyan, Color.Red, dangerT) * pulse;
+                int bt = 3;
+                spriteBatch.Draw(pixel, new Rectangle(bgRect.X - bt, bgRect.Y - bt, bgRect.Width + bt * 2, bt), null, borderColor, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+                spriteBatch.Draw(pixel, new Rectangle(bgRect.X - bt, bgRect.Y + bgRect.Height, bgRect.Width + bt * 2, bt), null, borderColor, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+                spriteBatch.Draw(pixel, new Rectangle(bgRect.X - bt, bgRect.Y - bt, bt, bgRect.Height + bt * 2), null, borderColor, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+                spriteBatch.Draw(pixel, new Rectangle(bgRect.X + bgRect.Width, bgRect.Y - bt, bt, bgRect.Height + bt * 2), null, borderColor, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+
+                // --- Jarum penunjuk emas dengan glow tebal di belakangnya ---
+                float needleY = bgRect.Y + bgRect.Height - (bgRect.Height * qteBarPosition);
+                spriteBatch.Draw(pixel, new Rectangle(bgRect.X - 14, (int)needleY - 6, bgRect.Width + 28, 12), null, Color.Gold * 0.35f, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+                spriteBatch.Draw(pixel, new Rectangle(bgRect.X - 8, (int)needleY - 3, bgRect.Width + 16, 6), null, Color.Gold, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+                spriteBatch.Draw(pixel, new Rectangle(bgRect.X - 8, (int)needleY - 1, bgRect.Width + 16, 2), null, Color.White, 0f, Vector2.Zero, SpriteEffects.None, 0f);
+
+                // --- RANK (C/B/A/S/SS/SSS) + jumlah klik player - kelihatan progress "seberapa niat" ---
+                var rankInfo = GetQteRank(qteClickCount);
+                Color rankColor = rankInfo.color;
+                if (rankInfo.label == "SSS")
+                {
+                    // Rank tertinggi dapet warna pelangi berputar biar keliatan paling "wah"
+                    float hue = (Main.GameUpdateCount * 0.012f) % 1f;
+                    rankColor = Main.hslToRgb(hue, 1f, 0.62f);
+                }
+                float rankPulse = 0.85f + 0.15f * (float)Math.Sin(Main.GameUpdateCount * 0.2f);
+                float rankBaseScale = 1.15f + rankInfo.glowLayers * 0.08f;
+                Vector2 rankPos = new Vector2(barPos.X, bgRect.Y - 128f);
+
+                // Lapisan glow di belakang rank - makin tinggi rank, makin banyak & makin lebar lapisannya
+                for (int g = rankInfo.glowLayers; g >= 1; g--)
+                {
+                    float glowScale = rankBaseScale * (1.15f + g * 0.16f) * rankPulse;
+                    float glowAlpha = 0.10f * g;
+                    Utils.DrawBorderString(spriteBatch, rankInfo.label, rankPos, rankColor * glowAlpha, glowScale, 0.5f, 0.5f);
+                }
+                Utils.DrawBorderString(spriteBatch, rankInfo.label, rankPos, Color.Black * 0.55f, rankBaseScale * rankPulse + 0.05f, 0.5f, 0.5f);
+                Utils.DrawBorderString(spriteBatch, rankInfo.label, rankPos, rankColor, rankBaseScale * rankPulse, 0.5f, 0.5f);
+
+                // Jumlah klik, digambar di bawah rank
+                Vector2 clickCountPos = new Vector2(barPos.X, bgRect.Y - 84f);
+                string clickCountText = qteClickCount.ToString() + " HITS";
+                Utils.DrawBorderString(spriteBatch, clickCountText, clickCountPos, Color.White, 0.85f, 0.5f, 0.5f);
+
+                // --- Label "OVERPOWER" di atas bar, nyala pas hampir menang ---
+                if (qteBarPosition > 0.75f)
+                {
+                    Color opColor = Color.Lerp(Color.DeepSkyBlue, Color.White, pulse);
+                    Utils.DrawBorderString(spriteBatch, "OVERPOWER!", new Vector2(barPos.X, bgRect.Y - 168f), opColor, 1.1f, 0.5f, 0.5f);
+                }
+                // --- Label "DANGER" merah berdenyut pas hampir kalah ---
+                if (qteBarPosition < 0.25f)
+                {
+                    Color dangerColor = Main.GameUpdateCount % 14 < 7 ? Color.Red : Color.OrangeRed;
+                    Utils.DrawBorderString(spriteBatch, "DANGER!", new Vector2(barPos.X, bgRect.Y + bgRect.Height + 34f), dangerColor, 1.1f, 0.5f, 0.5f);
+                }
+
+                // --- Teks instruksi utama, besar & warnanya berputar-putar seperti api ---
+                string qteText = "SPAM [LMB] TO RESIST!";
+                float huePhase = (Main.GameUpdateCount * 0.08f) % (MathHelper.TwoPi);
+                Color textColor = Color.Lerp(Color.Yellow, Color.OrangeRed, 0.5f + 0.5f * (float)Math.Sin(huePhase));
+                Vector2 textPos = new Vector2(barPos.X, bgRect.Y - 44f);
+                // Lapisan glow gelap di belakang biar teksnya makin nendang
+                Utils.DrawBorderString(spriteBatch, qteText, textPos, Color.Black * 0.6f, 1.32f, 0.5f, 0.5f);
+                Utils.DrawBorderString(spriteBatch, qteText, textPos, textColor, 1.25f, 0.5f, 0.5f);
+            }
+
+            // Speech bubble dialog boss - digambar terakhir biar selalu di atas semua elemen lain,
+            // dan tetap muncul walau Main.hideUI = true (beda dari CombatText yang ikut kesembunyiin).
+            DrawSpeechBubble(spriteBatch, screenPos);
+
             return false;
-        }
-    }
-
-    public class WhoAmIProjectileGuard : GlobalProjectile
-    {
-        private int proxySlot => Main.maxPlayers - 1;
-
-        public override void SetDefaults(Projectile projectile)
-        {
-            if (projectile.owner == proxySlot)
-            {
-                projectile.hostile = true;
-                projectile.friendly = false;
-            }
-        }
-
-        public override bool PreAI(Projectile projectile)
-        {
-            if (projectile.owner == proxySlot)
-            {
-                projectile.hostile = true;
-                projectile.friendly = false;
-                if (projectile.aiStyle == 99)
-                {
-                    int idx = NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>());
-                    if (idx != -1)
-                    {
-                        if (!Main.player[proxySlot].channel) { projectile.Kill(); return false; }
-                        NPC boss = Main.npc[idx];
-                        Player target = Main.player[boss.target];
-                        if (target != null && target.active && !target.dead) { projectile.ai[0] = target.Center.X; projectile.ai[1] = target.Center.Y; }
-                    }
-                    else { projectile.Kill(); return false; }
-                }
-            }
-            return true;
-        }
-
-        public override void PostAI(Projectile projectile)
-        {
-            if (projectile.owner == proxySlot)
-            {
-                int idx = NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>());
-                if (idx != -1) projectile.scale = Main.npc[idx].scale;
-
-                projectile.hostile = true;
-                projectile.friendly = false;
-
-                Player target = null;
-                float closest = float.MaxValue;
-                for (int i = 0; i < Main.maxPlayers; i++)
-                {
-                    if (i == proxySlot) continue;
-                    Player p = Main.player[i];
-                    if (p != null && p.active && !p.dead)
-                    {
-                        float d = Vector2.Distance(projectile.Center, p.Center);
-                        if (d < closest) { closest = d; target = p; }
-                    }
-                }
-
-                if (target != null)
-                {
-                    Vector2 toPlayer = target.Center - projectile.Center;
-                    float dist = toPlayer.Length();
-                    if ((projectile.aiStyle == 9 || ProjectileID.Sets.MinionTargettingFeature[projectile.type]) && !projectile.minion && !projectile.sentry && !Main.projPet[projectile.type])
-                    {
-                        if (dist > 0f) toPlayer.Normalize();
-                        float spd = projectile.velocity.Length();
-                        if (spd < 5f) spd = 12f;
-                        projectile.velocity = Vector2.Lerp(projectile.velocity, toPlayer * spd, 0.28f);
-                    }
-                    else if (projectile.minion || projectile.sentry || Main.projPet[projectile.type])
-                    {
-                        if (projectile.type == ProjectileID.StardustDragon2 || projectile.type == ProjectileID.StardustDragon3 || projectile.type == ProjectileID.StardustDragon4) return;
-                        projectile.tileCollide = false;
-                        Vector2 targetPos = target.Center;
-                        if (projectile.type == ProjectileID.EmpressBlade)
-                        {
-                            float angle = (projectile.identity % 8) * (MathHelper.TwoPi / 8f) + (Main.GameUpdateCount * 0.03f);
-                            targetPos += new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)) * 55f;
-                            toPlayer = targetPos - projectile.Center;
-                            dist = toPlayer.Length();
-                        }
-                        if (dist > 0f) toPlayer.Normalize();
-                        float minionSpeed = dist > 600f ? 16f : 10f;
-                        Vector2 wave = new Vector2(-toPlayer.Y, toPlayer.X) * (float)Math.Sin(Main.GameUpdateCount * 0.15f) * 2f;
-                        Vector2 finalVel = (toPlayer * minionSpeed) + wave;
-                        projectile.velocity = Vector2.Lerp(projectile.velocity, finalVel, 0.12f);
-                        if (projectile.velocity != Vector2.Zero)
-                        {
-                            projectile.rotation = projectile.velocity.ToRotation();
-                            if (projectile.type == ProjectileID.FlyingImp || projectile.type == ProjectileID.BabySlime || projectile.type == ProjectileID.DangerousSpider || projectile.type == ProjectileID.JumperSpider || projectile.type == ProjectileID.VenomSpider)
-                                projectile.rotation += MathHelper.ToRadians(90f);
-                        }
-                        if (Main.GameUpdateCount % 60 == 0 && dist < 600f && Main.rand.NextBool(2))
-                        {
-                            Vector2 shoot = target.Center - projectile.Center;
-                            if (shoot != Vector2.Zero) shoot.Normalize();
-                            shoot *= 11f;
-                            int p = Projectile.NewProjectile(projectile.GetSource_FromThis(), projectile.Center, shoot, ProjectileID.PurpleLaser, (int)(projectile.damage * 0.75f), 0f, proxySlot);
-                            if (p >= 0 && p < 1000) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; }
-                        }
-                    }
-                }
-            }
         }
     }
 }
