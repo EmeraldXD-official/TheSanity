@@ -26,6 +26,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         public static Vector2 CutsceneCameraTarget = Vector2.Zero;
         public static float CutsceneShakeIntensity = 0f;
 
+        // ================== PERFECT MIRROR SUMMON HOOK ==================
+        // Diisi oleh WhoAmIMirrorPaintingTile.TrySummon() SEBELUM NPC.NewNPC dipanggil, supaya
+        // begitu instance NPC ini pertama kali AI()-nya jalan, dia tau harus muncul PAS DI DEPAN
+        // cermin (bukan jatuh dari langit kayak intro lama). Nullable: kalau null pas AI() pertama
+        // jalan (misal boss di-spawn lewat cara lain, debug command dsb), fallback ke posisi lama
+        // (di atas player) supaya tetap gak crash.
+        public static Vector2? PendingMirrorSpawnPoint = null;
+        public static int PendingMirrorFacingDirection = 1;
+
         private static readonly FieldInfo TransformationMatrixField = typeof(SpriteViewMatrix).GetField("_transformationMatrix", BindingFlags.NonPublic | BindingFlags.Instance);
 
         // ================== FIX: boss ga pernah despawn pas kita mati kebunuh dia ==================
@@ -66,6 +75,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private int weaponCarouselTimer = 0;
         private int weaponSwapThreshold = 180;
         private int scanCooldownTimer = 0;
+
+        // Anti-repeat memory buat weapon carousel (lihat ScanAndSelectWeapon di WhoAmI_Helpers.cs) -
+        // nyimpen beberapa tipe senjata TERAKHIR yang dipakai supaya carousel beneran muter ke
+        // senjata lain yang "diingat" dari inventory player, bukan keseringan balik ke senjata yang
+        // sama (atau kesannya "cuma pakai 1-2 senjata favorit") tiap kali reroll.
+        private List<int> recentWeaponTypeHistory = new List<int>();
 
         // AI States
         public int aiState = 100;
@@ -145,7 +160,55 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private const int STATE_PARRY_STANCE = 6;
         private const int STATE_COUNTER_ATTACK = 7;
         private const int STATE_PREDICTIVE_DODGE = 8;
+        private const int STATE_MAGIC_SPIRAL_RIFT = 9;
+
+        // ================== "SAT SET" OVERHAUL: 4 new attack states ==================
+        private const int STATE_BLINK_ECHO_COMBO = 10;      // TrueMelee / ProjMelee — rhythm blink-slash-counter
+        private const int STATE_ORBIT_GRID_LOCK = 11;       // Ranged — orbiting zoner + laser grid barrage
+        private const int STATE_GRAVITY_WELL_TORRENT = 12;  // Magic — gravity well pull + spiral projectile rain
+        private const int STATE_MIRROR_MIRAGE = 13;         // Any/Desperation — 3-way decoy shell game
+        private const int STATE_MIRAGE_DECOY_HOLD = 14;     // internal: used ONLY by decoy instances while they wait to be hit
+
+        // Signature patterns for the 4 archetypes that previously only had the original 4 shared
+        // patterns and never got a unique one of their own (TrueMelee/ProjMelee got Blink & Echo Combo,
+        // Ranged got Orbiting Grid Lock, Magic got Gravity Well Torrent - Summon/Whip/Yoyo/Boomerang
+        // did not). See WhoAmI_Pattern_ArchetypeExtras.cs.
+        private const int STATE_SUMMON_RIFT_SWARM = 15;     // Summon — retreat + minion rift swarm + synced dive
+        private const int STATE_WHIP_LASH_CAGE = 16;        // Whip — 3-point flank snap-dash lash cage
+        private const int STATE_YOYO_TETHER_STORM = 17;     // Yoyo — rotating fan throw + orbital sweep
+        private const int STATE_BOOMERANG_CROSSFIRE = 18;   // Boomerang — twin flank snap-dash crossfire
+
+        // ================== INVENTORY-DRIVEN ARCHETYPE ATTACKS: MELEE TRIO ==================
+        // 3 new "Lucille Karma"-tier patterns exclusive to TrueMelee/ProjMelee (see
+        // WhoAmI_Pattern_MeleeArchetypeExtras.cs). Rolled into the existing TrueMelee/ProjMelee
+        // validPatterns pool in SelectAndExecuteArchetypePattern (indices 5/6/7) alongside the
+        // pre-existing 0-4, so they're just more variety in the same weighted-random loop rather
+        // than a separate system.
+        private const int STATE_ABYSSAL_CLEAVE = 19;         // "Abyssal Cleave & Fractured Space"
+        private const int STATE_ORBITING_BLADE_RING = 20;    // "Orbiting Blade Ring (Sovereign Guard)"
+        private const int STATE_DIMENSIONAL_PIERCE = 21;     // "Dimensional Pierce / Flash Strike"
+
+        // ================== INVENTORY-DRIVEN ARCHETYPE ATTACKS: RANGED TRIO ==================
+        // See WhoAmI_Pattern_RangedArchetypeExtras.cs. Rolled into the Ranged validPatterns pool in
+        // SelectAndExecuteArchetypePattern (indices 5/6/7), same convention as the melee trio above.
+        private const int STATE_VECTOR_LASER_GRID = 22;      // "Vector Laser Grid System"
+        private const int STATE_HOMING_CLUSTER_COMET = 23;   // "Homing Cluster Comet"
+        private const int STATE_SINGULARITY_OVERDRIVE = 24;  // "Singularity Overdrive"
+
+        // ================== INVENTORY-DRIVEN ARCHETYPE ATTACKS: MAGIC TRIO ==================
+        // See WhoAmI_Pattern_MagicArchetypeExtras.cs. Rolled into the Magic validPatterns pool in
+        // SelectAndExecuteArchetypePattern (indices 6/7/8 - Magic already had a 6th slot, index 5,
+        // for the pre-existing Gravity Well & Arcane Torrent), same convention as the other trios.
+        private const int STATE_AUREOLA_SIGNET_RAIN = 25;    // "Aureola Signet Rain"
+        private const int STATE_DOUBLE_HELIX_SWEEP = 26;     // "Double Helix Sweep"
+        private const int STATE_QUANTUM_GLITCH_PHASING = 27; // "Quantum Glitch Phasing"
+
         private const int STATE_DESPERATION_CUTSCENE = 103;
+
+        // Intro baru: boss muncul (fade in) tepat di depan lukisan WhoAmIMirrorPaintingTile, bukan
+        // jatuh dari langit di atas player kayak intro lama. States 100/101 lama DIPAKAI ULANG
+        // (bukan dihapus) buat urutan dialog ini - lihat HandleCutscenes - biar nggak perlu ubah
+        // semua tempat lain yang masih ngecek `aiState == 100 || aiState == 101` (music fade, dsb).
 
         // ================== DESPERATION CUTSCENE FIELDS ==================
         private bool desperationStarted = false;
@@ -227,6 +290,38 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private Player dummyPlayer;
         private int proxySlot => Main.maxPlayers - 1;
+
+        // ================================================================================================
+        // MIRROR MIRAGE / SHELL GAME — decoy support fields
+        // ================================================================================================
+        // Decoys are spawned as ADDITIONAL instances of this same NPC type (simplest way to get a fully
+        // "hittable", correctly-rendered clone without new content/textures). `isMirageDecoy` flags an
+        // instance as a fake so every other system in this mod (cutscene triggers, music, defeat menu,
+        // desperation logic) can tell it apart from the real boss - see FindRealBossIndex() below, which
+        // every OTHER file that does NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>()) should prefer instead.
+        public bool isMirageDecoy = false;
+        public int mirageOwnerWhoAmI = -1; // NPC.whoAmI of the real boss that spawned this decoy
+
+        // Only meaningful on the REAL boss instance while STATE_MIRROR_MIRAGE is active.
+        private int[] mirageDecoySlots = new int[2] { -1, -1 }; // NPC.whoAmI of the two decoys
+        private int mirageRealPositionIndex = 0; // which of the 3 layout slots (0=Left,1=Right,2=Top) is real
+        private Vector2[] mirageLayoutPositions = new Vector2[3];
+        private bool mirageChannelBroken = false;
+        private int mirrorMirageCooldownTimer = 0;
+
+        // Finds the REAL WhoAmI boss NPC index, ignoring any mirage decoys. Other files (SceneEffect,
+        // CutscenePlayer, DefeatMenuSystem) should call this instead of NPC.FindFirstNPC when they need
+        // "the" boss instance, otherwise a decoy could get picked up and report wrong aiState/cutscene data.
+        public static int FindRealBossIndex()
+        {
+            for (int i = 0; i < Main.maxNPCs; i++)
+            {
+                NPC npc = Main.npc[i];
+                if (npc.active && npc.type == ModContent.NPCType<WhoAmI>() && npc.ModNPC is WhoAmI w && !w.isMirageDecoy)
+                    return i;
+            }
+            return -1;
+        }
 
         // ---------- SetStaticDefaults ----------
         public override void SetStaticDefaults()
@@ -312,7 +407,20 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         public override bool? CanBeHitByProjectile(Projectile projectile)
         {
+            // FIX: mirage decoys could still be popped by player hits. Every comment in this project
+            // (WhoAmI_Pattern_MirrorMirage.cs especially) already claimed this method blocked decoys,
+            // but the actual `isMirageDecoy` check was never here - only the unrelated proxySlot guard
+            // (which stops the boss's OWN projectiles from hitting itself) was. Decoys are an illusion
+            // to be picked apart by eye, not a target you're allowed to damage - see SpawnMirageDecoys.
+            if (isMirageDecoy) return false;
             if (projectile.owner == proxySlot) return false;
+            return null;
+        }
+
+        public override bool? CanBeHitByItem(Player player, Item item)
+        {
+            // Same fix as CanBeHitByProjectile above, for melee/item hits.
+            if (isMirageDecoy) return false;
             return null;
         }
 
@@ -335,6 +443,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         public override bool CheckDead()
         {
+            // Decoys are ordinary NPCs as far as death is concerned - they just burst into shards
+            // (handled in OnKill below) instead of ever entering the desperation sequence.
+            if (isMirageDecoy) return true;
+
             if (aiState != STATE_DESPERATION_CUTSCENE && aiState != 102)
             {
                 NPC.life = 1;
@@ -377,6 +489,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         public override void ModifyHitByProjectile(Projectile projectile, ref NPC.HitModifiers modifiers)
         {
+            // Belt-and-suspenders: CanBeHitByProjectile already blocks the hit entirely for decoys now,
+            // so this shouldn't normally even be reached for them - but zero the damage anyway instead
+            // of just returning, in case some non-standard damage source ever bypasses CanBeHitBy*.
+            if (isMirageDecoy) { modifiers.SetMaxDamage(0); return; }
+
+            if (aiState == STATE_MIRROR_MIRAGE && !mirageChannelBroken)
+            {
+                BreakMirageChannel(); // real boss got picked correctly - stagger it and expose to clean damage
+                return;
+            }
+
             if (isParrying && projectile.active && projectile.friendly && !projectile.hostile)
             {
                 modifiers.SetMaxDamage(0);
@@ -411,6 +534,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         public override void ModifyHitByItem(Player player, Item item, ref NPC.HitModifiers modifiers)
         {
+            // Belt-and-suspenders: CanBeHitByItem already blocks the hit entirely for decoys now, so
+            // this shouldn't normally even be reached for them - but zero the damage anyway instead of
+            // just returning, in case some non-standard damage source ever bypasses CanBeHitBy*.
+            if (isMirageDecoy) { modifiers.SetMaxDamage(0); return; }
+
+            if (aiState == STATE_MIRROR_MIRAGE && !mirageChannelBroken)
+            {
+                BreakMirageChannel();
+                return;
+            }
+
             if (isParrying)
             {
                 modifiers.SetMaxDamage(0);
@@ -436,6 +570,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // ======================== MAIN AI ========================
         public override void AI()
         {
+            // Mirage decoys run a tiny, self-contained AI instead of the full boss brain below - see
+            // WhoAmI_Pattern_MirrorMirage.cs (RunMirageDecoyAI). This keeps every other system in this
+            // file (proxy player, cutscenes, weapon carousel, despawn timers) untouched by decoys.
+            if (isMirageDecoy)
+            {
+                RunMirageDecoyAI();
+                return;
+            }
+
             TargetClosestRealPlayer();
 
             if (NPC.target == -1 || !Main.player[NPC.target].active || Main.player[NPC.target].dead)
@@ -473,12 +616,28 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 initializedCutscene = true;
                 aiState = 100;
                 aiTimer = 0;
-                NPC.Center = player.Center - new Vector2(0, 700);
+
+                if (PendingMirrorSpawnPoint.HasValue)
+                {
+                    // Muncul lewat cermin: taruh persis di titik yang udah dihitung sama
+                    // WhoAmIMirrorPaintingTile.TrySummon() (tepat di depan lukisan Perfect Mirror).
+                    NPC.Center = PendingMirrorSpawnPoint.Value;
+                    NPC.direction = PendingMirrorFacingDirection;
+                    NPC.spriteDirection = NPC.direction;
+                    PendingMirrorSpawnPoint = null;
+                }
+                else
+                {
+                    // Fallback lama (misal di-spawn lewat debug/command, bukan lewat cermin) -
+                    // dipertahankan supaya tetap gak crash walau summon-nya nggak lewat mirror shrine.
+                    NPC.Center = player.Center - new Vector2(0, 700);
+                }
             }
 
             if (!isPhase2 && NPC.life < NPC.lifeMax * 0.5f && aiState != 100 && aiState != 101 && aiState != 102 && aiState != STATE_DESPERATION_CUTSCENE)
             {
                 isPhase2 = true;
+                TriggerPhase2RageBurst(); // ledakan partikel + roar + screenshake pas transisi ke rage-mode (WhoAmI_VFX.cs)
                 aiState = 2;
                 aiTimer = 0;
                 NPC.velocity = Vector2.Zero;
@@ -562,12 +721,24 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             CalculateTacticalPosition(player);
             HandleReactiveDodging(player);
+            HandleProjectileSideStep(player); // "sat set" rule 2.5: perpendicular micro-dash + counter window
+
+            if (mirrorMirageCooldownTimer > 0) mirrorMirageCooldownTimer--;
+            TickSatSetTimers();
+            UpdateAmbientBossVFX(player); // aura mote/light "napas" tema-warna, jalan tiap tick selama fight aktif (WhoAmI_VFX.cs)
 
             switch (aiState)
             {
                 case STATE_IDLE:
                     NPC.damage = 0;
                     ExecuteSmoothMovement(player);
+
+                    // Mirror Mirage is archetype-agnostic (works the same regardless of what the player
+                    // is holding) and gets progressively more frequent in phase 2 / desperation, so it's
+                    // rolled independently of the normal weapon-archetype pattern loop below.
+                    if (mirrorMirageCooldownTimer <= 0 && patternCooldown <= 0 && TryStartMirrorMirage(player))
+                        break;
+
                     if (patternCooldown <= 0)
                         SelectAndExecuteArchetypePattern(player);
                     else
@@ -612,6 +783,78 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     ExecutePredictiveDodge(player);
                     break;
 
+                case STATE_MAGIC_SPIRAL_RIFT:
+                    HandleMagicSpiralRift(player);
+                    break;
+
+                case STATE_BLINK_ECHO_COMBO:
+                    HandleBlinkEchoCombo(player);
+                    break;
+
+                case STATE_ORBIT_GRID_LOCK:
+                    HandleOrbitingGridLock(player);
+                    break;
+
+                case STATE_GRAVITY_WELL_TORRENT:
+                    HandleGravityWellTorrent(player);
+                    break;
+
+                case STATE_MIRROR_MIRAGE:
+                    HandleMirrorMirage(player);
+                    break;
+
+                case STATE_SUMMON_RIFT_SWARM:
+                    HandleSummonRiftSwarm(player);
+                    break;
+
+                case STATE_WHIP_LASH_CAGE:
+                    HandleWhipLashCage(player);
+                    break;
+
+                case STATE_YOYO_TETHER_STORM:
+                    HandleYoyoTetherStorm(player);
+                    break;
+
+                case STATE_BOOMERANG_CROSSFIRE:
+                    HandleBoomerangCrossfire(player);
+                    break;
+
+                case STATE_ABYSSAL_CLEAVE:
+                    HandleAbyssalCleave(player);
+                    break;
+
+                case STATE_ORBITING_BLADE_RING:
+                    HandleOrbitingBladeRing(player);
+                    break;
+
+                case STATE_DIMENSIONAL_PIERCE:
+                    HandleDimensionalPierce(player);
+                    break;
+
+                case STATE_VECTOR_LASER_GRID:
+                    HandleVectorLaserGrid(player);
+                    break;
+
+                case STATE_HOMING_CLUSTER_COMET:
+                    HandleHomingClusterComet(player);
+                    break;
+
+                case STATE_SINGULARITY_OVERDRIVE:
+                    HandleSingularityOverdrive(player);
+                    break;
+
+                case STATE_AUREOLA_SIGNET_RAIN:
+                    HandleAureolaSignetRain(player);
+                    break;
+
+                case STATE_DOUBLE_HELIX_SWEEP:
+                    HandleDoubleHelixSweep(player);
+                    break;
+
+                case STATE_QUANTUM_GLITCH_PHASING:
+                    HandleQuantumGlitchPhasing(player);
+                    break;
+
                 default:
                     aiState = STATE_IDLE;
                     aiTimer = 0;
@@ -640,7 +883,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             // teleport/glitch acak persis pas lagi dash. Sekarang clamp jarak-ke-player ini
             // di-skip selama STATE_DASH_ATTACK (durasinya cuma ~35 tick jadi tetap aman); batas
             // dunia (world bounds) di bawah tetap jalan di semua state buat jaga-jaga terakhir.
-            if (aiState != STATE_DASH_ATTACK)
+            // STATE_BLINK_ECHO_COMBO also gets exempted here for the same reason as STATE_DASH_ATTACK:
+            // its blink/echo movement (see WhoAmI_Pattern_BlinkEchoCombo.cs) deliberately repositions the
+            // boss in a single tick and would otherwise get snap-clamped mid-telegraph.
+            if (aiState != STATE_DASH_ATTACK && aiState != STATE_BLINK_ECHO_COMBO)
             {
                 Vector2 diff = NPC.Center - target.Center;
                 if (diff.Length() > maxDistanceFromPlayer)
@@ -677,26 +923,38 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             CutsceneCameraTarget = NPC.Center;
             NPC.dontTakeDamage = true;
             NPC.damage = 0;
+            UpdateAmbientBossVFX(player); // aura/mote tema-warna tetap "napas" selama cutscene, bukan cuma pas fight normal (WhoAmI_VFX.cs)
 
             if (aiState == 100)
             {
-                NPC.alpha = 0;
-                Vector2 targetPos = player.Center - new Vector2(0, 250f);
-                NPC.velocity = (targetPos - NPC.Center) * 0.08f;
+                // Mirror-shrine intro, part 1: berdiri diam persis di depan cermin (sudah
+                // diposisikan di NPC.Center oleh bootstrap di AI(), TIDAK dikejar-kejar lagi ke
+                // arah player kayak intro lama), lalu fade dari transparan penuh ke keliatan
+                // penuh ("dari pudar menjadi terang").
+                NPC.velocity = Vector2.Zero;
                 CutsceneShakeIntensity = 0f;
 
-                if (aiTimer == 60) CombatText.NewText(NPC.getRect(), new Color(160, 110, 240), "Hello, my name is...", true);
-                if (aiTimer == 200) CombatText.NewText(NPC.getRect(), new Color(160, 110, 240), "Wait... Who am I? Why am I in this world?", true);
-                if (aiTimer >= 360) { aiState = 101; aiTimer = 0; NPC.netUpdate = true; }
+                const int FadeInDuration = 90;
+                NPC.alpha = (int)MathHelper.Lerp(255, 0, MathHelper.Clamp(aiTimer / (float)FadeInDuration, 0f, 1f));
+
+                if (Main.rand.NextBool(3))
+                    Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.PurpleTorch, 0f, 0f, 150, default, 1.1f);
+
+                if (aiTimer == FadeInDuration + 20) ShowBossDialogue("Where is this?", new Color(160, 110, 240), 130f);
+                if (aiTimer == FadeInDuration + 170) ShowBossDialogue("Why...", new Color(160, 110, 240), 110f);
+                if (aiTimer == FadeInDuration + 300) ShowBossDialogue("Why do you look just like me?", new Color(210, 70, 210), 150f);
+                if (aiTimer >= FadeInDuration + 470) { aiState = 101; aiTimer = 0; NPC.netUpdate = true; }
             }
             else if (aiState == 101)
             {
-                NPC.velocity *= 0.85f;
-                float progress = MathHelper.Clamp(aiTimer / 360f, 0f, 1f);
-                CutsceneShakeIntensity = progress * 8.5f;
+                // Mirror-shrine intro, part 2: sisa dua baris dialog, lalu lepas ke pertarungan
+                // normal (sama kayak intro lama, gak ada perubahan di bagian transisi keluarnya).
+                NPC.velocity = Vector2.Zero;
+                NPC.alpha = 0;
+                CutsceneShakeIntensity = 0f;
 
-                if (aiTimer == 60) CombatText.NewText(NPC.getRect(), new Color(210, 70, 210), "Why... I look like you?", true);
-                if (aiTimer == 200) CombatText.NewText(NPC.getRect(), new Color(255, 40, 40), "Does that mean this is all your fault?!", true);
+                if (aiTimer == 40) ShowBossDialogue("Oh, I see.", new Color(140, 200, 255), 130f);
+                if (aiTimer == 170) ShowBossDialogue("Then I now know what I need to do...", new Color(255, 40, 40), 170f);
                 if (aiTimer >= 360) { IsCutsceneActive = false; NPC.dontTakeDamage = false; aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
             }
             else if (aiState == 2)
@@ -889,6 +1147,18 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             dialogueTint = tint;
             dialogueTimeLeft = durationFrames;
             dialogueTotalDuration = durationFrames;
+
+            // Setiap baris dialog sekarang dapet feedback audio+visual sendiri (dulu cuma teks
+            // lewat doang) - "chime" pelan yang warnanya ngikutin tint dialog itu sendiri (bukan
+            // warna acak), plus semburan kecil partikel di kepala boss biar kerasa ada "yang
+            // ngomong", selaras sama speech bubble-nya (DrawSpeechBubble).
+            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item25 with { Pitch = 0.3f, Volume = 0.55f }, NPC.Center);
+            for (int i = 0; i < 8; i++)
+            {
+                float a = MathHelper.TwoPi * i / 8f;
+                Vector2 dir = new Vector2((float)Math.Cos(a), (float)Math.Sin(a));
+                LuminanceUtilities.SpawnParticle(NPC.Top + dir * 6f, dir * 1.2f, tint, 18, 0.55f, ParticleType.Spark);
+            }
         }
 
         // ======================== DESPERATION CUTSCENE (DODGE/QTE MEKANIK) ========================
@@ -899,6 +1169,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             IsCutsceneActive = true;
             NPC.dontTakeDamage = true;
             NPC.damage = 0;
+            UpdateAmbientBossVFX(player); // aura/mote tema-warna tetap jalan sepanjang cutscene eksekusi (WhoAmI_VFX.cs)
 
             player.controlLeft = false;
             player.controlRight = false;
@@ -1785,24 +2056,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             if (aim != Vector2.Zero) aim.Normalize();
             float angle = aim.ToRotation() + angleOffset;
 
-            int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, Vector2.Zero, ProjectileID.Excalibur, (int)(NPC.damage * 1.2f), 0f, proxySlot);
-            if (p >= 0 && p < 1000)
-            {
-                Main.projectile[p].hostile = true;
-                Main.projectile[p].friendly = false;
-                Main.projectile[p].timeLeft = 10;
-                Main.projectile[p].scale = 1.8f;
-                Main.projectile[p].rotation = angle;
-                Main.projectile[p].width = 80;
-                Main.projectile[p].height = 80;
-                Main.projectile[p].Center = NPC.Center + aim * 40f;
-                Main.projectile[p].penetrate = -1;
-                Main.projectile[p].aiStyle = 0;
-                Main.projectile[p].tileCollide = false;
-
-                for (int i = 0; i < 5; i++)
-                    LuminanceUtilities.SpawnParticle(Main.projectile[p].Center + Main.rand.NextVector2Circular(40, 40), Main.rand.NextVector2Circular(2, 2), Color.Cyan, 20, 0.8f, ParticleType.Spark);
-            }
+            // Normal swing no longer spawns a TerraBlade2Shot projectile; it now only leaves a
+            // short particle burst so the boss still feels active without the extra projectile hitbox.
+            Vector2 slashPos = NPC.Center + aim * 40f;
+            for (int i = 0; i < 5; i++)
+                LuminanceUtilities.SpawnParticle(slashPos + Main.rand.NextVector2Circular(40, 40), Main.rand.NextVector2Circular(2, 2), Color.Cyan, 20, 0.8f, ParticleType.Spark);
         }
 
         private void ExecuteRangedBarrage(Player target)
@@ -2122,6 +2380,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         public override void OnKill()
         {
+            if (isMirageDecoy)
+            {
+                OnMirageDecoyKilled();
+                return;
+            }
+
             if (Main.player[proxySlot] != null && Main.player[proxySlot].whoAmI == proxySlot) Main.player[proxySlot] = new Player();
             IsCutsceneActive = false;
             Main.hideUI = false;
@@ -2198,6 +2462,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         public override bool PreDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
         {
             if (dummyPlayer == null || NPC.oldPos == null) return false;
+
+            DrawBossAura(spriteBatch, screenPos); // glow/aura tema-warna di belakang badan boss (WhoAmI_VFX.cs)
+            DrawAttackPatternVFX(spriteBatch, screenPos); // sprite VFX per-attack, tint disesuaikan pattern yang lagi aktif (WhoAmI_VFX_Attacks.cs)
 
             if (aiState != 100 && aiState != 101 && aiState != 102 && aiState != 2 && aiState != STATE_DESPERATION_CUTSCENE)
             {

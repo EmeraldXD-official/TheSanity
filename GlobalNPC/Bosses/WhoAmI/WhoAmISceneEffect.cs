@@ -12,7 +12,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         {
             get
             {
-                int bossIndex = NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>());
+                int bossIndex = WhoAmI.FindRealBossIndex(); // ignores mirage decoys - see WhoAmI.cs
                 if (bossIndex != -1)
                 {
                     var boss = Main.npc[bossIndex].ModNPC as WhoAmI;

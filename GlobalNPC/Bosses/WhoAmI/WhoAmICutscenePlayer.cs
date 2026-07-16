@@ -26,7 +26,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         public override void PostUpdateBuffs()
         {
-            int bossIndex = NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>());
+            int bossIndex = WhoAmI.FindRealBossIndex(); // ignores mirage decoys - see WhoAmI.cs
             if (bossIndex != -1)
             {
                 var boss = Main.npc[bossIndex].ModNPC as WhoAmI;

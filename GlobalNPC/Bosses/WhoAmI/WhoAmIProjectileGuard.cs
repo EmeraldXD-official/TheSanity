@@ -6,9 +6,14 @@ using Terraria.ModLoader;
 
 namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 {
-    public class WhoAmIProjectileGuard : GlobalProjectile
+    public partial class WhoAmIProjectileGuard : GlobalProjectile
     {
-        private static int proxySlot => Main.maxPlayers - 1;
+        // Split across files: this file owns AI/damage/lifecycle guarding for the boss's mimicked
+        // player-weapon projectiles. WhoAmI_VFX_ProjectileShader.cs (new) owns ONLY the "Lucille
+        // Karma"-tier draw pipeline (neon outline / scrolling noise / chromatic trail / impact
+        // shockwave) for the exact same set of projectiles (owner == proxySlot) - kept separate so
+        // the movement-fix logic above isn't buried under draw code and vice versa.
+        internal static int proxySlot => Main.maxPlayers - 1;
 
         public override void SetDefaults(Projectile projectile)
         {
@@ -76,7 +81,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     {
                         if (!Main.player[proxySlot].channel) { projectile.Kill(); return false; }
                         NPC boss = Main.npc[idx];
-                        Player target = Main.player[boss.target];
+                        // boss.target can be -1 (no player targeted yet, e.g. the instant the boss
+                        // spawns, or briefly after its previous target dies/disconnects before a new
+                        // one is re-acquired) - indexing Main.player[-1] directly threw
+                        // IndexOutOfRangeException ("Index was outside the bounds of the array") on
+                        // every minion/sentry/pet-owned projectile's PreAI that tick.
+                        Player target = boss.target >= 0 && boss.target < Main.maxPlayers ? Main.player[boss.target] : null;
                         if (target != null && target.active && !target.dead)
                         {
                             projectile.ai[0] = target.Center.X;
@@ -182,7 +192,18 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 projectile.hostile = true;
                 projectile.friendly = false;
 
-                if (projectile.minion || projectile.sentry || Main.projPet[projectile.type])
+                // Razorblade Typhoon isn't a minion (projectile.minion is false for it), but its
+                // vanilla homing AI has the exact same underlying problem as the minions above: it
+                // picks its target by searching nearby NPCs, and the only NPC around is the boss
+                // itself, so it locks onto and orbits the boss instead of ever flying at the player.
+                // There's no ModNPC/GlobalNPC hook to intercept vanilla's target *selection* (the
+                // NPC.CanBeChasedBy check it uses isn't an overridable hook, just a plain method on
+                // the vanilla NPC class) - so instead of fighting the selection step, we do the same
+                // thing done for minions: force its velocity to hard-home on the nearest real player
+                // every tick here in PostAI, which runs after and overwrites whatever vanilla's own
+                // AI picked that tick.
+                bool isForcedPlayerHoming = projectile.minion || projectile.sentry || Main.projPet[projectile.type] || projectile.type == ProjectileID.Typhoon;
+                if (isForcedPlayerHoming)
                 {
                     if (projectile.type == ProjectileID.StardustDragon2 || projectile.type == ProjectileID.StardustDragon3 || projectile.type == ProjectileID.StardustDragon4) return;
 

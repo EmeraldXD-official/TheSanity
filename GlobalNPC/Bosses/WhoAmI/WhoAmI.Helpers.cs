@@ -145,10 +145,22 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         }
 
         // ---------- Helpers ----------
+        // FIX: "boss keeps picking the same weapon / same pattern" - root cause was HERE, not in the
+        // weapon carousel logic itself (that logic already excludes recently-used weapons and rolls
+        // from a candidate list correctly). The bug was `new Random(seed)` being constructed FRESH on
+        // every single call with a seed built from slow-moving values (NPC.whoAmI, aiTimer, NPC.life,
+        // Main.GameUpdateCount) that are often only a handful of ticks apart between two consecutive
+        // weapon-swap rolls. System.Random with two closely-spaced seeds produces STRONGLY CORRELATED
+        // first outputs (a well-known .NET Random pitfall) - so `candidates[GetDeterministicRandom(0,
+        // candidates.Count)]` kept landing on the same index run after run, which is exactly why the
+        // carousel felt like it "wasn't actually randomizing" even though the selection code around it
+        // was already written correctly. Switching to Main.rand (Terraria's shared, continuously-
+        // advancing RNG - the same one every other pattern file in this mod already uses for its own
+        // randomness) fixes this with no other logic changes needed.
         private int GetDeterministicRandom(int min, int max)
         {
-            int seed = (int)(NPC.whoAmI * 1000 + aiTimer * 7 + NPC.life + Main.GameUpdateCount);
-            return new Random(seed).Next(min, max);
+            if (max <= min) return min;
+            return Main.rand.Next(min, max);
         }
 
         private Vector2 GetWaveOffset()
@@ -165,6 +177,28 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         {
             if (weapon == null || weapon.IsAir) return false;
             return weapon.shoot > 0 && weapon.shoot != ProjectileID.None;
+        }
+
+        private int GetWeaponProjectileType(Item weapon)
+        {
+            if (weapon == null || weapon.IsAir)
+                return ProjectileID.TerraBeam;
+
+            int projType = weapon.shoot > 0 ? weapon.shoot : ContentSamples.ItemsByType[weapon.type].shoot;
+            if (projType <= 0 || projType == ProjectileID.None)
+                projType = ProjectileID.TerraBeam;
+
+            if (projType == ProjectileID.PurificationPowder)
+                projType = weapon.CountsAsClass(DamageClass.Ranged) ? ProjectileID.Bullet : ProjectileID.BulletHighVelocity;
+
+            if (weapon.type == ItemID.TerraBlade)
+                projType = ProjectileID.TerraBeam;
+            else if (weapon.type == ItemID.TrueNightsEdge)
+                projType = ProjectileID.NightBeam;
+            else if (weapon.type == ItemID.TrueExcalibur)
+                projType = ProjectileID.LightBeam;
+
+            return projType;
         }
 
         // ======================== SMOOTH MOVEMENT ========================
@@ -196,7 +230,14 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
             if (isPhase2) idealDistance *= 0.8f;
 
-            Vector2 goal = target.Center + tacticalTargetOffset + GetWaveOffset();
+            // "SAT SET" RULE 1 - PREDICTIVE INTERCEPTION: steer toward where the player is GOING
+            // (their current velocity projected forward), not their raw current coordinate. Blended
+            // 65/35 with the actual position rather than used raw, so the boss doesn't overshoot wildly
+            // if the player suddenly stops or reverses direction.
+            Vector2 interceptPoint = GetPredictiveInterceptPoint(target, 20f);
+            Vector2 steeringAnchor = Vector2.Lerp(target.Center, interceptPoint, 0.65f);
+
+            Vector2 goal = steeringAnchor + tacticalTargetOffset + GetWaveOffset();
 
             if (distToPlayer < idealDistance * 0.6f && aiState == STATE_IDLE)
             {
@@ -429,20 +470,58 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     weaponSwapThreshold = GetDeterministicRandom(180, 301);
                     isCurrentlyChanneling = false;
 
+                    // "ideal" = senjata yang archetype-nya cocok sama jarak sekarang (melee kalau
+                    // deket, non-melee kalau jauh) - lihat komentar `preferClose` di atas. Ini CUMA
+                    // preferensi urutan pencarian, bukan hard filter: kalau kategori ideal kebetulan
+                    // lagi nggak punya opsi yang belum baru2 ini dipakai, kita tetap jatuh balik ke
+                    // seluruh weaponPool yang "diingat" dari inventory player, bukan cuma diem di
+                    // 1-2 senjata yang sama terus.
                     List<Item> ideal = new List<Item>();
+                    List<Item> allSafe = new List<Item>();
                     foreach (var item in weaponPool)
                     {
                         if (BannedWeapons.Contains(item.type)) continue;
+                        allSafe.Add(item);
                         bool isMelee = item.CountsAsClass(DamageClass.Melee) || (item.shoot > 0 && ProjectileID.Sets.IsAWhip[item.shoot]);
                         if (preferClose == isMelee) ideal.Add(item);
                     }
+
+                    // Buang dari kandidat semua tipe senjata yang masih ada di recentWeaponTypeHistory
+                    // (beberapa pick terakhir) - INI yang bikin carousel beneran "ingat & muter" ke
+                    // senjata lain di inventory, bukan berulang kali balik ke senjata yang sama
+                    // (apalagi cuma yang paling sakit) tiap reroll. Kalau exclude bikin kandidat abis
+                    // (misal pool-nya emang cuma 1-2 senjata unik), longgarin balik ke daftar penuh.
+                    List<Item> FilterFresh(List<Item> src)
+                    {
+                        var fresh = src.Where(w => !recentWeaponTypeHistory.Contains(w.type)).ToList();
+                        return fresh.Count > 0 ? fresh : src;
+                    }
+
+                    List<Item> candidates = ideal.Count > 0 ? FilterFresh(ideal) : FilterFresh(allSafe);
+
                     Item selected = null;
-                    if (ideal.Count > 0) selected = ideal[GetDeterministicRandom(0, ideal.Count)];
-                    else { var safe = weaponPool.Where(w => !BannedWeapons.Contains(w.type)).ToList(); if (safe.Count > 0) { currentPoolIndex = (currentPoolIndex + 1) % safe.Count; selected = safe[currentPoolIndex]; } else selected = weaponPool[0]; }
+                    if (candidates.Count > 0)
+                    {
+                        selected = candidates[GetDeterministicRandom(0, candidates.Count)];
+                    }
+                    else if (allSafe.Count > 0)
+                    {
+                        currentPoolIndex = (currentPoolIndex + 1) % allSafe.Count;
+                        selected = allSafe[currentPoolIndex];
+                    }
+                    else selected = weaponPool[0];
 
                     if (selected != null) { Item w = new Item(); w.SetDefaults(selected.type); activeWeapon = w; }
                     else { Item f = new Item(); f.SetDefaults(ItemID.EnchantedSword); activeWeapon = f; }
                     if (BannedWeapons.Contains(activeWeapon.type)) { Item f = new Item(); f.SetDefaults(ItemID.EnchantedSword); activeWeapon = f; }
+
+                    // Catat pick ini di riwayat (cap-nya ngikutin ukuran pool - kalau pool cuma 2
+                    // senjata unik, jangan sampai riwayat "memakan" semua opsi dan bikin fallback
+                    // selalu ke-trigger; sisain minimal 1 opsi yang selalu boleh dipilih lagi).
+                    int historyCap = Math.Max(1, Math.Min(4, allSafe.Count - 1));
+                    recentWeaponTypeHistory.Add(activeWeapon.type);
+                    while (recentWeaponTypeHistory.Count > historyCap) recentWeaponTypeHistory.RemoveAt(0);
+
                     burstShotCounter = 0;
                     NPC.netUpdate = true;
                 }
@@ -582,25 +661,106 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             return Math.Max(1, dmg);
         }
 
-        private void FireAttackProjectile(Player target)
+        // ======================== WEAPON-COPY MUZZLE VFX/SFX ========================
+        // Themed by the copied weapon's damage class (same "color = identity" idea as the ambient
+        // aura in WhoAmI_VFX.cs), so a stolen melee weapon reads red, ranged reads green, magic reads
+        // purple, etc. - instead of every single copied weapon firing with the same flat gold/cyan
+        // sparks regardless of what it actually is.
+        private Color GetWeaponMuzzleColor(Item weapon)
+        {
+            if (weapon == null) return Color.White;
+            if (weapon.CountsAsClass(DamageClass.Melee) || (weapon.shoot > 0 && ProjectileID.Sets.IsAWhip[weapon.shoot])) return new Color(255, 90, 70);
+            if (weapon.CountsAsClass(DamageClass.Ranged)) return new Color(110, 230, 130);
+            if (weapon.CountsAsClass(DamageClass.Magic)) return new Color(170, 100, 255);
+            if (weapon.CountsAsClass(DamageClass.Summon)) return new Color(255, 200, 80);
+            return new Color(200, 200, 255);
+        }
+
+        // A short, punchy muzzle flash at the boss's hand the instant a copied weapon fires - gives
+        // every shot a moment of "impact" at the SOURCE (not just the projectile trail), and its color
+        // immediately tells the player what kind of weapon just got fired without reading a tooltip.
+        private void SpawnWeaponMuzzleFlash(Item weapon)
+        {
+            Color muzzle = GetWeaponMuzzleColor(weapon);
+            for (int i = 0; i < 6; i++)
+            {
+                float a = MathHelper.TwoPi * i / 6f + Main.rand.NextFloat(-0.2f, 0.2f);
+                Vector2 dir = new Vector2((float)Math.Cos(a), (float)Math.Sin(a));
+                LuminanceUtilities.SpawnParticle(NPC.Center + dir * 8f, dir * Main.rand.NextFloat(2f, 4f), muzzle, 14, 0.75f, ParticleType.Spark);
+            }
+            LuminanceUtilities.SpawnParticle(NPC.Center, Vector2.Zero, Color.White, 10, 0.9f, ParticleType.Spark);
+        }
+
+        // Every copied weapon now reliably makes SOME noise when it fires - previously the
+        // Terra Blade/True Night's Edge/True Excalibur beam branch returned BEFORE the shared
+        // `if (activeWeapon.UseSound != null) PlaySound(...)` line at the end of this method, so those
+        // three weapons fired their beams completely silently. Centralizing the sound here (with a
+        // slight per-shot pitch offset so a rapid-fire weapon doesn't sound like a stuck record) fixes
+        // that and covers every firing branch, not just the common one.
+        private void PlayWeaponFireSound(Item weapon)
+        {
+            var style = weapon.UseSound ?? SoundID.Item42; // generic "cast/throw" fallback so there's always feedback
+            Terraria.Audio.SoundEngine.PlaySound(style.WithPitchOffset(Main.rand.NextFloat(-0.12f, 0.12f)), NPC.Center);
+        }
+
+        // angleOffsetRadians lets ring/fan-burst patterns (SkyFracture ring bursts, random-spread
+        // volleys, etc.) actually aim each individual shot in its own direction. Every call site used
+        // to compute a per-shot ang/dir/spread value and then call the parameterless overload anyway,
+        // silently discarding it - every "shot" in a burst ended up aimed at the exact same point,
+        // so multi-shot weapons like Sky Fracture (which already fires 3 blades per call) stacked
+        // dozens of near-identical parallel trajectories on top of each other instead of fanning out.
+        // That's the dense, static "wall of blades" / "looks drawn" bug - not a spawn-rate bug, a
+        // direction bug: too many projectiles genuinely were flying the same line at once.
+        private void FireAttackProjectile(Player target, float angleOffsetRadians = 0f)
         {
             Vector2 aim = target.Center - NPC.Center;
             if (aim != Vector2.Zero) aim.Normalize();
             else aim = new Vector2(NPC.direction, 0f);
+            if (angleOffsetRadians != 0f) aim = aim.RotatedBy(angleOffsetRadians);
+            FireAttackProjectileAimed(target, aim);
+        }
 
+        // For radial/ring-burst patterns that want each shot flying in its own absolute world-space
+        // direction (e.g. "8 blades evenly spaced in a full circle around the boss") rather than a
+        // small offset from the aim-at-target line. Several patterns computed a per-shot direction
+        // like this and then called the target-aimed overload anyway, throwing the direction away -
+        // every "ring" shot ended up aimed at the same point as every other shot, which for
+        // multi-shot weapons like Sky Fracture (3 blades per call already) stacked dozens of nearly
+        // identical parallel trajectories into one dense line instead of fanning out into a ring.
+        private void FireAttackProjectileInDirection(Player target, Vector2 direction)
+        {
+            if (direction != Vector2.Zero) direction.Normalize();
+            else direction = new Vector2(NPC.direction, 0f);
+            FireAttackProjectileAimed(target, direction);
+        }
+
+        private void FireAttackProjectileAimed(Player target, Vector2 aim)
+        {
             int dmg = CalculateScaledDamage(activeWeapon);
             float speed = activeWeapon.shootSpeed > 0 ? activeWeapon.shootSpeed : 11f;
             Vector2 vel = aim * speed;
 
+            SpawnWeaponMuzzleFlash(activeWeapon);
+            PlayWeaponFireSound(activeWeapon);
+
             int projType = activeWeapon.shoot;
             if (projType <= 0) projType = ContentSamples.ItemsByType[activeWeapon.type].shoot;
-            if (projType <= 0) projType = ProjectileID.EnchantedBeam;
+            if (projType <= 0 || projType == ProjectileID.PurificationPowder)
+            {
+                // Every vanilla gun (S.D.M.G., Chain Gun, all of them) sets Item.shoot =
+                // ProjectileID.PurificationPowder as a meaningless placeholder - the real fired
+                // projectile normally comes from whatever ammo is loaded via Player.PickAmmo(),
+                // which never runs for this dummy owner. Spawning PurificationPowder directly
+                // makes a Clentaminator-style powder ball that immediately bursts into dust -
+                // that's the "shatters instead of firing" bug, and it hits every gun, not just
+                // S.D.M.G./Chain Gun. Give ammo-based guns a real bullet instead.
+                projType = activeWeapon.CountsAsClass(DamageClass.Ranged) ? ProjectileID.Bullet : ProjectileID.BulletHighVelocity;
+            }
 
             if (activeWeapon.type == ItemID.TerraBlade || activeWeapon.type == ItemID.TrueNightsEdge || activeWeapon.type == ItemID.TrueExcalibur)
             {
                 projType = (activeWeapon.type == ItemID.TerraBlade) ? ProjectileID.TerraBeam : (activeWeapon.type == ItemID.TrueNightsEdge) ? ProjectileID.NightBeam : ProjectileID.LightBeam;
-                Vector2 a = target.Center - NPC.Center; if (a != Vector2.Zero) a.Normalize();
-                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, a * speed, projType, dmg, 0f, proxySlot);
+                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, aim * speed, projType, dmg, 0f, proxySlot);
                 if (p >= 0 && p < 1000)
                 {
                     Main.projectile[p].hostile = true;
@@ -630,6 +790,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 if ((name.Contains("staff") || name.Contains("book") || name.Contains("tome")) && activeWeapon.rare >= ItemRarityID.Yellow) { countP = 3; spread = MathHelper.ToRadians(12f); linear = true; }
             }
 
+            bool isSkyFracture = projType == ProjectileID.SkyFracture;
+
             for (int i = 0; i < countP; i++)
             {
                 Vector2 fVel = vel;
@@ -638,7 +800,21 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     if (linear) fVel = vel.RotatedBy(MathHelper.Lerp(-spread, spread, (float)i / (countP - 1)));
                     else fVel = vel.RotatedBy(MathHelper.ToRadians(GetDeterministicRandom((int)(-MathHelper.ToDegrees(spread)), (int)(MathHelper.ToDegrees(spread)))));
                 }
-                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, fVel, projType, dmg, 0f, proxySlot);
+
+                Vector2 spawnPos = NPC.Center;
+                if (isSkyFracture)
+                {
+                    // Real Sky Fracture swords erupt from small random "portals" scattered near the
+                    // caster and each blade's line has its own tiny jitter - without this every volley
+                    // fires all 3 blades from the exact same point with the exact same deterministic
+                    // spread, so a multi-volley barrage just overdraws the same three lines over and
+                    // over. That's the "looks drawn/ruled" bug: a rigid repeated fan instead of a
+                    // flurry of individual energy swords.
+                    spawnPos += Main.rand.NextVector2Circular(28f, 28f);
+                    fVel = fVel.RotatedBy(MathHelper.ToRadians(Main.rand.NextFloat(-4f, 4f)));
+                }
+
+                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), spawnPos, fVel, projType, dmg, 0f, proxySlot);
                 if (p >= 0 && p < 1000)
                 {
                     Main.projectile[p].hostile = true;
@@ -661,7 +837,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         activeYoyoBoomerangProjectiles.Add(p);
                 }
             }
-            if (activeWeapon.UseSound != null) Terraria.Audio.SoundEngine.PlaySound(activeWeapon.UseSound, NPC.Center);
+            // (Firing sound already handled once at the top of this method via PlayWeaponFireSound -
+            // that call now covers every branch, including the beam weapons above which used to be
+            // silent because they `return` before ever reaching this old duplicate call.)
         }
 
         // Dipanggil TIAP TICK dari AI() utama. Bersihin entry yang udah nggak aktif, dan

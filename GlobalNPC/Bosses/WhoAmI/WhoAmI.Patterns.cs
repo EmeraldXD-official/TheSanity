@@ -25,28 +25,50 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             switch (currentArchetype)
             {
                 case WeaponArchetype.TrueMelee:
-                    validPatterns = new List<int> { 0, 1, 2, 3 };
+                    // index 4 = Blink & Echo Combo (STATE_BLINK_ECHO_COMBO)
+                    // index 5 = Abyssal Cleave & Fractured Space (STATE_ABYSSAL_CLEAVE)
+                    // index 6 = Orbiting Blade Ring / Sovereign Guard (STATE_ORBITING_BLADE_RING)
+                    // index 7 = Dimensional Pierce / Flash Strike (STATE_DIMENSIONAL_PIERCE)
+                    validPatterns = new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 };
                     break;
                 case WeaponArchetype.ProjMelee:
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3 } : new List<int> { 1 };
+                    // index 4 = Blink & Echo Combo (STATE_BLINK_ECHO_COMBO)
+                    // index 5-7 = same melee archetype trio as TrueMelee (see above) - these read
+                    // the player's weapon type for the mimicked slash/blade art but don't require
+                    // a projectile, so they stay available even when !hasProjectile.
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 } : new List<int> { 1, 5, 6, 7 };
                     break;
                 case WeaponArchetype.Ranged:
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3 } : new List<int> { 3 };
+                    // index 4 = Orbiting Grid Lock (STATE_ORBIT_GRID_LOCK)
+                    // index 5 = Vector Laser Grid System (STATE_VECTOR_LASER_GRID)
+                    // index 6 = Homing Cluster Comet (STATE_HOMING_CLUSTER_COMET)
+                    // index 7 = Singularity Overdrive (STATE_SINGULARITY_OVERDRIVE)
+                    // All 3 need a real ranged projectile to mimic, same as the rest of this pool.
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 } : new List<int> { 3 };
                     break;
                 case WeaponArchetype.Magic:
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3 } : new List<int> { 3 };
+                    // index 4 = existing Phantom Mirage Cascade (STATE_MAGIC_SPIRAL_RIFT)
+                    // index 5 = new Gravity Well & Arcane Torrent (STATE_GRAVITY_WELL_TORRENT)
+                    // index 6 = Aureola Signet Rain (STATE_AUREOLA_SIGNET_RAIN)
+                    // index 7 = Double Helix Sweep (STATE_DOUBLE_HELIX_SWEEP)
+                    // index 8 = Quantum Glitch Phasing (STATE_QUANTUM_GLITCH_PHASING)
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7, 8 } : new List<int> { 3 };
                     break;
                 case WeaponArchetype.Summon:
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3 } : new List<int> { 1 };
+                    // index 4 = new Spectral Rift Swarm (STATE_SUMMON_RIFT_SWARM)
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4 } : new List<int> { 1 };
                     break;
                 case WeaponArchetype.Whip:
-                    validPatterns = new List<int> { 0, 1, 2, 3 };
+                    // index 4 = new Lash Cage (STATE_WHIP_LASH_CAGE)
+                    validPatterns = new List<int> { 0, 1, 2, 3, 4 };
                     break;
                 case WeaponArchetype.Yoyo:
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3 } : new List<int> { 3 };
+                    // index 4 = new Tether Storm (STATE_YOYO_TETHER_STORM)
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4 } : new List<int> { 3 };
                     break;
                 case WeaponArchetype.Boomerang:
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3 } : new List<int> { 0 };
+                    // index 4 = new Crossfire (STATE_BOOMERANG_CROSSFIRE)
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4 } : new List<int> { 0 };
                     break;
                 default:
                     validPatterns = new List<int> { 0 };
@@ -144,7 +166,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             aiState = STATE_MELEE_COMBO;
                             aiTimer = 0;
                             meleeComboStep = 0;
-                            NPC.velocity = Vector2.Zero;
+                            NPC.velocity *= 0.3f; // soft-stop, bukan snap ke nol - biar transisi dari gerakan sebelumnya kerasa nyambung
                             for (int i = 0; i < 20; i++)
                                 LuminanceUtilities.SpawnParticle(NPC.Center, Main.rand.NextVector2Circular(5, 5), Color.OrangeRed, 25, 1.5f, ParticleType.Spark);
                             NPC.netUpdate = true;
@@ -223,6 +245,45 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 4:
+                        // NEW: Blink & Echo Combo - see WhoAmI_Pattern_BlinkEchoCombo.cs
+                        if (aiState != STATE_BLINK_ECHO_COMBO)
+                        {
+                            aiState = STATE_BLINK_ECHO_COMBO;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW: Abyssal Cleave & Fractured Space - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_ABYSSAL_CLEAVE)
+                        {
+                            aiState = STATE_ABYSSAL_CLEAVE;
+                            aiTimer = 0;
+                            ResetAbyssalCleaveState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW: Orbiting Blade Ring (Sovereign Guard) - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_ORBITING_BLADE_RING)
+                        {
+                            aiState = STATE_ORBITING_BLADE_RING;
+                            aiTimer = 0;
+                            ResetOrbitingBladeRingState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW: Dimensional Pierce / Flash Strike - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_DIMENSIONAL_PIERCE)
+                        {
+                            aiState = STATE_DIMENSIONAL_PIERCE;
+                            aiTimer = 0;
+                            ResetDimensionalPierceState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -236,7 +297,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             aiState = STATE_MELEE_COMBO;
                             aiTimer = 0;
                             meleeComboStep = 0;
-                            NPC.velocity = Vector2.Zero;
+                            NPC.velocity *= 0.3f; // soft-stop, bukan snap ke nol - biar transisi dari gerakan sebelumnya kerasa nyambung
                             for (int i = 0; i < 10; i++)
                                 LuminanceUtilities.SpawnParticle(NPC.Center, Main.rand.NextVector2Circular(3, 3), Color.Orange, 20, 1.2f, ParticleType.Spark);
                             NPC.netUpdate = true;
@@ -259,7 +320,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             aiState = STATE_MELEE_COMBO;
                             aiTimer = 0;
                             meleeComboStep = 0;
-                            NPC.velocity = Vector2.Zero;
+                            NPC.velocity *= 0.3f; // soft-stop, bukan snap ke nol - biar transisi dari gerakan sebelumnya kerasa nyambung
                             NPC.netUpdate = true;
                         }
                         break;
@@ -311,6 +372,45 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         {
                             aiState = STATE_IDLE;
                             aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 4:
+                        // NEW: Blink & Echo Combo - see WhoAmI_Pattern_BlinkEchoCombo.cs
+                        if (aiState != STATE_BLINK_ECHO_COMBO)
+                        {
+                            aiState = STATE_BLINK_ECHO_COMBO;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW: Abyssal Cleave & Fractured Space - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_ABYSSAL_CLEAVE)
+                        {
+                            aiState = STATE_ABYSSAL_CLEAVE;
+                            aiTimer = 0;
+                            ResetAbyssalCleaveState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW: Orbiting Blade Ring (Sovereign Guard) - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_ORBITING_BLADE_RING)
+                        {
+                            aiState = STATE_ORBITING_BLADE_RING;
+                            aiTimer = 0;
+                            ResetOrbitingBladeRingState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW: Dimensional Pierce / Flash Strike - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_DIMENSIONAL_PIERCE)
+                        {
+                            aiState = STATE_DIMENSIONAL_PIERCE;
+                            aiTimer = 0;
+                            ResetDimensionalPierceState();
                             NPC.netUpdate = true;
                         }
                         break;
@@ -395,6 +495,45 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 4:
+                        // NEW: Blink & Echo Combo - see WhoAmI_Pattern_BlinkEchoCombo.cs
+                        if (aiState != STATE_BLINK_ECHO_COMBO)
+                        {
+                            aiState = STATE_BLINK_ECHO_COMBO;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW: Abyssal Cleave & Fractured Space - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_ABYSSAL_CLEAVE)
+                        {
+                            aiState = STATE_ABYSSAL_CLEAVE;
+                            aiTimer = 0;
+                            ResetAbyssalCleaveState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW: Orbiting Blade Ring (Sovereign Guard) - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_ORBITING_BLADE_RING)
+                        {
+                            aiState = STATE_ORBITING_BLADE_RING;
+                            aiTimer = 0;
+                            ResetOrbitingBladeRingState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW: Dimensional Pierce / Flash Strike - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_DIMENSIONAL_PIERCE)
+                        {
+                            aiState = STATE_DIMENSIONAL_PIERCE;
+                            aiTimer = 0;
+                            ResetDimensionalPierceState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -470,6 +609,45 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 4:
+                        // NEW: Blink & Echo Combo - see WhoAmI_Pattern_BlinkEchoCombo.cs
+                        if (aiState != STATE_BLINK_ECHO_COMBO)
+                        {
+                            aiState = STATE_BLINK_ECHO_COMBO;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW: Abyssal Cleave & Fractured Space - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_ABYSSAL_CLEAVE)
+                        {
+                            aiState = STATE_ABYSSAL_CLEAVE;
+                            aiTimer = 0;
+                            ResetAbyssalCleaveState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW: Orbiting Blade Ring (Sovereign Guard) - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_ORBITING_BLADE_RING)
+                        {
+                            aiState = STATE_ORBITING_BLADE_RING;
+                            aiTimer = 0;
+                            ResetOrbitingBladeRingState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW: Dimensional Pierce / Flash Strike - see WhoAmI_Pattern_MeleeArchetypeExtras.cs
+                        if (aiState != STATE_DIMENSIONAL_PIERCE)
+                        {
+                            aiState = STATE_DIMENSIONAL_PIERCE;
+                            aiTimer = 0;
+                            ResetDimensionalPierceState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
         }
@@ -537,6 +715,45 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         if (aiTimer > 40) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
                         break;
+                    case 4:
+                        // NEW: Orbiting Grid Lock - see WhoAmI_Pattern_OrbitingGridLock.cs
+                        if (aiState != STATE_ORBIT_GRID_LOCK)
+                        {
+                            aiState = STATE_ORBIT_GRID_LOCK;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW: Vector Laser Grid System - see WhoAmI_Pattern_RangedArchetypeExtras.cs
+                        if (aiState != STATE_VECTOR_LASER_GRID)
+                        {
+                            aiState = STATE_VECTOR_LASER_GRID;
+                            aiTimer = 0;
+                            ResetVectorLaserGridState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW: Homing Cluster Comet - see WhoAmI_Pattern_RangedArchetypeExtras.cs
+                        if (aiState != STATE_HOMING_CLUSTER_COMET)
+                        {
+                            aiState = STATE_HOMING_CLUSTER_COMET;
+                            aiTimer = 0;
+                            ResetHomingClusterCometState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW: Singularity Overdrive - see WhoAmI_Pattern_RangedArchetypeExtras.cs
+                        if (aiState != STATE_SINGULARITY_OVERDRIVE)
+                        {
+                            aiState = STATE_SINGULARITY_OVERDRIVE;
+                            aiTimer = 0;
+                            ResetSingularityOverdriveState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -595,6 +812,45 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             bossWeaponSwingTimer = bossWeaponSwingMax;
                         }
                         if (aiTimer > 50) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
+                        break;
+                    case 4:
+                        // NEW: Orbiting Grid Lock - see WhoAmI_Pattern_OrbitingGridLock.cs
+                        if (aiState != STATE_ORBIT_GRID_LOCK)
+                        {
+                            aiState = STATE_ORBIT_GRID_LOCK;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW: Vector Laser Grid System - see WhoAmI_Pattern_RangedArchetypeExtras.cs
+                        if (aiState != STATE_VECTOR_LASER_GRID)
+                        {
+                            aiState = STATE_VECTOR_LASER_GRID;
+                            aiTimer = 0;
+                            ResetVectorLaserGridState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW: Homing Cluster Comet - see WhoAmI_Pattern_RangedArchetypeExtras.cs
+                        if (aiState != STATE_HOMING_CLUSTER_COMET)
+                        {
+                            aiState = STATE_HOMING_CLUSTER_COMET;
+                            aiTimer = 0;
+                            ResetHomingClusterCometState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW: Singularity Overdrive - see WhoAmI_Pattern_RangedArchetypeExtras.cs
+                        if (aiState != STATE_SINGULARITY_OVERDRIVE)
+                        {
+                            aiState = STATE_SINGULARITY_OVERDRIVE;
+                            aiTimer = 0;
+                            ResetSingularityOverdriveState();
+                            NPC.netUpdate = true;
+                        }
                         break;
                 }
             }
@@ -673,6 +929,58 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         if (aiTimer > 35) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
                         break;
+                    case 4:
+                        // Phase 2 Phantom Mirage Cascade: enter the state and let HandleMagicSpiralRift run.
+                        if (aiState != STATE_MAGIC_SPIRAL_RIFT)
+                        {
+                            aiState = STATE_MAGIC_SPIRAL_RIFT;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW: Gravity Well & Arcane Torrent - see WhoAmI_Pattern_GravityWellTorrent.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_GRAVITY_WELL_TORRENT)
+                        {
+                            aiState = STATE_GRAVITY_WELL_TORRENT;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW: Aureola Signet Rain - see WhoAmI_Pattern_MagicArchetypeExtras.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_AUREOLA_SIGNET_RAIN)
+                        {
+                            aiState = STATE_AUREOLA_SIGNET_RAIN;
+                            aiTimer = 0;
+                            ResetAureolaSignetRainState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW: Double Helix Sweep - see WhoAmI_Pattern_MagicArchetypeExtras.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_DOUBLE_HELIX_SWEEP)
+                        {
+                            aiState = STATE_DOUBLE_HELIX_SWEEP;
+                            aiTimer = 0;
+                            ResetDoubleHelixSweepState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 8:
+                        // NEW: Quantum Glitch Phasing - see WhoAmI_Pattern_MagicArchetypeExtras.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_QUANTUM_GLITCH_PHASING)
+                        {
+                            aiState = STATE_QUANTUM_GLITCH_PHASING;
+                            aiTimer = 0;
+                            ResetQuantumGlitchPhasingState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -742,6 +1050,59 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         if (aiTimer > 40) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
                         break;
+                    case 4:
+                        // Phase 1 Phantom Mirage Cascade: identical trigger — HandleMagicSpiralRift reads
+                        // isPhase2 internally to scale the shot count, teleport distance, and fan width.
+                        if (aiState != STATE_MAGIC_SPIRAL_RIFT)
+                        {
+                            aiState = STATE_MAGIC_SPIRAL_RIFT;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW: Gravity Well & Arcane Torrent - see WhoAmI_Pattern_GravityWellTorrent.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_GRAVITY_WELL_TORRENT)
+                        {
+                            aiState = STATE_GRAVITY_WELL_TORRENT;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW: Aureola Signet Rain - see WhoAmI_Pattern_MagicArchetypeExtras.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_AUREOLA_SIGNET_RAIN)
+                        {
+                            aiState = STATE_AUREOLA_SIGNET_RAIN;
+                            aiTimer = 0;
+                            ResetAureolaSignetRainState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW: Double Helix Sweep - see WhoAmI_Pattern_MagicArchetypeExtras.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_DOUBLE_HELIX_SWEEP)
+                        {
+                            aiState = STATE_DOUBLE_HELIX_SWEEP;
+                            aiTimer = 0;
+                            ResetDoubleHelixSweepState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 8:
+                        // NEW: Quantum Glitch Phasing - see WhoAmI_Pattern_MagicArchetypeExtras.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_QUANTUM_GLITCH_PHASING)
+                        {
+                            aiState = STATE_QUANTUM_GLITCH_PHASING;
+                            aiTimer = 0;
+                            ResetQuantumGlitchPhasingState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
         }
@@ -805,6 +1166,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         if (aiTimer > 40) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
                         break;
+                    case 4:
+                        // NEW: Spectral Rift Swarm - see WhoAmI_Pattern_ArchetypeExtras.cs
+                        if (aiState != STATE_SUMMON_RIFT_SWARM)
+                        {
+                            aiState = STATE_SUMMON_RIFT_SWARM;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -860,6 +1230,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             Terraria.Audio.SoundEngine.PlaySound(SoundID.Item14, NPC.Center);
                         }
                         if (aiTimer > 50) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
+                        break;
+                    case 4:
+                        // NEW: Spectral Rift Swarm - see WhoAmI_Pattern_ArchetypeExtras.cs
+                        if (aiState != STATE_SUMMON_RIFT_SWARM)
+                        {
+                            aiState = STATE_SUMMON_RIFT_SWARM;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
                         break;
                 }
             }
@@ -918,6 +1297,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         if (aiTimer > 35) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
                         break;
+                    case 4:
+                        // NEW: Lash Cage - see WhoAmI_Pattern_ArchetypeExtras.cs
+                        if (aiState != STATE_WHIP_LASH_CAGE)
+                        {
+                            aiState = STATE_WHIP_LASH_CAGE;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -969,6 +1357,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         if (aiTimer > 40) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
                         break;
+                    case 4:
+                        // NEW: Lash Cage - see WhoAmI_Pattern_ArchetypeExtras.cs
+                        if (aiState != STATE_WHIP_LASH_CAGE)
+                        {
+                            aiState = STATE_WHIP_LASH_CAGE;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
         }
@@ -1019,6 +1416,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         if (aiTimer > 90) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
                         break;
+                    case 4:
+                        // NEW: Tether Storm - see WhoAmI_Pattern_ArchetypeExtras.cs
+                        if (aiState != STATE_YOYO_TETHER_STORM)
+                        {
+                            aiState = STATE_YOYO_TETHER_STORM;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -1062,6 +1468,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             FireAttackProjectile(target);
                         }
                         if (aiTimer > 100) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
+                        break;
+                    case 4:
+                        // NEW: Tether Storm - see WhoAmI_Pattern_ArchetypeExtras.cs
+                        if (aiState != STATE_YOYO_TETHER_STORM)
+                        {
+                            aiState = STATE_YOYO_TETHER_STORM;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
                         break;
                 }
             }
@@ -1118,6 +1533,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         if (aiTimer > 35) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
                         break;
+                    case 4:
+                        // NEW: Crossfire - see WhoAmI_Pattern_ArchetypeExtras.cs
+                        if (aiState != STATE_BOOMERANG_CROSSFIRE)
+                        {
+                            aiState = STATE_BOOMERANG_CROSSFIRE;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -1164,6 +1588,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             bossWeaponSwingTimer = bossWeaponSwingMax;
                         }
                         if (aiTimer > 40) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
+                        break;
+                    case 4:
+                        // NEW: Crossfire - see WhoAmI_Pattern_ArchetypeExtras.cs
+                        if (aiState != STATE_BOOMERANG_CROSSFIRE)
+                        {
+                            aiState = STATE_BOOMERANG_CROSSFIRE;
+                            aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
                         break;
                 }
             }
