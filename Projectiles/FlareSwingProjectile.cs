@@ -6,6 +6,9 @@ using System;
 using Terraria.GameContent;
 using Terraria.ID;
 using TheSanity.Players; 
+using Luminance.Assets;             // LazyAsset<T> - lazy-loaded texture wrapper
+using Luminance.Common.Utilities;   // Utilities.UseBlendState() - swap blend state tanpa manual End()/Begin()
+using Luminance.Common.Easings;     // EasingCurves & PiecewiseCurve - dipakai untuk kurva overdrive flash
 
 namespace TheSanity.Projectiles
 {
@@ -13,10 +16,25 @@ namespace TheSanity.Projectiles
     {
         public override string Texture => "TheSanity/Items/FlareSword"; 
 
+        // Glow mask sengaja disamakan pola dengan sprite utama (sama layout frame day/night).
+        // LazyAsset dari Luminance otomatis handle lazy loading tanpa manual caching/IsLoaded check.
+        private static readonly LazyAsset<Texture2D> GlowTexture = LazyAsset<Texture2D>.Request("TheSanity/Items/FlareSword_Glow");
+
+        // Kurva "overdrive" untuk flash glow di puncak swing: naik cepat (Quartic Out) dari 0->1
+        // di paruh pertama swing (0 - 0.5), lalu jatuh cepat (Quartic In) dari 1->0 di paruh kedua (0.5 - 1).
+        // Hasilnya: spike tajam persis di apex tebasan, bukan landai.
+        private static readonly PiecewiseCurve SwingOverdriveCurve = new PiecewiseCurve()
+            .Add(EasingCurves.Quartic, EasingType.Out, 1f, 0.5f)
+            .Add(EasingCurves.Quartic, EasingType.In, 0f, 1f);
+
         private float[] oldRotations = new float[90]; 
         private Vector2[] oldPositions = new Vector2[90];
         private NPC targetToOmnislash = null;
         private bool isSlashingPhase = false;
+
+        // Progress swing (0..1) disimpan sebagai field supaya bisa diakses dari PreDraw
+        // untuk menghitung "overdrive flash" tepat di puncak tebasan.
+        private float currentSwingProgress = 0f;
 
         public override void SetStaticDefaults() {
             ProjectileID.Sets.TrailCacheLength[Projectile.type] = 90;
@@ -57,6 +75,7 @@ namespace TheSanity.Projectiles
                 float maxDuration = Projectile.localAI[0];
                 float activeTimeLeft = Projectile.timeLeft - 30;
                 float progress = (maxDuration - activeTimeLeft) / maxDuration;
+                currentSwingProgress = progress; // simpan untuk dipakai di PreDraw (overdrive glow)
 
                 float swingProgress = -MathF.Cos(progress * MathHelper.Pi) * 1.4f;
                 isSlashingPhase = (progress > 0.05f && progress < 0.95f);
@@ -125,32 +144,44 @@ namespace TheSanity.Projectiles
             oldPositions[0] = Projectile.Center;
         }
 
-        // ==================== UPDATE: EFEK HIT DUST & ELECTRIFIED DEBUFF ====================
         public override void OnHitNPC(NPC target, NPC.HitInfo hit, int damageDone) {
-            // Logika Omnislash bawaan malam hari tetap berjalan normal
             if (!Main.dayTime) { 
                 targetToOmnislash = target;
             }
 
-            // 1. INFLICT DEBUFF ELECTRIFIED
-            // Memberikan debuff Electrified selama 5 detik (300 ticks) ke musuh yang terkena tebasan
+            // INFLICT DEBUFF ELECTRIFIED
             target.AddBuff(BuffID.Electrified, 300);
 
-            // 2. ADAPTIVE HIT DUST BURST
-            // Menyesuaikan tipe partikel ledakan: Siang = SolarFlare (Api Emas), Malam = Electric (Petir Biru)
+            // ADAPTIVE HIT DUST BURST
             int hitDustType = Main.dayTime ? DustID.SolarFlare : DustID.Electric;
 
-            // Memunculkan 10 partikel mencuat keluar secara acak saat musuh tertebas
             for (int i = 0; i < 10; i++) {
                 int d = Dust.NewDust(target.position, target.width, target.height, hitDustType);
                 Main.dust[d].noGravity = true;
-                Main.dust[d].velocity *= 2.8f; // Kecepatan muncratan partikel biar kerasa impact-nya
-                Main.dust[d].scale = Main.rand.NextFloat(1f, 1.5f); // Ukuran partikel bervariasi
+                Main.dust[d].velocity *= 2.8f; 
+                Main.dust[d].scale = Main.rand.NextFloat(1f, 1.5f); 
             }
+        }
+
+        // ==================== LUMINANCE: WARNA GLOW DINAMIS (DAY/NIGHT) ====================
+        private Color GetGlowColor() {
+            return Main.dayTime
+                ? new Color(255, 190, 70)   // Golden/Orange siang
+                : new Color(110, 210, 255); // Cyan-ish malam (di-blend ke ungu via overdrive/flash lerp)
+        }
+
+        // ==================== LUMINANCE: OVERDRIVE FLASH DI APEX SWING ====================
+        // Mengevaluasi SwingOverdriveCurve (Luminance PiecewiseCurve) di progress swing saat ini.
+        // Hasilnya 0 -> 1 -> 0, memuncak tajam persis di apex (progress = 0.5), mensimulasikan
+        // "flash" tenaga penuh pas blade ada di titik tebasan paling kuat.
+        private float GetSwingOverdrive() {
+            if (!isSlashingPhase) return 0f;
+            return SwingOverdriveCurve.Evaluate(currentSwingProgress);
         }
 
         public override bool PreDraw(ref Color lightColor) {
             Texture2D texture = TextureAssets.Projectile[Projectile.type].Value;
+            Texture2D glowTexture = GlowTexture.Value;
             
             int frameWidth = 119;
             int frameHeight = 119;
@@ -167,8 +198,8 @@ namespace TheSanity.Projectiles
                 overallAlpha = (float)Projectile.timeLeft / 30f;
             }
 
-            Main.spriteBatch.End();
-            Main.spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, RasterizerState.CullCounterClockwise, null, Main.GameViewMatrix.TransformationMatrix);
+            // Ganti ke Additive lewat Luminance Utilities (bungkus End()+Begin() yang aman & konsisten)
+            Main.spriteBatch.UseBlendState(BlendState.Additive);
 
             int totalGhosts = 70; 
             for (int i = 1; i <= totalGhosts; i++) {
@@ -209,10 +240,11 @@ namespace TheSanity.Projectiles
                 );
             }
 
-            Main.spriteBatch.End();
-            Main.spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, RasterizerState.CullCounterClockwise, null, Main.GameViewMatrix.TransformationMatrix);
+            // Balik ke AlphaBlend untuk sprite dasar
+            Main.spriteBatch.UseBlendState(BlendState.AlphaBlend);
 
             if (Projectile.timeLeft > 30) {
+                // LAYER 1: Base blade sprite, normal AlphaBlend
                 Main.spriteBatch.Draw(
                     texture, 
                     Projectile.Center - Main.screenPosition, 
@@ -224,6 +256,32 @@ namespace TheSanity.Projectiles
                     spriteEffects, 
                     0f
                 );
+
+                // LAYER 2: Glow mask, Additive - menyala di celah/inti blade.
+                // Intensitasnya "overdrive" tepat di apex swing (via SwingOverdriveCurve) untuk
+                // kesan hantaman penuh tenaga, lalu balik ke glow ambient begitu swing selesai.
+                float overdrive = GetSwingOverdrive();
+                Color glowColor = Color.Lerp(GetGlowColor(), Color.White, overdrive * 0.85f);
+
+                float glowAlpha = MathHelper.Clamp(0.5f + overdrive * 1.1f, 0f, 1.6f) * overallAlpha;
+                float glowScale = Projectile.scale * 0.7f * (1f + overdrive * 0.3f); // sedikit "membesar" saat flash
+
+                Main.spriteBatch.UseBlendState(BlendState.Additive);
+
+                Main.spriteBatch.Draw(
+                    glowTexture,
+                    Projectile.Center - Main.screenPosition,
+                    sourceRect,
+                    glowColor * glowAlpha,
+                    Projectile.rotation,
+                    origin,
+                    glowScale,
+                    spriteEffects,
+                    0f
+                );
+
+                // Kembalikan ke AlphaBlend supaya state akhir spriteBatch konsisten untuk draw call berikutnya
+                Main.spriteBatch.UseBlendState(BlendState.AlphaBlend);
             }
 
             return false; 

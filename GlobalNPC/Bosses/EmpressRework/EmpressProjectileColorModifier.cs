@@ -12,25 +12,22 @@ namespace TheSanity.GlobalNPC.Bosses.EmpressRework
         public override bool InstancePerEntity => true;
         
         public int projectileIndexInSpread = -1;
+        public int attackPhase = 1;
         public Vector2 initialCenter = Vector2.Zero;
         public float initialRotation = 0f;
         public bool hasLockedPosition = false;
         public bool isBossEverlasting = false;
         public int customTimer = 0; 
 
-        // Dipakai buat mengunci arah HallowBossLastingRainbow supaya dia jalan lurus, tidak melengkung/berputar
         public Vector2 lockedVelocity = Vector2.Zero;
         public bool hasLockedVelocity = false;
 
-        // Persingkat jeda (dalam tick) sebelum HallowBossLastingRainbow "meledak" jadi HallowBossRainbowStreak
-        // Vanilla defaultnya cukup lama, angka ini yang menentukan seberapa cepat dia meledak. Tinggal disesuaikan.
         private const int LastingRainbowLifetime = 90;
 
         public override void SetDefaults(Projectile projectile)
         {
             if (projectile.type == ProjectileID.HallowBossLastingRainbow)
             {
-                // Ini yang bikin jeda sebelum meledak jadi lebih singkat.
                 projectile.timeLeft = LastingRainbowLifetime;
             }
         }
@@ -39,18 +36,13 @@ namespace TheSanity.GlobalNPC.Bosses.EmpressRework
         {
             if (projectile.type == ProjectileID.HallowBossLastingRainbow)
             {
-                // Kunci arah gerak di tick pertama, jadi dia jalan lurus terus, tidak melengkung
                 if (!hasLockedVelocity)
                 {
                     lockedVelocity = projectile.velocity;
                     hasLockedVelocity = true;
                 }
 
-                // Paksa kembali ke arah awal tiap tick (nge-override hasil AI vanilla yang bikin dia melengkung)
                 projectile.velocity = lockedVelocity;
-
-                // Kunci rotasi searah gerak, jadi dia tidak berputar/spin sendiri
-                // +PiOver2 karena sprite HallowBossLastingRainbow default-nya menghadap ke atas (bukan ke kanan)
                 projectile.rotation = lockedVelocity.ToRotation() + MathHelper.PiOver2;
             }
 
@@ -78,11 +70,22 @@ namespace TheSanity.GlobalNPC.Bosses.EmpressRework
                 for (int i = 0; i < 5; i++)
                 {
                     float rotation = MathHelper.ToRadians(72f * i);
-                    Vector2 velocity = new Vector2(0, 6f).RotatedBy(rotation);
-                    int p = Projectile.NewProjectile(projectile.GetSource_Death(), projectile.Center, velocity, ProjectileID.HallowBossRainbowStreak, 25, 0f, Main.myPlayer);
+                    Vector2 initialVelocity = new Vector2(0, 1.2f).RotatedBy(rotation);
                     
-                    if (p != Main.maxProjectiles) {
-                        Main.projectile[p].GetGlobalProjectile<EmpressProjectileColorModifier>().projectileIndexInSpread = i;
+                    int p = Projectile.NewProjectile(
+                        projectile.GetSource_Death(), 
+                        projectile.Center, 
+                        initialVelocity, 
+                        ModContent.ProjectileType<CustomRainbowStreak>(), 
+                        22, 
+                        0f, 
+                        Main.myPlayer
+                    );
+
+                    if (p != Main.maxProjectiles && Main.projectile[p].ModProjectile is CustomRainbowStreak customStreak)
+                    {
+                        customStreak.projectileIndexInSpread = i;
+                        customStreak.attackPhase = attackPhase;
                     }
                 }
             }
@@ -121,33 +124,38 @@ namespace TheSanity.GlobalNPC.Bosses.EmpressRework
                     float indicatorOpacity = 0f;
                     if (customTimer < 42)
                     {
-                        if (customTimer <= 25) indicatorOpacity = 0.7f; 
-                        else indicatorOpacity = MathHelper.Lerp(0.7f, 0f, (customTimer - 25) / 17f);
+                        if (customTimer <= 25) indicatorOpacity = 0.6f; 
+                        else indicatorOpacity = MathHelper.Lerp(0.6f, 0f, (customTimer - 25) / 17f);
                     }
 
+                    // Hanya menggambar garis indikator (BloomLine) tanpa ChromaticBurst
                     if (indicatorOpacity > 0f)
                     {
                         Texture2D indicatorTex = ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Bosses/EmpressRework/BloomLine").Value;
                         Vector2 lineOrigin = new Vector2(indicatorTex.Width / 2f, indicatorTex.Height / 2f);
                         float lineRotation = initialRotation + MathHelper.PiOver2; 
-                        Vector2 lineScale = new Vector2(0.6f, 3500f / indicatorTex.Height);
                         Vector2 indicatorDrawPos = initialCenter - Main.screenPosition + new Vector2(0f, projectile.gfxOffY);
-                        Color indicatorColor = pastelColor * indicatorOpacity;
-                        indicatorColor.A = 0; 
-                        Main.EntitySpriteDraw(indicatorTex, indicatorDrawPos, null, indicatorColor * 0.7f, lineRotation, lineOrigin, lineScale, SpriteEffects.None, 0);
-                        
-                        Texture2D burstTex = ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Bosses/EmpressRework/ChromaticBurst").Value;
-                        float burstProgress = customTimer / 42f;
-                        Main.EntitySpriteDraw(burstTex, indicatorDrawPos, null, pastelColor * MathHelper.Lerp(0.4f, 0f, burstProgress), 0f, burstTex.Size() / 2f, MathHelper.Lerp(2.5f, 0.1f, burstProgress), SpriteEffects.None, 0);
+
+                        // Outer Glow Line
+                        Color outerColor = pastelColor * (indicatorOpacity * 0.5f);
+                        outerColor.A = 0; 
+                        Vector2 outerScale = new Vector2(0.45f, 3500f / indicatorTex.Height);
+                        Main.EntitySpriteDraw(indicatorTex, indicatorDrawPos, null, outerColor, lineRotation, lineOrigin, outerScale, SpriteEffects.None, 0);
+
+                        // Inner Core Line
+                        Color innerCore = Color.White * (indicatorOpacity * 0.75f);
+                        innerCore.A = 0;
+                        Vector2 innerScale = new Vector2(0.15f, 3500f / indicatorTex.Height);
+                        Main.EntitySpriteDraw(indicatorTex, indicatorDrawPos, null, innerCore, lineRotation, lineOrigin, innerScale, SpriteEffects.None, 0);
                     }
                 }
 
-                Color glowColor = pastelColor * 0.3f;
+                Color glowColor = pastelColor * 0.25f;
                 glowColor.A = 0;
                 for (int j = 0; j < 4; j++)
                 {
-                    Vector2 glowOffset = Vector2.UnitX.RotatedBy(MathHelper.PiOver2 * j) * 4f;
-                    Main.EntitySpriteDraw(texture, drawPosition + glowOffset, sourceRectangle, glowColor, projectile.rotation, origin, projectile.scale * 1.05f, SpriteEffects.None, 0);
+                    Vector2 glowOffset = Vector2.UnitX.RotatedBy(MathHelper.PiOver2 * j) * 3f;
+                    Main.EntitySpriteDraw(texture, drawPosition + glowOffset, sourceRectangle, glowColor, projectile.rotation, origin, projectile.scale * 1.03f, SpriteEffects.None, 0);
                 }
 
                 if (projectile.type == ProjectileID.HallowBossRainbowStreak)
@@ -157,7 +165,7 @@ namespace TheSanity.GlobalNPC.Bosses.EmpressRework
                         if (projectile.oldPos[i] == Vector2.Zero) continue;
                         float trailFactor = 1f - (i / (float)projectile.oldPos.Length);
                         Vector2 trailPosition = projectile.oldPos[i] + projectile.Size / 2f - Main.screenPosition + new Vector2(0f, projectile.gfxOffY);
-                        Main.EntitySpriteDraw(texture, trailPosition, sourceRectangle, pastelColor * trailFactor * 0.25f, projectile.oldRot[i], origin, projectile.scale * trailFactor, SpriteEffects.None, 0);
+                        Main.EntitySpriteDraw(texture, trailPosition, sourceRectangle, pastelColor * trailFactor * 0.2f, projectile.oldRot[i], origin, projectile.scale * trailFactor, SpriteEffects.None, 0);
                     }
                 }
                 Main.EntitySpriteDraw(texture, drawPosition, sourceRectangle, pastelColor, projectile.rotation, origin, projectile.scale, SpriteEffects.None, 0);
