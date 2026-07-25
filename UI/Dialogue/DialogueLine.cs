@@ -52,6 +52,26 @@ namespace TheSanity.UI.DialogueSystem
         // "UnchangeBGM": kalau True, BGM tetap lanjut muter walau UIDialogueBox ini di-Close().
         public bool KeepBgmAfterClose = false;
 
+        // CustomFontPath: font KHUSUS buat baris ini doang, contoh "TheSanity/Fonts/SaiFont"
+        // (path asset .dynamicfont/.xnb yang udah di-compile ke dalam mod). null (default) =
+        // baris ini pakai font sistem biasa (FontAssets.MouseText) - JADI OPT-IN PER BARIS,
+        // bukan ganti semua dialog sekaligus. Kalau path yang dikasih ga ketemu/gagal di-load,
+        // otomatis fallback ke font default juga (lihat DialogueFontCache.cs), ga bikin crash.
+        // Sama seperti BGM/TypingSound, field ini TIDAK memakai aturan rantai warisan - tiap
+        // baris murni pakai nilainya sendiri (atau font default kalau null).
+        public string CustomFontPath = null;
+
+        // CustomFontScale: pengali ukuran KHUSUS buat font baris ini (dipakai bareng
+        // CustomFontPath, di atas UIDialogueBox.TextScale global). null (default) = ga ada
+        // pengali tambahan, ukuran teks baris ini SAMA PERSIS kayak baris lain (TextScale biasa).
+        // Contoh 1.5f = 150% lebih besar dari TextScale biasa, 0.8f = 80% (lebih kecil).
+        // Berguna khusus buat font custom yang secara alami tampil kecil/tipis (mis. font gaya
+        // tulisan tangan) dibanding font default Terraria, jadi bisa dikompensasi per-baris
+        // tanpa perlu ubah TextScale global (yang bakal ikut ngubah SEMUA baris lain juga).
+        // Field ini TIDAK memakai aturan rantai warisan - tiap baris murni pakai nilainya
+        // sendiri (atau tanpa pengali tambahan kalau null), sama seperti CustomFontPath.
+        public float? CustomFontScale = null;
+
         public const string NoneToken = "NONE";
 
         public static bool IsNone(string value) =>

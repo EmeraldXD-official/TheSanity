@@ -1,0 +1,164 @@
+using System;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using Terraria;
+using Terraria.GameContent;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoProjectile
+{
+    // ==================================================================================
+    // Border arena lingkaran raksasa buat Pattern 5 (Arena Bomb). Murni VISUAL, ga ada
+    // hitbox/damage sama sekali -- yang narik player biar tetep di dalem itu logic-nya ada
+    // di ArenaBombDash.cs (ConfinePlayersToArena), bukan projectile ini.
+    //
+    // Digambar pakai TextureAssets.MagicPixel (asset VANILLA, 1x1 putih polos) yang di-stretch
+    // jadi ratusan segmen kecil ngebentuk lingkaran, BUKAN dust/particle. Warnanya dianimasiin
+    // pake beberapa lapis noise sinus (merah pekat + hitam gonta-ganti + sedikit "jitter" radius)
+    // biar keliatan hidup/ga polos rata, bukan lingkaran statis 1 warna doang.
+    //
+    // ai[0] = whoAmI dari PlutoHead pemilik border ini.
+    // ai[1] = state -> 0 = aktif (muncul & bertahan), 1 = mengecil & fade out sebelum Kill().
+    // ==================================================================================
+    public class PlutoArenaBorder : ModProjectile
+    {
+        // 🛑 [SATU-SATUNYA SUMBER RADIUS ARENA] dipakai bareng sama ArenaBombDash.cs biar
+        // ga ada 2 angka radius yang beda sendiri-sendiri. 150 block x 150 block (1 block =
+        // 16px) -> diameter ~2400px -> radius ~1200px.
+        public const float Radius = 1200f;
+
+        // 🛑 [LOKASI BALANCING DURASI MUNCUL] border membesar dari 0 -> full radius
+        private const int IntroTime = 25;
+
+        // 🛑 [LOKASI BALANCING DURASI MENGHILANG] border mengecil dari full radius -> 0 lalu Kill()
+        private const int OutroTime = 35;
+
+        // 🛑 [LOKASI BALANCING JUMLAH SEGMEN GARIS] makin banyak makin mulus tapi makin berat
+        private const int SegmentCount = 140;
+
+        // 🛑 [LOKASI BALANCING KETEBALAN GARIS BORDER]
+        private const float BorderThickness = 26f;
+
+        public override string Texture => "TheSanity/GlobalNPC/Bosses/Pluto/PlutoProjectile/PlutoBomb"; // texture dummy, ga dipakai (PreDraw custom)
+
+        public override void SetStaticDefaults() {
+            ProjectileID.Sets.DrawScreenCheckFluff[Type] = 2600;
+            ProjectileID.Sets.TrailCacheLength[Type] = 2;
+        }
+
+        public override void SetDefaults() {
+            Projectile.width = 8;
+            Projectile.height = 8;
+
+            Projectile.friendly = false;
+            Projectile.hostile = false;
+            Projectile.damage = 0;
+            Projectile.tileCollide = false;
+            Projectile.ignoreWater = true;
+            Projectile.penetrate = -1;
+            Projectile.timeLeft = 36000; // dikontrol manual lewat ai[1], bukan lewat timeLeft habis
+        }
+
+        private float ScaleFactor {
+            get {
+                int state = (int)Projectile.ai[1];
+                if (state == 0) {
+                    // Fase muncul: 0 -> 1 selama IntroTime, lalu tetap 1 (bertahan penuh)
+                    return MathHelper.Clamp(Projectile.localAI[0] / IntroTime, 0f, 1f);
+                }
+                else {
+                    // Fase menghilang: 1 -> 0 selama OutroTime
+                    return MathHelper.Clamp(1f - (Projectile.localAI[0] / OutroTime), 0f, 1f);
+                }
+            }
+        }
+
+        public override void AI() {
+            // 🛑 [FIX DRAW ORDER] Pluto (Head/Body) pakai NPC.behindTiles = true, jadi digambar
+            // di pass "belakang tile" yang lebih awal daripada pass proyektil normal -- tanpa ini,
+            // border (proyektil biasa) kegambar BELAKANGAN tiap frame -> keliatan numpuk DI ATAS
+            // Pluto. Daftarin whoAmI ke cache list ini TIAP TICK (list-nya di-reset tiap frame sama
+            // game) supaya border digambar bareng di pass paling awal itu, dan Pluto konsisten
+            // kegambar DI ATAS/depan border, bukan sebaliknya.
+            Main.instance.DrawCacheProjsBehindNPCsAndTiles.Add(Projectile.whoAmI);
+
+            int state = (int)Projectile.ai[1];
+
+            Projectile.localAI[0]++;
+
+            if (state == 1 && Projectile.localAI[0] >= OutroTime) {
+                Projectile.Kill();
+            }
+
+            // Posisi kunci diem di titik spawn (velocity emang sengaja Vector2.Zero dari awal),
+            // jadi ga perlu ngapa-ngapain lagi soal posisi di sini.
+        }
+
+        public override bool ShouldUpdatePosition() => false;
+
+        public override bool PreDraw(ref Color lightColor) {
+            float scale = ScaleFactor;
+            if (scale <= 0.001f) return false;
+
+            float currentRadius = Radius * scale;
+            Vector2 center = Projectile.Center - Main.screenPosition;
+
+            Texture2D pixel = TextureAssets.MagicPixel.Value; // asset VANILLA 1x1 putih
+            Rectangle pixelSrc = new Rectangle(0, 0, 1, 1);
+            Vector2 pixelOrigin = new Vector2(0.5f, 0.5f);
+
+            float time = Main.GlobalTimeWrappedHourly;
+            float globalFade = MathHelper.Clamp(scale * 1.4f, 0f, 1f); // ikut fade in/out juga
+
+            for (int i = 0; i < SegmentCount; i++) {
+                float t = (float)i / SegmentCount;
+                float baseAngle = t * MathHelper.TwoPi;
+
+                // 🛑 [JITTER RADIUS] bikin garis border ga rata sempurna, kayak "bergolak" pelan
+                float jitter = (float)Math.Sin(baseAngle * 9f + time * 3.2f) * 6f
+                             + (float)Math.Sin(baseAngle * 23f - time * 5.7f) * 3f;
+                float segRadius = currentRadius + jitter;
+
+                Vector2 point = center + baseAngle.ToRotationVector2() * segRadius;
+
+                // 🛑 [NOISE WARNA] campuran merah pekat & hitam yang gonta-ganti per segmen &
+                // per waktu, biar keliatan "hidup"/berdenyut, bukan warna solid rata.
+                float noiseA = (float)Math.Sin(baseAngle * 5f + time * 2.4f) * 0.5f + 0.5f;
+                float noiseB = (float)Math.Sin(baseAngle * 17f - time * 4.1f) * 0.5f + 0.5f;
+                float darkness = MathHelper.Clamp((noiseA * 0.6f + noiseB * 0.4f), 0f, 1f);
+
+                Color darkRed = new Color(120, 0, 0);
+                Color pureBlack = Color.Black;
+                Color segColor = Color.Lerp(darkRed, pureBlack, darkness) * globalFade;
+
+                // Panjang tiap segmen dilebihin dikit biar nyambung rapat antar segmen
+                float segLength = (MathHelper.TwoPi * segRadius / SegmentCount) * 1.6f;
+
+                // 🛑 [FIX BUG GARIS PUTUS-PUTUS] Sisi panjang tiap segmen (segLength) ada di
+                // sumbu VERTIKAL tekstur sebelum dirotasi (lihat segScale di bawah: X = tebal,
+                // Y = panjang). Jadi biar sisi panjang itu ngikutin lengkungan lingkaran
+                // (tangensial), rotasinya HARUS pas "baseAngle" doang. Sebelumnya ada
+                // "+ MathHelper.PiOver2" ekstra yang bikin tiap segmen malah muter 90° kelewatan
+                // sampai nunjuk ke arah radius (kayak jari-jari roda) -- itu penyebab keliatan
+                // garis-garis lepas ga nyambung, bukan lingkaran utuh.
+                float segRotation = baseAngle;
+
+                Vector2 segScale = new Vector2(BorderThickness, segLength);
+
+                Main.EntitySpriteDraw(pixel, point, pixelSrc, segColor, segRotation, pixelOrigin, segScale, SpriteEffects.None, 0);
+
+                // Lapisan tipis lebih terang di tengah garis biar ga keliatan flat/1 warna doang
+                float glowPulse = (float)Math.Sin(baseAngle * 11f + time * 6f) * 0.5f + 0.5f;
+                if (glowPulse > 0.7f) {
+                    float emberIntensity = (glowPulse - 0.7f) / 0.3f * globalFade;
+                    Color emberColor = new Color(255, 40, 20) * emberIntensity;
+                    Vector2 emberScale = new Vector2(BorderThickness * 0.4f, segLength);
+                    Main.EntitySpriteDraw(pixel, point, pixelSrc, emberColor, segRotation, pixelOrigin, emberScale, SpriteEffects.None, 0);
+                }
+            }
+
+            return false;
+        }
+    }
+}

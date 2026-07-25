@@ -11,7 +11,7 @@ using Terraria.DataStructures;
 namespace TheSanity.NPCs
 {
     // =========================================================================
-    // 1. KODE UTAMA ENTIAS SPACE RAIN CLOUD NPC (SMART TARGETING - 20 BLOCKS RADIUS)
+    // 1. KODE UTAMA ENTIAS SPACE RAIN CLOUD NPC (DENGAN WSOLID PLATFORM)
     // =========================================================================
     public class SpaceRainCloudNPC : ModNPC
     {
@@ -227,14 +227,16 @@ namespace TheSanity.NPCs
                 }
             }
 
-            // --- GAYA FISIK BADAN UTAMA (SOLID BLOCK / ROCK PILLAR COLLISION STYLE) ---
+            // --- GAYA FISIK BADAN UTAMA (SOLID PLATFORM / WSOLID STYLE) ---
             bool playerOnTop = false;
+            float offsetFromPreviousPosition = NPC.position.Y - NPC.oldPosition.Y;
+
             for (int i = 0; i < Main.maxPlayers; i++)
             {
                 Player player = Main.player[i];
                 if (player.active && !player.dead)
                 {
-                    // Cek apakah player sedang di-hook oleh awan ini
+                    // Cek apakah player sedang di-hook oleh awan ini (abaikan tabrakan jika ya)
                     bool isThisPlayerHooked = false;
                     for (int j = 0; j < Main.maxProjectiles; j++)
                     {
@@ -249,48 +251,52 @@ namespace TheSanity.NPCs
                             }
                         }
                     }
-                    if (isThisPlayerHooked) continue;
+                    if (isThisPlayerHooked) 
+                        continue;
 
-                    if (player.Hitbox.Intersects(NPC.Hitbox))
+                    // Menggunakan batasan fisik WSolid Platform dari GolemArenaPlatform
+                    if (player.GoingDownWithGrapple || Collision.SolidCollision(player.position, player.width, player.height) || player.controlDown)
+                        continue;
+
+                    Rectangle playerRect = new((int)player.position.X, (int)player.position.Y + player.height, player.width, 1);
+
+                    int effectiveNPCHitboxHeight = Math.Min((int)player.velocity.Y, 0) + (int)Math.Abs(offsetFromPreviousPosition) + 14;
+                    if (playerRect.Intersects(new Rectangle((int)NPC.position.X, (int)NPC.position.Y, NPC.width, effectiveNPCHitboxHeight)) && player.position.Y <= NPC.position.Y)
                     {
-                        float overlapX = Math.Min(player.position.X + player.width, NPC.position.X + NPC.width) - Math.Max(player.position.X, NPC.position.X);
-                        float overlapY = Math.Min(player.position.Y + player.height, NPC.position.Y + NPC.height) - Math.Max(player.position.Y, NPC.position.Y);
-
-                        if (overlapX < overlapY)
+                        if (!player.justJumped && player.velocity.Y >= 0 && !Collision.SolidCollision(player.position + player.velocity, player.width, player.height))
                         {
-                            if (player.Center.X < NPC.Center.X)
-                                player.position.X -= overlapX;
-                            else
-                                player.position.X += overlapX;
-                            player.velocity.X = 0;
-                        }
-                        else
-                        {
-                            if (player.Center.Y < NPC.Center.Y)
+                            float kecepatanHantaman = player.velocity.Y;
+                            playerOnTop = true;
+
+                            // Memosisikan player tetap stabil di atas platform awan
+                            player.velocity.Y = 0;
+                            player.position.Y = NPC.position.Y - player.height + 4;
+                            player.position += NPC.velocity;
+
+                            // Mempertahankan logika internal Cloudy awal
+                            player.fallStart = (int)(player.position.Y / 16f);
+                            player.GetModPlayer<CloudyPlayerBlackout>().standingOnCloud = true;
+
+                            if (player.mount.Active)
+                                player.mount.ResetFlightTime(player.velocity.X);
+
+                            if (landingWindowTimer == 0)
+                                landingWindowTimer = 30;
+
+                            float batasKecepatanHancur = player.mount.Active ? 7.0f : 11.0f;
+                            if (kecepatanHantaman >= batasKecepatanHancur && landingWindowTimer > 0)
+                                NPC.ai[3] = 1f;
+
+                            // Mengunci gerakan animasi player agar tidak glitching di udara saat berdiri
+                            if (Math.Abs(player.velocity.X) < 0.01f)
                             {
-                                float kecepatanHantaman = player.velocity.Y;
-                                playerOnTop = true;
-                                player.position.Y -= overlapY;
-                                player.velocity.Y = 0;
-                                player.fallStart = (int)(player.position.Y / 16f);
-                                player.GetModPlayer<CloudyPlayerBlackout>().standingOnCloud = true;
-
-                                if (player.mount.Active)
-                                    player.mount.ResetFlightTime(player.velocity.X);
-
-                                if (landingWindowTimer == 0)
-                                    landingWindowTimer = 30;
-
-                                float batasKecepatanHancur = player.mount.Active ? 7.0f : 11.0f;
-                                if (kecepatanHantaman >= batasKecepatanHancur && landingWindowTimer > 0)
-                                    NPC.ai[3] = 1f;
+                                player.legFrame.Y = 0;
+                                player.legFrameCounter = 0;
                             }
-                            else
-                            {
-                                player.position.Y += overlapY;
-                                if (player.velocity.Y < 0)
-                                    player.velocity.Y = 0;
-                            }
+                            player.wingFrame = 0;
+                            player.wingFrameCounter = 0;
+                            player.bodyFrame.Y = 0;
+                            player.bodyFrameCounter = 0;
                         }
                     }
                 }

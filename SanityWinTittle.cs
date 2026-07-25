@@ -8,6 +8,7 @@ namespace TheSanity
     {
         public override void PostSetupContent()
         {
+			 if (Main.dedServ) return;
             // 🔧 Ganti splash text menggunakan refleksi karena Main.splashText mungkin tidak langsung tersedia di beberapa versi
             var splashTextField = typeof(Main).GetField("splashText", BindingFlags.Static | BindingFlags.Public);
             if (splashTextField != null)

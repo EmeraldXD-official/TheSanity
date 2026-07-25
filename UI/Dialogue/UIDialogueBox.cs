@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Content;
@@ -50,6 +49,19 @@ namespace TheSanity.UI.DialogueSystem
         public float NameTextScale = 1f;
         public int MaxIconSize = 160;
 
+        // Ukuran icon item inline di dalam teks (tag [i:ID]), relatif terhadap tinggi 1 baris teks.
+        // 1f = kira-kira sama tinggi sama teksnya, naikin dikit (mis. 1.15f) kalau mau icon-nya
+        // keliatan lebih "nonjol" dibanding teks di sekitarnya.
+        public float InlineIconScale = 1.1f;
+
+        // ================= POSISI (base dari kode + offset slider Config player) =================
+        // "Base" = posisi yang di-set lewat kode (constructor / SetBasePosition), representasi anchor
+        // + pixel offset kayak biasa (Left/Top.Set). Config.PositionOffsetX/Y (slider player) ditambahkan
+        // di ATAS base ini tiap frame lewat ApplyPosition() - jadi base tetap dikontrol penuh dari kode,
+        // sementara player tetap bisa nge-nudge dikit sesuai selera tanpa nabrak/override base-nya.
+        private float _baseLeftPixels = -340f, _baseLeftPercent = 0.5f;
+        private float _baseTopPixels = 430f, _baseTopPercent = 0f;
+
         // ================= KONFIGURASI ANIMASI (detik) =================
         public float PanelRevealDuration = 0.22f;
         public float IconTabRevealDuration = 0.20f;
@@ -97,7 +109,9 @@ namespace TheSanity.UI.DialogueSystem
         public event Action<UIDialogueBox> OnTimerExpired;       // dipanggil sekali pas waktu habis (sebelum auto-advance)
 
         // ================= STATE LAYOUT =================
-        private List<string> _wrappedLines = new List<string>();
+        // Sekarang list-of-token (bukan string biasa lagi) supaya tag [i:ID] (icon) dan
+        // [c/RRGGBB:teks] (warna per-bagian) tetap kebawa utuh sampai tahap gambar.
+        private List<List<RichToken>> _wrappedLines = new List<List<RichToken>>();
         private int _panelWidth, _panelHeight, _iconSize, _totalChars;
         private bool _p1HasIcon, _p2HasIcon;
         private readonly SlantedTagTextureCache _tagCacheP1 = new SlantedTagTextureCache();
@@ -158,6 +172,38 @@ namespace TheSanity.UI.DialogueSystem
             Append(_skipToggleButton);
 
             Visible = false;
+            ApplyPosition();
+        }
+
+        // ============================================================
+        //                    POSISI GUI (BASE + OFFSET CONFIG)
+        // ============================================================
+
+        /// <summary>
+        /// Set posisi "dasar" Dialogue Box dari KODE (biasanya dipanggil sekali pas setup di
+        /// ModSystem.Load(), tapi bisa dipanggil ulang kapan aja - misal mau geser box tergantung
+        /// konteks tertentu, kayak dialog cutscene vs dialog NPC biasa beda posisi).
+        /// Parameter sama persis konsepnya kayak UIElement.Left/Top.Set(pixels, percent) biasa:
+        /// percent 0.5f = anchor tengah layar, dst. Player TETAP bisa nge-nudge lebih jauh lagi
+        /// lewat slider PositionOffsetX/Y di Mod Config, di ATAS posisi dasar yang kamu set di sini.
+        /// </summary>
+        public void SetBasePosition(float leftPixels, float leftPercent, float topPixels, float topPercent)
+        {
+            _baseLeftPixels = leftPixels;
+            _baseLeftPercent = leftPercent;
+            _baseTopPixels = topPixels;
+            _baseTopPercent = topPercent;
+            ApplyPosition();
+        }
+
+        private void ApplyPosition()
+        {
+            var cfg = ModContent.GetInstance<DialogueClientConfig>();
+            float offsetX = cfg?.PositionOffsetX ?? 0;
+            float offsetY = cfg?.PositionOffsetY ?? 0;
+
+            Left.Set(_baseLeftPixels + offsetX, _baseLeftPercent);
+            Top.Set(_baseTopPixels + offsetY, _baseTopPercent);
         }
 
         public override void Draw(SpriteBatch spriteBatch)
@@ -168,6 +214,10 @@ namespace TheSanity.UI.DialogueSystem
 
         public override void Update(GameTime gameTime)
         {
+            // Selalu di-apply (bukan cuma pas Visible) biar begitu player geser slider posisi di
+            // Mod Config, box langsung "nempel" di posisi baru pas dibuka lagi tanpa perlu reload.
+            ApplyPosition();
+
             if (Visible)
             {
                 float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
@@ -381,6 +431,15 @@ namespace TheSanity.UI.DialogueSystem
             return theme;
         }
 
+        /// <summary>
+        /// Skala teks EFEKTIF buat baris ini: TextScale global dikali pengali
+        /// DialogueLine.CustomFontScale kalau baris ini punya nilai itu (non-null), atau
+        /// TextScale biasa kalau null. Dipakai konsisten di RecalculateLayout() (buat
+        /// wrapping/ukur lebar) DAN DrawSelf() (buat gambar) supaya hasil wrap & gambar
+        /// selalu sinkron satu sama lain, ga ada mismatch ukuran antara keduanya.
+        /// </summary>
+        private float GetEffectiveTextScale(DialogueLine line) => TextScale * (line?.CustomFontScale ?? 1f);
+
         // ============================================================
         //                    AUDIO: BGM / TYPING SOUND / SFX
         // ============================================================
@@ -592,7 +651,10 @@ namespace TheSanity.UI.DialogueSystem
             }
             else
             {
-                DynamicSpriteFont font = FontAssets.MouseText.Value;
+                // Font: pakai CustomFontPath baris ini KALAU di-set, kalau nggak (null) balik ke
+                // font sistem default - jadi custom font ini opt-in per baris, bukan ganti semua.
+                DynamicSpriteFont font = DialogueFontCache.Get(line.CustomFontPath);
+                float effectiveScale = GetEffectiveTextScale(line); // TextScale x DialogueLine.CustomFontScale (kalau di-set)
                 string text = line.GetActiveText() ?? string.Empty;
 
                 // TINGGI (Y) PANEL & ICON SENGAJA DIBUAT TETAP (FIXED) = MinHeight, GA IKUT MENYESUAIKAN
@@ -602,11 +664,19 @@ namespace TheSanity.UI.DialogueSystem
                 int iconSizeGuess = Math.Min(height, MaxIconSize);
 
                 int availableTextWidth = Math.Max(MaxWidth - Padding * 2, 80);
-                _wrappedLines = WrapText(font, text, availableTextWidth, TextScale);
+                float lineHeightGuess = font.MeasureString("Ay").Y * effectiveScale;
+                float inlineIconSize = lineHeightGuess * InlineIconScale;
+
+                List<RichToken> tokens = DialogueRichText.Parse(text);
+                _wrappedLines = DialogueRichText.Wrap(font, tokens, availableTextWidth, effectiveScale, inlineIconSize);
 
                 float longestLine = 0f;
-                foreach (string l in _wrappedLines)
-                    longestLine = Math.Max(longestLine, font.MeasureString(l).X * TextScale);
+                foreach (List<RichToken> l in _wrappedLines)
+                {
+                    float w = 0f;
+                    foreach (RichToken t in l) w += DialogueRichText.TokenWidth(t, font, effectiveScale, inlineIconSize);
+                    longestLine = Math.Max(longestLine, w);
+                }
 
                 int width = (int)MathHelper.Clamp(longestLine + Padding * 2, MinWidth, MaxWidth);
 
@@ -615,7 +685,7 @@ namespace TheSanity.UI.DialogueSystem
                 _iconSize = iconSizeGuess;
 
                 _totalChars = 0;
-                foreach (string l in _wrappedLines) _totalChars += l.Length;
+                foreach (List<RichToken> l in _wrappedLines) _totalChars += l.Count;
             }
 
             int nameTagOffset = NameTagHeight / 2 + NameTagRaiseExtra;
@@ -653,43 +723,6 @@ namespace TheSanity.UI.DialogueSystem
             _prevButton.Recalculate();
             _nextButton.Recalculate();
             _skipToggleButton.Recalculate();
-        }
-
-        private static List<string> WrapText(DynamicSpriteFont font, string text, int maxWidth, float scale)
-        {
-            var lines = new List<string>();
-            if (string.IsNullOrEmpty(text))
-            {
-                lines.Add(string.Empty);
-                return lines;
-            }
-
-            foreach (string paragraph in text.Split('\n'))
-            {
-                string[] words = paragraph.Split(' ');
-                var current = new StringBuilder();
-
-                foreach (string word in words)
-                {
-                    string test = current.Length == 0 ? word : current + " " + word;
-                    float testWidth = font.MeasureString(test).X * scale;
-
-                    if (testWidth > maxWidth && current.Length > 0)
-                    {
-                        lines.Add(current.ToString());
-                        current.Clear();
-                        current.Append(word);
-                    }
-                    else
-                    {
-                        if (current.Length > 0) current.Append(' ');
-                        current.Append(word);
-                    }
-                }
-                lines.Add(current.ToString());
-            }
-
-            return lines;
         }
 
         // ============================================================
@@ -814,27 +847,76 @@ namespace TheSanity.UI.DialogueSystem
             _skipToggleButton.BorderColor = theme.OutlineColor;
 
             // ---------- TEKS DIALOG, diketik dari kiri ke kanan ----------
+            // Font: custom per-baris (DialogueLine.CustomFontPath) kalau di-set, kalau nggak
+            // balik ke font default sistem - konsisten sama yang dipakai di RecalculateLayout().
             bool allStagesDone = !_closing && _stageIndex >= StageCount;
             if (allStagesDone)
             {
-                DynamicSpriteFont font = FontAssets.MouseText.Value;
-                float lineH = font.MeasureString("Ay").Y * TextScale + 4f;
+                DynamicSpriteFont font = DialogueFontCache.Get(line.CustomFontPath);
+                float effectiveScale = GetEffectiveTextScale(line); // TextScale x DialogueLine.CustomFontScale (kalau di-set)
+                float lineH = font.MeasureString("Ay").Y * effectiveScale + 4f;
+                float inlineIconSize = (lineH - 4f) * InlineIconScale;
                 float textX = panelX + Padding;
                 float textY = panelY + Padding;
 
                 int remaining = (int)_typedAmount;
                 for (int i = 0; i < _wrappedLines.Count && remaining > 0; i++)
                 {
-                    string wLine = _wrappedLines[i];
-                    int show = Math.Min(remaining, wLine.Length);
+                    List<RichToken> wLine = _wrappedLines[i];
+                    int show = Math.Min(remaining, wLine.Count);
                     remaining -= show;
                     if (show <= 0) break;
 
-                    string visiblePart = wLine.Substring(0, show);
-                    spriteBatch.DrawString(font, visiblePart, new Vector2(textX, textY + i * lineH),
-                        theme.DialogueTextColor, 0f, Vector2.Zero, TextScale, SpriteEffects.None, 0f);
+                    float cursorX = textX;
+                    float rowY = textY + i * lineH;
+
+                    for (int t = 0; t < show; t++)
+                    {
+                        RichToken token = wLine[t];
+
+                        if (token.Type == RichTokenType.Icon)
+                        {
+                            DrawInlineIcon(spriteBatch, token.IconItemID, cursorX, rowY, inlineIconSize, lineH);
+                            cursorX += inlineIconSize;
+                        }
+                        else
+                        {
+                            Color glyphColor = token.ColorOverride ?? theme.DialogueTextColor;
+                            string ch = token.Char.ToString();
+                            spriteBatch.DrawString(font, ch, new Vector2(cursorX, rowY),
+                                glyphColor, 0f, Vector2.Zero, effectiveScale, SpriteEffects.None, 0f);
+                            cursorX += font.MeasureString(ch).X * effectiveScale;
+                        }
+                    }
                 }
             }
+        }
+
+        /// <summary>
+        /// Gambar 1 icon item inline di dalam teks dialog (dari tag [i:ID]). Support item vanilla
+        /// maupun modded (dua-duanya sama-sama ada di TextureAssets.Item[] setelah mod ke-load).
+        /// Kalau ID-nya ga valid/texture belum ke-load, ga digambar apa-apa (ga bikin crash).
+        /// CATATAN: item yang punya banyak frame animasi (mis. beberapa item bercahaya) bakal
+        /// digambar utuh 1 spritesheet-nya, bukan cuma frame pertama - cukup buat kebanyakan item
+        /// biasa, tapi kalau butuh presisi frame tertentu, gambar manual sendiri di luar sistem ini.
+        /// </summary>
+        private void DrawInlineIcon(SpriteBatch sb, int itemId, float x, float y, float size, float lineH)
+        {
+            // itemId <= 0 = jelas bukan item valid (0 = "kosong"/air di slot). Batas atas ga perlu
+            // dicek manual terhadap ItemID.Count karena TextureAssets.Item[] otomatis sepanjang
+            // TOTAL item TERMASUK semua item modded yang ke-load (bukan cuma vanilla).
+            if (itemId <= 0 || itemId >= TextureAssets.Item.Length) return;
+
+            Asset<Texture2D> asset = TextureAssets.Item[itemId];
+            if (asset?.Value == null) return;
+
+            Texture2D tex = asset.Value;
+            float scale = Math.Min(size / tex.Width, size / tex.Height);
+            float drawH = tex.Height * scale;
+
+            // center-kan icon secara vertikal terhadap tinggi 1 baris teks
+            float offsetY = (lineH - drawH) / 2f;
+            sb.Draw(tex, new Vector2(x, y + offsetY), null, Color.White, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
         }
 
         private void DrawIconTab(SpriteBatch sb, int x, int y, int size, float progress, DialogueTheme theme, bool mirrored)

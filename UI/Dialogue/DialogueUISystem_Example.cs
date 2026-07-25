@@ -33,11 +33,18 @@ namespace TheSanity.UI.DialogueSystem
             HistoryKeybind = KeybindLoader.RegisterKeybind(Mod, "Open Dialogue History", "H");
 
             DialogueBox = new UIDialogueBox();
-            // Posisi default: anchor tengah-horizontal (0.5f) + pixel offset. Buat geser SELURUH GUI
-            // dialogue box ke kiri/kanan, cukup ubah angka pertama di Left.Set(...) di bawah ini:
-            // makin NEGATIF (mis. -340 -> -420) = geser makin ke KIRI, makin ke arah 0/positif = ke KANAN.
-            DialogueBox.Left.Set(-340, 0.5f);
-            DialogueBox.Top.Set(430, 0f);
+            // Posisi default (BASE) diatur dari kode di sini via SetBasePosition(leftPixels, leftPercent,
+            // topPixels, topPercent) - PENTING pakai method ini, bukan DialogueBox.Left.Set()/Top.Set()
+            // langsung, karena UIDialogueBox sekarang otomatis nambahin offset slider PositionOffsetX/Y
+            // (Mod Config, lihat DialogueClientConfig.cs) di atas base ini tiap frame - kalau di-set
+            // manual lewat Left.Set() langsung, akan ke-override balik ke base tiap frame berikutnya.
+            //
+            // leftPercent 0.5f = anchor tengah-horizontal layar, leftPixels = offset piksel dari situ:
+            //   makin NEGATIF (mis. -340 -> -420) = geser makin ke KIRI
+            //   makin ke arah 0 / positif           = geser makin ke KANAN
+            // Player sendiri masih bisa nge-nudge lebih jauh lagi lewat slider di Mod Config tanpa
+            // ganggu base yang kamu set di sini.
+            DialogueBox.SetBasePosition(leftPixels: -340f, leftPercent: 0.5f, topPixels: 430f, topPercent: 0f);
             // begitu ada baris baru tampil (termasuk pas Open()), catat ke riwayat
             DialogueBox.OnEntryChanged += (box, index) =>
             {
@@ -188,6 +195,46 @@ namespace TheSanity.UI.DialogueSystem
 
         // Contoh: skip animasi ketik yang sedang jalan tanpa menyalakan toggle permanen
         public void ContohForceSelesaikanKetikan() => DialogueBox.CompleteTypingInstantly();
+
+        // ================================================================
+        // CONTOH: font custom per-baris + icon item inline + teks berwarna
+        // ================================================================
+        public void ContohFontCustomDanRichText()
+        {
+            var lines = new List<DialogueLine>
+            {
+                new DialogueLine
+                {
+                    // CustomFontPath cuma ngaruh ke BARIS INI doang - baris lain yang ga ngisi
+                    // field ini tetap pakai font default sistem seperti biasa.
+                    CustomFontPath = "TheSanity/Fonts/SaiFont",
+                    P1 = new SpeakerData
+                    {
+                        Active = true,
+                        Nametag = "Sanity",
+                        // [c/RRGGBB:teks] -> warnain bagian tertentu doang. Contoh: cuma kata
+                        // "BENCI KAMU" yang jadi merah, sisanya tetap warna default tema aktif.
+                        Dialogue = "Aku benar benar [c/FF0000:BENCI KAMU]... bercanda kok hehe.",
+                    },
+                    P2 = new SpeakerData { Active = true, Nametag = "Traveler", Dialogue = "" },
+                },
+                new DialogueLine
+                {
+                    // Baris ini TIDAK diisi CustomFontPath -> otomatis balik ke font default.
+                    P1 = new SpeakerData
+                    {
+                        Active = true,
+                        Nametag = "Sanity",
+                        // [i:ID] -> gambar icon item inline di tengah kalimat. ID bisa vanilla
+                        // (ItemID.IronSword dst) atau item modded (ModContent.ItemType<T>()).
+                        Dialogue = $"Coba lihat, aku bawa [i:{ItemID.IronBroadsword}] pedang besi nih!",
+                    },
+                    P2 = new SpeakerData { Active = true, Nametag = "Traveler", Dialogue = "" },
+                },
+            };
+
+            DialogueBox.Open(lines);
+        }
     }
 
     public class DialogueUIState : UIState

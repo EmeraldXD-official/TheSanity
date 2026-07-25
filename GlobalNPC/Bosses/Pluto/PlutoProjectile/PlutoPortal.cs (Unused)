@@ -1,0 +1,112 @@
+using System;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using ReLogic.Content;
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoProjectile
+{
+    public class PlutoPortal : ModProjectile
+    {
+        public static Asset<Texture2D> MainTexture;
+        public static Asset<Texture2D> MidleTexture;
+        public static Asset<Texture2D> RingTexture;
+
+        public override string Texture => "TheSanity/GlobalNPC/Bosses/Pluto/PlutoProjectile/PortalMain";
+
+        public override void SetStaticDefaults() {
+            if (!Main.dedServ) {
+                MainTexture = ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Bosses/Pluto/PlutoProjectile/PortalMain");
+                MidleTexture = ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Bosses/Pluto/PlutoProjectile/PortalMidle");
+                RingTexture = ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Bosses/Pluto/PlutoProjectile/PortalRing");
+            }
+        }
+
+        public override void SetDefaults() {
+            Projectile.width = 10;
+            Projectile.height = 10;
+            Projectile.tileCollide = false;
+            Projectile.ignoreWater = true;
+            Projectile.penetrate = -1;
+            Projectile.hostile = false; 
+            Projectile.friendly = false;
+            Projectile.timeLeft = 3600;  
+            Projectile.scale = 0.01f;     
+            Projectile.alpha = 255;      
+        }
+
+        public override void AI() {
+            int ownerIdx = (int)Projectile.ai[0];
+            if (ownerIdx >= 0 && ownerIdx < Main.maxNPCs && Main.npc[ownerIdx].active) {
+                NPC owner = Main.npc[ownerIdx];
+                // JIKA PLUTO BERGANTI PATTERN (Tidak lagi di Pattern 3 / PredicMineDash)
+                // Maka paksa portal ini untuk masuk ke fase Shrink & Fade Out
+                if (owner.ai[0] != 3f) {
+                    Projectile.ai[1] = 1f; 
+                }
+            } else {
+                Projectile.ai[1] = 1f; // Owner mati/despawn
+            }
+
+            if (Projectile.ai[1] == 0f) {
+                if (Projectile.scale < 1.0f) {
+                    Projectile.scale += 0.08f;
+                    if (Projectile.scale > 1.0f) Projectile.scale = 1.0f;
+                }
+                if (Projectile.alpha > 0) {
+                    Projectile.alpha -= 15;
+                    if (Projectile.alpha < 0) Projectile.alpha = 0;
+                }
+            }
+            else {
+                Projectile.scale -= 0.08f;
+                Projectile.alpha += 18;
+                if (Projectile.scale <= 0f || Projectile.alpha >= 255) {
+                    Projectile.Kill();
+                }
+            }
+
+            // Rotasi berlawanan arah
+            Projectile.localAI[0] += 0.05f; 
+            Projectile.localAI[2] += 0.012f; 
+            Projectile.localAI[1] -= 0.035f; 
+        }
+
+        public override bool PreDraw(ref Color lightColor) {
+            if (MainTexture == null || MidleTexture == null || RingTexture == null) return false;
+
+            SpriteBatch spriteBatch = Main.spriteBatch;
+            float opacity = (255f - Projectile.alpha) / 255f;
+            Vector2 drawPos = Projectile.Center - Main.screenPosition;
+            Color portalColor = Color.Red * opacity;
+
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, RasterizerState.CullCounterClockwise, null, Main.GameViewMatrix.TransformationMatrix);
+
+            // 1. Portal Ring (Paling belakang, diperkecil 20% dari skala portal)
+            Texture2D ringTex = RingTexture.Value;
+            Vector2 ringOrigin = ringTex.Size() / 2f;
+            float ringScale = Projectile.scale * 0.8f; 
+            spriteBatch.Draw(ringTex, drawPos, null, portalColor, Projectile.localAI[2], ringOrigin, ringScale, SpriteEffects.None, 0f);
+
+            // 2. Portal Midle (Tengah, disesuaikan mengisi kekosongan bagian dalam Ring)
+            Texture2D midTex = MidleTexture.Value;
+            Vector2 midOrigin = midTex.Size() / 2f;
+            float midScale = Projectile.scale * 2.4f; 
+            spriteBatch.Draw(midTex, drawPos, null, portalColor, Projectile.localAI[1], midOrigin, midScale, SpriteEffects.None, 0f);
+
+            // 3. Portal Main (Paling atas, berukuran tepat 50% dari visual Midle)
+            Texture2D mainTex = MainTexture.Value;
+            Vector2 mainOrigin = mainTex.Size() / 2f;
+            float mainScale = Projectile.scale * 1.6f; 
+            spriteBatch.Draw(mainTex, drawPos, null, portalColor, Projectile.localAI[0], mainOrigin, mainScale, SpriteEffects.None, 0f);
+
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, RasterizerState.CullCounterClockwise, null, Main.GameViewMatrix.TransformationMatrix);
+
+            return false;
+        }
+    }
+}

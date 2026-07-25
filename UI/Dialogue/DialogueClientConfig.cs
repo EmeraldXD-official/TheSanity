@@ -40,5 +40,19 @@ namespace TheSanity.UI.DialogueSystem
         [DefaultValue(false)]
         [Tooltip("If ON, the box's open/close animation (panel, icon tab, name tag, buttons) is instant with no animation.")]
         public bool DisableOpenCloseAnimation;
+
+        [Header("Position")]
+
+        [Range(-500, 500)]
+        [DefaultValue(0)]
+        [Slider]
+        [Tooltip("Nudge the Dialogue Box left/right from wherever the mod placed it by default. Negative = left, positive = right.")]
+        public int PositionOffsetX;
+
+        [Range(-500, 500)]
+        [DefaultValue(0)]
+        [Slider]
+        [Tooltip("Nudge the Dialogue Box up/down from wherever the mod placed it by default. Negative = up, positive = down.")]
+        public int PositionOffsetY;
     }
 }

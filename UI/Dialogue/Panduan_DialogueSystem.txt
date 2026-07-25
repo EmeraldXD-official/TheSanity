@@ -16,7 +16,10 @@ DAFTAR ISI
 9. Timer Dialog (durasi per-baris, garis indikator, hook)
 10. Efek Ambient per-Tema (daun, darah, ember, dst)
 11. Tampilan tombol & Name Tag (UPDATE terbaru)
-12. Catatan tambahan / gotcha
+12. Font Custom per-baris (BARU)
+13. Rich Text: Icon Item Inline & Teks Berwarna (BARU)
+14. Posisi Dialogue Box: Base Position + Slider Config (BARU)
+15. Catatan tambahan / gotcha
 
 
 ====================================================================
@@ -493,7 +496,195 @@ angkanya (kira-kira setengah dari lebar box rata-rata kamu).
 
 
 ====================================================================
-12. CATATAN TAMBAHAN / GOTCHA
+12. FONT CUSTOM PER-BARIS (BARU)
+====================================================================
+Tiap DialogueLine sekarang punya field CustomFontPath (string, default
+null). Kalau diisi, HANYA baris itu doang yang pakai font tersebut -
+baris lain yang ga ngisi field ini tetap pakai font default sistem
+(FontAssets.MouseText) seperti biasa. Jadi sifatnya OPT-IN PER BARIS,
+bukan ganti font semua dialog sekaligus.
+
+    new DialogueLine
+    {
+        CustomFontPath = "TheSanity/Fonts/SaiFont", // path asset .dynamicfont/.xnb kamu
+        P1 = new SpeakerData { Active = true, Nametag = "Sanity", Dialogue = "Halo!" },
+    }
+
+    new DialogueLine
+    {
+        // CustomFontPath ga diisi (null) -> baris ini pakai font default seperti biasa
+        P1 = new SpeakerData { Active = true, Nametag = "Sanity", Dialogue = "Balik ke font biasa." },
+    }
+
+-- Ukuran font custom per-baris: CustomFontScale (BARU) --
+Selain CustomFontPath, tiap DialogueLine juga punya field
+CustomFontScale (float?, default null). Ini PENGALI ukuran teks
+KHUSUS buat baris ini, dikalikan ke atas UIDialogueBox.TextScale
+global (bukan gantiin, cuma ngali). Berguna banget kalau font custom
+kamu secara alami tampil KECIL/TIPIS dibanding font default Terraria
+pas dipakai di TextScale yang sama (kejadian umum buat font gaya
+tulisan tangan/handwriting) - tinggal naikin CustomFontScale baris itu
+doang, TANPA perlu ubah TextScale global (yang bakal ikut ngubah
+SEMUA baris lain, termasuk yang pakai font default).
+
+    new DialogueLine
+    {
+        CustomFontPath = "TheSanity/Fonts/SaiFont",
+        CustomFontScale = 1.5f, // 150% dari TextScale biasa - font ini jadi lebih gede & gampang dibaca
+        P1 = new SpeakerData { Active = true, Nametag = "Sanity", Dialogue = "Tulisan tangan, tapi kebaca!" },
+    }
+
+    new DialogueLine
+    {
+        CustomFontPath = "TheSanity/Fonts/SaiFont",
+        CustomFontScale = 0.8f, // sebaliknya: 80%, buat font yang justru KEGEDEAN/tebal
+        P1 = new SpeakerData { Active = true, Nametag = "Sanity", Dialogue = "Contoh font yang diperkecil dikit." },
+    }
+
+    new DialogueLine
+    {
+        CustomFontPath = "TheSanity/Fonts/SaiFont",
+        // CustomFontScale ga diisi (null) -> ga ada pengali tambahan, ukuran = TextScale biasa
+        P1 = new SpeakerData { Active = true, Nametag = "Sanity", Dialogue = "Font custom, ukuran normal (TextScale biasa)." },
+    }
+
+Catatan:
+- CustomFontScale HANYA berlaku bareng CustomFontPath - ga ada
+  gunanya diisi kalau CustomFontPath baris itu null (karena "font
+  default" dianggap sudah pas ukurannya di TextScale biasa), tapi
+  ga akan bikin crash/error juga kalau tetap diisi.
+- Sama seperti CustomFontPath, field ini OPT-IN PER BARIS dan TIDAK
+  memakai aturan rantai warisan - baris berikutnya yang ga ngisi field
+  ini otomatis balik ke ukuran normal, ga ke-bawa dari baris sebelumnya.
+- Perhitungan wrap teks (word-wrap ke baris berikutnya kalau kepanjangan)
+  otomatis ikut menyesuaikan CustomFontScale, jadi teks tetap rapi ga
+  kepotong/tumpang-tindih walau ukurannya diperbesar/diperkecil.
+
+Cara bikin file font .dynamicfont/.xnb-nya sendiri (install font ke
+sistem, buat file .dynamicfont di folder Fonts/, dst) ga dibahas di
+panduan ini - itu proses setup mod-level, bukan bagian dari sistem
+dialog ini.
+
+-- Cara kerja & caching --
+Font di-load lewat DialogueFontCache.cs (file baru), yang nge-cache
+hasil ModContent.Request<DynamicSpriteFont>() biar ga di-request ulang
+tiap frame. Kalau path yang kamu kasih SALAH/GAGAL di-load (misal typo
+nama file), otomatis fallback ke font default TANPA bikin crash, dan
+path itu ditandai "gagal" biar ga terus-menerus dicoba ulang tiap frame
+(hemat performa). Kalau pas development kamu baru benerin typo path-nya
+dan mau dicoba ulang tanpa restart game:
+
+    DialogueFontCache.ClearFailedCache();
+
+Catatan: font custom cuma diterapkan ke TEKS DIALOG utama (yang
+diketik), BUKAN ke name tag / tombol - dua-duanya tetap pakai font
+sistem standar.
+
+
+====================================================================
+13. RICH TEXT: ICON ITEM INLINE & TEKS BERWARNA (BARU)
+====================================================================
+Teks di dalam DialogueLine.P1/P2.Dialogue sekarang mendukung 2 tag
+inline, format sama persis kayak chat tag bawaan Terraria (jadi kalau
+kamu udah familiar sama chat tag vanilla, syntax-nya ga asing):
+
+-- Icon item inline: [i:ID] --
+    Dialogue = "Coba lihat pedang ini [i:725]!"
+
+ID bisa item vanilla (pakai ItemID.NamaItem dari Terraria.ID) atau item
+modded (pakai ModContent.ItemType<NamaItemClassKamu>()). Contoh yang
+lebih aman daripada nulis angka mentah:
+
+    Dialogue = $"Aku bawa [i:{ItemID.IronBroadsword}] nih!"
+    Dialogue = $"Ini [i:{ModContent.ItemType<MyCoolSword>()}] buatan kita sendiri."
+
+Icon digambar sejajar teks di sekitarnya, ukurannya proporsional
+terhadap tinggi 1 baris teks (diatur lewat UIDialogueBox.InlineIconScale,
+default 1.1f - naikin/turunin kalau mau icon lebih besar/kecil relatif
+ke teksnya). Icon ikut animasi ketik (dianggap 1 "karakter" buat
+keperluan reveal animasi ketik), dan ikut ke-wrap otomatis kalau
+kepanjangan di ujung baris.
+
+-- Teks berwarna: [c/RRGGBB:teks di sini] --
+    Dialogue = "Aku benar benar [c/FF0000:BENCI KAMU]!!"
+
+Cuma teks DI DALAM tag itu yang keganti warnanya (di contoh ini "BENCI
+KAMU" doang, jadi merah/FF0000) - teks lain di baris yang sama tetap
+pakai DialogueTheme.DialogueTextColor (warna default tema aktif),
+BUKAN warna manapun kalau kamu ganti tema/palet, warna override ini
+tetap konsisten (dia ga ikut ke-hue-shift sama fitur palet di bagian 6,
+karena sifatnya override eksplisit per-kata).
+
+Boleh dipakai berkali-kali dalam satu baris:
+    Dialogue = "[c/00FF00:Hijau] dan [c/0000FF:biru] dalam satu kalimat."
+
+Boleh digabung sama icon juga:
+    Dialogue = $"Item [i:{ItemID.IronBroadsword}] ini [c/FF0000:BERBAHAYA]!"
+
+-- Batasan --
+- Tag [c/...] TIDAK BISA di-nest (isinya ga boleh ada tag [i:...] atau
+  [c/...] lain lagi di dalamnya).
+- Isi tag [c/...] ga boleh mengandung karakter "]" literal.
+- Hex warna WAJIB 6 digit (RRGGBB), huruf besar/kecil dua-duanya boleh.
+- Item yang punya banyak frame animasi bakal digambar utuh 1
+  spritesheet-nya (bukan cuma 1 frame) - cukup buat kebanyakan item
+  biasa, tapi kurang presisi buat item yang beranimasi.
+
+File baru DialogueRichText.cs (parser + word-wrap versi rich-token)
+WAJIB ikut di-include ke project.
+
+
+====================================================================
+14. POSISI DIALOGUE BOX: BASE POSITION + SLIDER CONFIG (BARU)
+====================================================================
+Sekarang ada 2 lapis kontrol posisi yang jalan bareng-bareng:
+
+1. BASE POSITION - diatur dari KODE, lewat DialogueBox.SetBasePosition().
+   Ini yang nentuin posisi "default"/"normal" box-nya.
+2. OFFSET SLIDER - diatur PLAYER sendiri lewat Mod Config
+   (PositionOffsetX & PositionOffsetY), ditambahkan di ATAS base
+   position tiap frame. Player bisa nge-nudge dikit sesuai selera
+   TANPA mengubah/menimpa base position yang kamu set dari kode.
+
+-- Cara set base position dari kode --
+    DialogueBox.SetBasePosition(
+        leftPixels: -340f, leftPercent: 0.5f,   // anchor tengah-horizontal + offset piksel
+        topPixels: 430f,  topPercent: 0f        // anchor dari atas layar + offset piksel
+    );
+
+PENTING: pakai SetBasePosition() ini, JANGAN pakai DialogueBox.Left.Set()
+/ Top.Set() secara langsung - soalnya UIDialogueBox sekarang otomatis
+nge-apply ulang (base + offset config) tiap frame di Update(), jadi
+kalau kamu set Left/Top langsung, hasilnya bakal ketimpa balik ke base
+lama di frame berikutnya.
+
+Boleh dipanggil ulang kapan aja, misal mau beda posisi tergantung
+konteks (dialog cutscene taruh di tengah-bawah, dialog NPC biasa taruh
+lebih ke pojok, dst) - tinggal panggil SetBasePosition() lagi dengan
+angka baru pas mau ganti konteks.
+
+-- Slider di Mod Config (sisi player) --
+Muncul otomatis di menu Mod Config Terraria, di bawah Header "Position":
+- PositionOffsetX : -500 s/d 500, geser kiri(-)/kanan(+)
+- PositionOffsetY : -500 s/d 500, geser atas(-)/bawah(+)
+
+Kedua slider ini default 0 (ga ada nudge tambahan, posisi = base murni
+dari kode). Player yang merasa posisi default kurang pas (ketutupan
+UI lain, kekecilan layar, dst) bisa geser sendiri tanpa perlu kamu
+sediakan opsi khusus tambahan - satu sistem ini otomatis nutup semua
+kasus itu.
+
+-- Migrasi dari kode lama --
+Kalau sebelumnya kamu (atau contoh lama) pakai:
+    DialogueBox.Left.Set(-340, 0.5f);
+    DialogueBox.Top.Set(430, 0f);
+GANTI jadi:
+    DialogueBox.SetBasePosition(-340f, 0.5f, 430f, 0f);
+Lihat DialogueUISystem_Example.cs (sudah di-update) buat contoh lengkap.
+
+
+====================================================================
+15. CATATAN TAMBAHAN / GOTCHA
 ====================================================================
 - Ganti halaman (Next/Previous) TIDAK mengulang animasi buka box,
   cuma reset animasi ketik teks. Animasi buka lengkap cuma jalan
@@ -514,3 +705,16 @@ angkanya (kira-kira setengah dari lebar box rata-rata kamu).
 - File baru DialogueThemeEffects.cs WAJIB ikut di-include ke project -
   isinya enum ThemeEffectKind & renderer partikel yang dipakai
   DialogueTheme.Effect dan UIDialogueBox.
+- File baru DialogueRichText.cs (parser tag [i:ID]/[c/RRGGBB:teks] +
+  word-wrap versi rich-token) dan DialogueFontCache.cs (cache font
+  custom per-baris) WAJIB juga ikut di-include ke project - lihat
+  bagian 12 & 13.
+- BREAKING CHANGE kecil: kalau sebelumnya kamu set posisi Dialogue Box
+  langsung lewat DialogueBox.Left.Set()/Top.Set(), sekarang WAJIB ganti
+  ke DialogueBox.SetBasePosition() (lihat bagian 14) - soalnya box
+  sekarang otomatis re-apply posisi (base + offset slider Config) tiap
+  frame di Update(), jadi Left/Top.Set() manual bakal ketimpa balik.
+- Field DialogueLine.CustomFontPath & CustomFontScale (bagian 12) dan
+  tag rich-text di isi Dialogue (bagian 13) sama-sama OPT-IN - kalau
+  ga dipakai sama sekali, semua dialog lama kamu tetap jalan & tampil
+  persis kayak sebelumnya tanpa perlu diubah apa-apa.
