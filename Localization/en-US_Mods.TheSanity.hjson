@@ -1,0 +1,1179 @@
+Biomes: {
+	TheSanityBestiaryIcon: {
+		DisplayName: The Sanity Bestiary Icon
+		TownNPCDialogueName: the The Sanity Bestiary Icon
+	}
+}
+
+Items: {
+	SanityNeutralizer: {
+		DisplayName: Sanity Neutralizer
+		Tooltip: Tooltip: Make You more calm
+	}
+
+	SoulofForgottenSnow: {
+		Tooltip: This think is so cold
+		DisplayName: Soul of Forgotten Snow
+	}
+
+	LoveBag: {
+		Tooltip: This give From a Femboy for You
+		DisplayName: Love Bag
+	}
+
+	AdvancedRuler: {
+		Tooltip: Right Click to 2 Corner of the Building, and Left Click to get Result Size of the building
+		DisplayName: Advanced Ruler
+	}
+
+	SoulOfTheSun: {
+		Tooltip: The Soul that drop from Idol of Lihzahrd
+		DisplayName: Soul Of The Sun
+	}
+
+	SanityTruffleWorm: {
+		Tooltip: ""
+		DisplayName: Truffly
+	}
+
+	SanityLacewing: {
+		Tooltip: ""
+		DisplayName: Raibow Lacewing
+	}
+
+	SanityAbeemination: {
+		Tooltip: ""
+		DisplayName: Bee blob
+	}
+
+	SanityDeerThing: {
+		DisplayName: Flufy Deery
+		Tooltip: ""
+	}
+
+	SanityClothierDoll: {
+		Tooltip: ""
+		DisplayName: Curse Doll
+	}
+
+	SanityWormFood: {
+		Tooltip: ""
+		DisplayName: Alaska Worm Food
+	}
+
+	EvilBelt: {
+		Tooltip:
+			'''
+			Reduce Damage taken by 17%
+			Has a chance to Dodge Enemy attack
+			Can Dash Trough Enemy
+
+			"The Power of Evil is in Your Hand Now"
+			'''
+		DisplayName: Evil Belt
+	}
+
+	RoyalBonePack: {
+		Tooltip:
+			'''
+			Increases the strength of friendly bees
+			Shoots crossbones at enemies while you are attacking
+			Summons shadow hands to attack your foes
+			Slimes become friendly (except Explosive Attack from Slimes)
+
+			Summons a special minion depending on your weapon class:
+			[c/076AA8:Crowny Slime] (Melee)
+			Summons a slime that slams into enemies, spawning homing spikes that inflict Slimed and On Fire!
+			[c/A85707:Baby Net] (Ranger)
+			Summons a mini Hornet that locks onto enemies, does a backflip, and fires 10 homing stingers that inflict Poisoned
+			[c/595959:Blizzardnado] (Mage)
+			Summons a mini tornado that throws rocks at enemies; fires a 15-rock barrage after every 5 shots, inflicting Frostburn
+			[c/B5B5B5:Skullytron] (Summon)
+			Summons a mini Skeletron head that locks onto enemies and throws 10 bones that return to the skull, inflicting Broken Armor
+			"The Spirit of the Guardian now in your Soul"
+			'''
+		DisplayName: Royal Bone Pack
+	}
+
+	MechanicalCamera: {
+		Tooltip:
+			'''
+			Increases defense by 15, damage reduction by 5%, and knockback resistance by 20%
+			Provides immunity to Cursed Inferno and Ichor
+			Your attacks have a 30% chance to inflict Cursed Inferno and Ichor
+			Your attacks have a 10% chance to summon mini Twins to fight for you
+			"Smile for the camera, the mechanical eyes are watching your every move"
+			'''
+		DisplayName: Mechanical Camera
+	}
+
+	MightyEagleSardine: {
+		Tooltip: "[c/864A0E:Created By:] [c/860E0E:Izhar]"
+		DisplayName: Mighty Eagle Sardine
+	}
+
+	TwinkleRelic: {
+		Tooltip: ""
+		DisplayName: Twinkle Relic
+	}
+
+	StarShineStaff: {
+		Tooltip:
+			'''
+			Shot Homing Stars to the enemy
+			"Shine of the little stars"
+			'''
+		DisplayName: Wand of Star Shine
+	}
+
+	TwinkleBag: {
+		Tooltip: ""
+		DisplayName: Treasure Bag (Twinkle)
+	}
+
+	TomeOfEclipsa: {
+		Tooltip:
+			'''
+			[c/864A0E:Created By:] [c/870D75:Zexino]
+			A forbidden tome that channels the darkness of a solar eclipse.
+			Launches lingering orbs that drain the essence of your foes.
+			"The eclipse never truly ends."
+			'''
+		DisplayName: Tome Of Eclipsa
+	}
+
+	BlackwhipItem: {
+		Tooltip:
+			'''
+			Inherits the unyielding wills of previous vestiges. Unleashes 3 chaotic strands of shadow energy in a wide spread.
+			"Channels absolute Main Character Energy. Wraps your targets in crackling, unstable teal lightning, 
+			locking them down with a gravitational Vortex effect..."
+			[c/FF4500:WARNING:] Regular grappling hooks are completely disabled by this sheer alpha energy. Also, 
+			the devs are not legally responsible for any severe spinal injuries. 
+			Bro really crafted the entire wiki into a rope.
+			'''
+		DisplayName: Blackwhip
+	}
+
+	TwinkleTwinkle: {
+		Tooltip:
+			'''
+			Summon Eyeless Stars Minion to Fight
+			"The Power of the Star now in your Side"
+			'''
+		DisplayName: Twinkle Twinkle Staff
+	}
+
+	Starmerang: {
+		Tooltip: Trhrow three Homing Twinkle Boomerang to Enemy
+		DisplayName: Starmerang
+	}
+
+	SatterdStars: {
+		DisplayName: Satterd Stars
+		Tooltip:
+			'''
+			Summon Twinkle at night
+			"Every Pice of the star feel like broken glass"
+			'''
+	}
+
+	FeatherWireWhip: {
+		DisplayName: Feather Wire Whip
+		Tooltip:
+			'''
+			Increases minion attack speed by 10% after hitting an enemy
+			Your minions will focus on the last enemy struck
+			'Light as a feather, shocking as a wire'
+			'''
+	}
+
+	DummyTool: {
+		DisplayName: Mega Dummy
+		Tooltip: RMB when hold this item to open menu for edit dummy stats
+	}
+
+	DivineSpiderScythe: {
+		DisplayName: Divine Spider Scythe
+		Tooltip:
+			'''
+			Strikes enemies with divine silk.
+			Automatically gains an attack speed burst every 5 orbs charged.
+			Orbs charge automatically over time.
+			         
+			'''
+	}
+
+	WhiteWhaleBag: {
+		Tooltip: ""
+		DisplayName: White Whale Bag
+	}
+
+	WhaleWhiteRelic: {
+		Tooltip: ""
+		DisplayName: Whale White Relic
+	}
+
+	HaloStaff: {
+		Tooltip:
+			'''
+			Summons a powerful halo entity to fight for you
+			The first summon creates a grand leader, subsequent summons create smaller helpers
+			'''
+		DisplayName: Halo Staff
+	}
+
+	HaloRune: {
+		Tooltip: emits 3 lasers around you
+		DisplayName: Halo Rune
+	}
+
+	GluttonyFruit: {
+		Tooltip:
+			'''
+			Some people say this fruit can eat people or perhaps it's the other way around?
+			[c/32FF32:+10% Permanently increases the damage dealt to the White Whale boss]
+			[c/32FF32:-5% Permanently reduces damage received from the White Whale boss]
+			'''
+		DisplayName: Gluttony Fruit
+	}
+
+	AmethystGemsparkRelicItem: {
+		DisplayName: Amethyst Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	DiamondGemsparkRelicItem: {
+		DisplayName: Diamond Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	EmeraldGemsparkRelicItem: {
+		DisplayName: Emerald Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	RubyGemsparkRelicItem: {
+		DisplayName: Ruby Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	SapphireGemsparkRelicItem: {
+		DisplayName: Sapphire Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	TopazGemsparkRelicItem: {
+		DisplayName: Topaz Gemspark Relic Item
+		Tooltip: ""
+	}
+
+	FluegelWhaleBone: {
+		DisplayName: Fluegel Whale Bone
+		Tooltip:
+			'''
+			An ancient, marrow-chilled bone that vibrates with a mournful melody.
+			Blow into it to challenge the phantom tyrant of the endless skies.
+			'''
+	}
+
+	AlchemistHomunculusStaff: {
+		DisplayName: Alchemist Homunculus Staff
+		Tooltip: ""
+	}
+
+	BambooTreepeater: {
+		DisplayName: Bamboo Treepeater
+		Tooltip: ""
+	}
+
+	BladeOfTheDarkness: {
+		DisplayName: Blade Of The Darkness
+		Tooltip: ""
+	}
+
+	CheatManipulationTome: {
+		DisplayName: Cheat Manipulation Tome
+		Tooltip: ""
+	}
+
+	CoralPistol: {
+		DisplayName: Coral Pistol
+		Tooltip: ""
+	}
+
+	DangerSense: {
+		DisplayName: Danger Sense
+		Tooltip: ""
+	}
+
+	VerdentBow: {
+		DisplayName: Verdent Bow
+		Tooltip: ""
+	}
+
+	EclipsaBlade: {
+		DisplayName: Eclipsa Blade
+		Tooltip: ""
+	}
+
+	CelestialImpaler: {
+		DisplayName: Celestial Impaler
+		Tooltip: ""
+	}
+
+	DuneBlade: {
+		DisplayName: Dune Blade
+		Tooltip: ""
+	}
+
+	EmpessBlade: {
+		DisplayName: Empess Blade
+		Tooltip: ""
+	}
+
+	TrueStarFury: {
+		DisplayName: True Star Fury
+		Tooltip: ""
+	}
+
+	FatherScythe: {
+		DisplayName: Father Scythe
+		Tooltip: ""
+	}
+
+	FlareSword: {
+		DisplayName: Flare Sword
+		Tooltip: ""
+	}
+
+	HydroSpellBook: {
+		DisplayName: Hydro Spell Book
+		Tooltip: ""
+	}
+
+	SkullOfEdge: {
+		DisplayName: Skull Of Edge
+		Tooltip: ""
+	}
+
+	SquidPistol: {
+		DisplayName: Squid Pistol
+		Tooltip: ""
+	}
+
+	AbyssalKrakenTentacle: {
+		DisplayName: Abyssal Kraken Tentacle
+		Tooltip: ""
+	}
+
+	CryoSniper: {
+		Tooltip:
+			'''
+			Converts all bullets into high-velocity cryo rounds
+			Striking an enemy marks them with a glacial target
+			Hitting a marked enemy deals 30% bonus damage and detonates the mark into homing glacial shards
+			Inflicts Frostbite on hit
+			'''
+		DisplayName: Cryo Sniper
+	}
+
+	DracolithX: {
+		Tooltip:
+			'''
+			Converts all bullets into high-velocity draconic plasma rounds that inflict Hellfire
+			Every 4th shot unleashes Thermal Overdrive, launching a massive piercing dragon head
+			Overdrive shots deal 50% bonus damage and inflict Daybreak
+			'''
+		DisplayName: Dracolith X
+	}
+
+	XenodracX: {
+		Tooltip:
+			'''
+			Converts all bullets into armor-piercing bio-organic rounds
+			Ignores 20 points of enemy defense
+			Striking enemies siphons life force to heal the wielder
+			Upon impact, shatters into 3 bone shards affected by gravity
+			Inflicts Venom on hit
+			'''
+		DisplayName: Xenodrac X
+	}
+
+	MoonlitBloom: {
+		Tooltip:
+			'''
+			Luxurious slashes with cherry blossom particles
+			Inflicts ShadowFlame on enemies upon hit by slashes or projectiles
+			[Left Click]: Rapid three-slash combo chain
+			Each slash releases flower petals from the blade tip
+			Final combo hit releases a circular petal burst
+			[Right Click]: Instant dash thrust stance, followed up by a finisher spin slash
+			Grants temporary immunity during the dash thrust
+			[Right Click Cooldown: 5 Seconds]
+			'''
+		DisplayName: Moonlit Bloom
+	}
+
+	ScarletDeath: {
+		DisplayName: Scarlet Death
+		Tooltip:
+			'''
+			[Left Click]: Unleashes a Cursed Bone Serpent Whip biting the Katana.
+			Fires blood spatters launching straight toward your cursor.
+			Blood spatters will home in on nearby enemies if present.
+			[Right Click]: Cursed Sheath Parry. Parries enemy contact or projectiles.
+			Successful parries grant invincibility and a +30% boost to All Weapon Stats!
+			Inflicts 'Scarlet Laceration' and releases healing blood orbs on hit.
+			'''
+	}
+
+	AmbariumOre: {
+		Tooltip: Disguised as ordinary stone until the blood moon rises...
+		DisplayName: Ambarium Ore
+	}
+
+	AmbariumBar: {
+		Tooltip: A dense metal bar emitting shadowy energy.
+		DisplayName: Ambarium Bar
+	}
+
+	AmbariumHook: {
+		DisplayName: Ambarium Hook
+		Tooltip: Reaches into the shadows to pull you forward.
+	}
+
+	AmbariumEye: {
+		DisplayName: Ambarium Eye
+		Tooltip:
+			'''
+			Throws a tethered ocular flail that can be aimed freely
+			Shatters its chain shortly after thrown to aggressively charge toward nearby foes
+			Inflicts Shadowflame on hit
+			Inflicts Venom and Obstructed during a Blood Moon
+			'''
+	}
+
+	AmbariumCodex: {
+		Tooltip:
+			'''
+			Opens a dark rift at the cursor that launches a high-speed shadow orb
+			The orb aggressively homes in on nearby targets with a fierce dash
+			Explodes on impact into an exponentially expanding shockwave
+			Inflicts Shadowflame on hit
+			'''
+		DisplayName: Ambarium Codex
+	}
+
+	AmbariumVisor: {
+		DisplayName: Ambarium Visor
+		Tooltip:
+			'''
+			Increases ranged damage by 4%
+			Increases ranged critical strike chance by 6%
+			'''
+		SetBonus:
+			'''
+			20% chance to not consume ammo
+			Every 8 ranged hits marks the strongest target for 5 seconds
+			While active, shooting summons Shadow Clones that mirror your fire rate
+			Has a 10 second recharge period after ending
+			'''
+	}
+
+	AmbariumHood: {
+		DisplayName: Ambarium Hood
+		Tooltip:
+			'''
+			Increases magic damage by 4%
+			Increases maximum mana by 40
+			Reduces mana usage by 6%
+			'''
+		SetBonus:
+			'''
+			Casting spells builds Magic Power
+			Every 5 spell casts triggers a Runic Supernova at cursor position, scattering homing shards
+			'''
+	}
+
+	AmbariumMask: {
+		DisplayName: Ambarium Mask
+		Tooltip:
+			'''
+			Increases summon damage by 4%
+			Increases max number of minions by 1
+			'''
+		SetBonus:
+			'''
+			Increases whip range by 15%
+			Summons a floating Ambarium Sentinel above your head
+			Minion and whip strikes charge the Sentinel to fire homing Shadowflame Shards
+			'''
+	}
+
+	AmbariumChestplate: {
+		DisplayName: Ambarium Chestplate
+		Tooltip: Increases damage by 5%
+	}
+
+	AmbariumLeggings: {
+		DisplayName: Ambarium Leggings
+		Tooltip:
+			'''
+			Increases movement speed by 10%
+			Increases critical strike chance by 3%
+			'''
+	}
+
+	DemonsBook: {
+		DisplayName: Demons Book
+		Tooltip: Summons a friendly Demon to cast Demon Scythes at enemies
+	}
+
+	VoidNecklace: {
+		Tooltip:
+			'''
+			Increases damage by 5%
+			Increases armor penetration by 8
+			'''
+		DisplayName: Void Necklace
+	}
+
+	NautilusBlaster: {
+		Tooltip:
+			'''
+			Fires a stream of bullets alongside homing water bubbles
+			Increases attack speed and damage significantly while wet
+			'''
+		DisplayName: Nautilus Blaster
+	}
+
+	AzureStaff: {
+		DisplayName: Azure Staff
+		Tooltip: ""
+	}
+
+	RiperRobe: {
+		Tooltip:
+			'''
+			5% increased damage
+			10% increased critical strike chance
+			'''
+		DisplayName: Riper Robe
+	}
+
+	RiperHood: {
+		Tooltip:
+			'''
+			10% increased damage
+			10% increased movement speed
+			'''
+		SetBonus: Summons a Reaper wielding a Death Sickle to fight by your side, without using a minion slot
+		DisplayName: Riper Hood
+	}
+
+	RiperLegs: {
+		DisplayName: Riper Legs
+		Tooltip:
+			'''
+			5% increased damage
+			5% increased movement speed
+			'''
+	}
+
+	FrequencyTracker: {
+		DisplayName: Frequency Tracker
+		Tooltip: Tracks corrupted television frequencies to summon TV Head.
+	}
+
+	GlitchControler: {
+		Tooltip: Summons a miniature CRT Companion above your head to shoot chain energy at enemies
+		DisplayName: Glitch Controler
+	}
+
+	BrokenTv: {
+		DisplayName: Broken Tv
+		Tooltip: Contains residual static power from a defeated signal
+	}
+
+	StaticBomb: {
+		DisplayName: Static Bomb
+		Tooltip: Explodes into a burst of high-voltage signal shrapnel
+	}
+
+	BroadcasterHeadset: {
+		DisplayName: Broadcaster Headset
+		Tooltip: 5% increased damage
+	}
+
+	BroadcasterSuit: {
+		DisplayName: Broadcaster Suit
+		Tooltip:
+			'''
+			6% increased critical strike chance
+			5% increased movement speed
+			'''
+	}
+
+	BroadcasterSlacks: {
+		DisplayName: Broadcaster Slacks
+		Tooltip:
+			'''
+			10% increased movement speed
+			5% increased attack speed
+			'''
+	}
+
+	AetherfinHelmet: {
+		DisplayName: Aetherfin Helmet
+		Tooltip:
+			'''
+			6% increased summon damage
+			Increases your max number of minions by 1
+			'''
+	}
+
+	AetherfinChestplate: {
+		DisplayName: Aetherfin Chestplate
+		Tooltip:
+			'''
+			8% increased summon damage
+			Increases your max number of minions by 1
+			'''
+	}
+
+	AetherfinGreaves: {
+		DisplayName: Aetherfin Greaves
+		Tooltip:
+			'''
+			10% increased movement speed
+			10% increased whip speed
+			Allows fluid movement in water
+			'''
+	}
+
+	TornRegaliaThread: {
+		DisplayName: Torn Regalia Thread
+		Tooltip: ""
+	}
+
+	HallowedWisle: {
+		DisplayName: Hallowed Wisle
+		Tooltip: ""
+	}
+
+	ReligiaBar: {
+		DisplayName: Religia Bar
+		Tooltip: "Smelted from Religia Ore, it hums faintly with leftover power"
+	}
+
+	ReligiaOre: {
+		DisplayName: Religia Ore
+		Tooltip: "A strange violet ore, said to have fallen from a fractured piece of the sky"
+	}
+}
+
+NPCs: {
+	Goldfish_Walker.DisplayName: American Goldfish
+	SanityMinionFrog.DisplayName: Vampire Frog
+	LoveDoveNPC.DisplayName: Bloody Dove
+	Fly.DisplayName: Fly
+	EaterJantung.DisplayName: Eater Hearth
+	ConfusionMinion.DisplayName: Brainfuse
+	CustomCreeper.DisplayName: Creeper
+	SpaceRainCloudNPC.DisplayName: Cloudy
+	GoldenStinger.DisplayName: Golden Stinger
+	Twinkle.DisplayName: Twinkle, The Mini Stars Guardian
+	DummyTargetNPC.DisplayName: Mega Dummy
+	WhiteWhaleClone.DisplayName: White Whale Clone
+	WhiteWhaleBoss.DisplayName: The White Whale
+
+	SunCultist: {
+		DisplayName: Sun Cultist
+
+		TownNPCMood: {
+			Content: I am content.
+			NoHome: I hate not having a home.
+			FarFromHome: I am too far from home.
+			LoveSpace: I love having so much space.
+			DislikeCrowded: I dislike how crowded I am.
+			HateCrowded: I hate how crowded I am.
+			LikeNPC_Princess: I like {NPCName}.
+			Princess_LovesNPC: I like {NPCName}.
+		}
+	}
+
+	DiamondBoss.DisplayName: Diamond Boss
+	DiamondBossClone.DisplayName: Diamond Boss Clone
+	EmeraldBoss.DisplayName: Emerald Boss
+	RubyBoss.DisplayName: Ruby Boss
+	RubyBossClone.DisplayName: Ruby Boss Clone
+	WhoAmI.DisplayName: Who Am I
+	ChameleonSlime.DisplayName: Chameleon Slime
+	Reaper.DisplayName: Reaper
+	TvHead.DisplayName: Tv Head
+	ChronarchNPC.DisplayName: Chronarch N P C
+	MiasmaNPC.DisplayName: Miasma N P C
+	ChronoReligia.DisplayName: Chrono Religia
+	PlagueReligia.DisplayName: Plague Religia
+}
+
+Projectiles: {
+	AnchorVisual.DisplayName: Anchor
+	BlackHarpyFeather.DisplayName: Raven Feather
+	BlizzardCloud.DisplayName: Blizzard Cloud
+	BloodSpikeHostile.DisplayName: Blood Spike
+	CrimsonBlade.DisplayName: Crimson Blade
+	MinisharkVisual.DisplayName: Minishark
+	GraniteBigBlast.DisplayName: Granite Big Blast
+	GraniteOrbitOrb.DisplayName: Granite Orbit Orb
+	MagicMirrorVisual.DisplayName: Magic Mirror
+	MothCloud.DisplayName: Sleep Powder
+	BloodyAxeProjectile.DisplayName: Bloody Axe
+	ClownHappyBomb.DisplayName: Clown Funny Bomb
+	VikingAx.DisplayName: Viking Axe
+	VultureFeather.DisplayName: Vulture Feather
+	RedDevilTrident.DisplayName: Devil Trident
+	TitanGloveVisual.DisplayName: Titan Glove
+	ZombieArmProjectile.DisplayName: Zombie Arm
+	BloodyBall.DisplayName: Bloody Ball
+	HomingBloodBat.DisplayName: Blood Bat
+	ClingerStaffVisualRework.DisplayName: Clinger Staff
+	DartRifleTurretVisual.DisplayName: Dart Rifle
+	CursedDartVisualRework.DisplayName: Cursed Dart
+	LifeDrainVisualRework.DisplayName: Life Drain
+	DartPistolTurretVisual.DisplayName: Dart Pistol
+	IchorDartVisualRework.DisplayName: Ichor Dart
+	CrystalShardShaft.DisplayName: Crystal Shard Shaft
+	CrystalShardHead.DisplayName: Crystal Shard Head
+	CrystalShardGrenade.DisplayName: Crystal Veil Shard
+	FlyingKnifeZone.DisplayName: Flying Knife
+	DaedalusBowVisual.DisplayName: Daedalus Bow
+	HallowStarCustom.DisplayName: Hallow Star
+	HolyArrowCustom.DisplayName: Holy Arrow
+	SoulFisherHook.DisplayName: Mimic Fisher Hook
+	EolRainbowBolt.DisplayName: Rainbow Trail
+	RainbowCustomBolt.DisplayName: Rainbow Spike
+	RainbowRocket.DisplayName: Rainbow Rocket
+	BlazingWheelFlame.DisplayName: Blazing Wheel Flame
+	FlameRing.DisplayName: Flame Ring
+	GoldenKeyProjectile.DisplayName: Golden Key
+	Bloodyback.DisplayName: Bloodyback
+	InkCloud.DisplayName: Ink Cloud
+	DarkMageSummonSign.DisplayName: Dark Mage Summon Sign
+	AncientMagicBook.DisplayName: Ancient Magic Book
+	EterniaShieldHub.DisplayName: Eternia Shield Hub
+	HostileDynamite.DisplayName: Dynamite
+	HostileBrokenHeroSword.DisplayName: Broken Hero Sword
+	HostileTerraBlade.DisplayName: Terra Blade
+	HostileTrueExcalibur.DisplayName: True Excalibur
+	HostileTrueNightEdge.DisplayName: True Night Edge
+	HostileMothronEgg.DisplayName: Mothron Egg
+	FritzGoreProjectile.DisplayName: Gore
+	PossessedPullBolt.DisplayName: Pull Bolt
+	PossessedPeaSoup.DisplayName: Pea Soup
+	DeathSickleWeapon.DisplayName: Death Sickle
+	HostileDeathSickle.DisplayName: Sickle
+	DeathBeamProjectile.DisplayName: Death Beam Projectile
+	RingSunProjectile.DisplayName: Ring Sun
+	GolemHealChain.DisplayName: Golem Chain
+	GolemCustomFist.DisplayName: Golem Fist
+	StoneShard.DisplayName: Stone Shard
+	GolemWallSlamFist.DisplayName: Golem Fist
+	GolemStynger.DisplayName: Golem Stynger
+	RitualTriangle.DisplayName: Lock Aura
+	AimTelegraphProjectile.DisplayName: Aim Telegraph Projectile
+	RedLaserBeamProjectile.DisplayName: Red Laser Beam Projectile
+	BabyEaterWatcher.DisplayName: Baby Eater Watcher
+	VilethornSpikeShaft.DisplayName: Vilethorn Spike Shaft
+	VilethornSpikeHead.DisplayName: Vilethorn Spike Head
+	VileSpikeSeed.DisplayName: Vile Spike Seed
+	AuraRing.DisplayName: Aura Ring
+	RedScramblerLaser.DisplayName: Red Scrambler Laser
+	BloodCloud.DisplayName: Blood Cloud
+	BloodRain.DisplayName: Blood Rain
+	BeeNuke.DisplayName: Bee Nuke
+	MiniBeeHive.DisplayName: Bee Hive
+	HoneyCloud.DisplayName: Honey Cloud
+	SkullytronProj.DisplayName: Skullytron
+	CrownySlimeProj.DisplayName: Crowny Slime
+	BlizzardnadoProj.DisplayName: Blizzardnado
+	BabyNetProj.DisplayName: Baby Net
+	BabyNetStinger.DisplayName: Net Stinger
+	BlizzardnadoSubProj.DisplayName: Rock
+	SkullytronSkull.DisplayName: Skull
+	CrownySlimeSpike.DisplayName: Crowny Spike
+	Spazamini.DisplayName: Spazamini
+	RetRubyBolt.DisplayName: Ret Ruby Bolt
+	Retanimini.DisplayName: Retanimini
+	MightyEagleProjectile.DisplayName: Mighty Eagle Projectile
+	SardineProjectile.DisplayName: Sardine Projectile
+	TwinkleRainbowStar.DisplayName: Twinkle Rainbow Star
+	TwinkleHostileStar.DisplayName: Twinkle Star
+	TwinkleCustomHomingStar.DisplayName: Twinkle Homing Star
+	StarShineProj.DisplayName: Star Shine
+	StarRainProj.DisplayName: Star Rain
+	TomeOfEclipsaHeld.DisplayName: Tome Of Eclipsa Held
+	EclipsaProjectile.DisplayName: Eclipsa Projectile
+	EclipsaOrbitProjectile.DisplayName: Eclipsa Orbit Projectile
+	BlackwhipProjectile.DisplayName: Blackwhip Projectile
+	BlackwhipTetherProjectile.DisplayName: Blackwhip Tether Projectile
+	BlackwhipWebWalkProjectile.DisplayName: Blackwhip Web Walk Projectile
+	TwinkleTwinkleMinion.DisplayName: Twinkle Twinkle Minion
+	TwinkleMinionStar.DisplayName: Twinkle Minion Star
+	StarmerangStar.DisplayName: Starmerang Star
+	StarmerangProj.DisplayName: Starmerang
+	FeatherWireWhipProj.DisplayName: Feather Wire Whip Proj
+	HaloSmallLaser.DisplayName: Halo Small Laser
+	HaloRuneLaser.DisplayName: Halo Rune Laser
+	HaloMinionGede.DisplayName: Halo Minion Gede
+	HaloMinion.DisplayName: Halo Minion
+	HaloBigLaser.DisplayName: Halo Big Laser
+	NebulaBlazeHostile.DisplayName: Nebula Blaze Hostile
+	SilkSlashProjectile.DisplayName: Silk Slash Projectile
+	WhiteWhaleLaser.DisplayName: White Whale Laser
+	SunCultistShot.DisplayName: Sun Cultist Shot
+	ChromaticBurstEffect.DisplayName: Chromatic Burst Effect
+	EmpressLiteClone.DisplayName: Empress Lite Clone
+	MiniEmpressBolt.DisplayName: Mini Empress Bolt
+	MiniSunDanceRay.DisplayName: Mini Sun Dance Ray
+	ShineFlareParticle.DisplayName: Shine Flare Particle
+	DiamondBossProjectile.DisplayName: Diamond Boss Projectile
+	EmeraldBossProjectile.DisplayName: Emerald Boss Projectile
+	RubyBossProjectile.DisplayName: Ruby Boss Projectile
+	HostileNettleBurst.DisplayName: Hostile Nettle Burst
+	HostileVampireKnife.DisplayName: Hostile Vampire Knife
+	BladeOfTheDarknessProj.DisplayName: Blade Of The Darkness Proj
+	CheatManipulation.DisplayName: Cheat Manipulation
+	CoralShard.DisplayName: Coral Shard
+	VerdentArrow.DisplayName: Verdent Arrow
+	VerdentCharge.DisplayName: Verdent Charge
+	SquidInkBullet.DisplayName: Squid Ink Bullet
+	AbyssalKrakenTentacleProj.DisplayName: Abyssal Kraken Tentacle Proj
+	AbyssalMaw.DisplayName: Abyssal Maw
+	MiniTentacleProj.DisplayName: Mini Tentacle Proj
+	BambooShard.DisplayName: Bamboo Shard
+	BambooShot.DisplayName: Bamboo Shot
+	BambooShotPoison.DisplayName: Bamboo Shot Poison
+	BladeOfTheDarknessImpactProj.DisplayName: Blade Of The Darkness Impact Proj
+	ButterflyProj.DisplayName: Butterfly Proj
+	CelestialImpalerProj.DisplayName: Celestial Impaler Proj
+	ChameleonSpike.DisplayName: Chameleon Spike
+	DesertBlockProj.DisplayName: Desert Block Proj
+	EclipsaExplosion.DisplayName: Eclipsa Explosion
+	EclipsaStrike.DisplayName: Eclipsa Strike
+	FatherScytheHeldProj.DisplayName: Father Scythe Held Proj
+	FatherScytheMiniProjectile.DisplayName: Father Scythe Mini Projectile
+	FatherScytheProjectile.DisplayName: Father Scythe Projectile
+	FlareSwingProjectile.DisplayName: Flare Swing Projectile
+	GemShardProjectile.DisplayName: Gem Shard Projectile
+	HomunculusMinion.DisplayName: Homunculus Minion
+	HomunculusPotion.DisplayName: Homunculus Potion
+	HydroSpellBookBeam.DisplayName: Hydro Spell Book Beam
+	SkullOfEdgeProj.DisplayName: Skull Of Edge Proj
+	StarProj.DisplayName: Star Proj
+	SulphurButterflyProj.DisplayName: Sulphur Butterfly Proj
+	SuperStarProj.DisplayName: Super Star Proj
+	ReworkedStreak.DisplayName: Reworked Streak
+	ReworkedLastingRainbow.DisplayName: Reworked Lasting Rainbow
+	ReworkedLance.DisplayName: Reworked Lance
+	ReworkedBlade.DisplayName: Reworked Blade
+	CustomRainbowStreak.DisplayName: Custom Rainbow Streak
+	CryoSniperShardProj.DisplayName: Cryo Sniper Shard Proj
+	CryoSniperBulletProj.DisplayName: Cryo Sniper Bullet Proj
+	DracolithOverdriveProj.DisplayName: Dracolith Overdrive Proj
+	DracolithBulletProj.DisplayName: Dracolith Bullet Proj
+	XenodracXBulletProj.DisplayName: Xenodrac X Bullet Proj
+	XenodracXShard1Proj.DisplayName: Xenodrac X Shard1 Proj
+	XenodracXShard2Proj.DisplayName: Xenodrac X Shard2 Proj
+	XenodracXShard3Proj.DisplayName: Xenodrac X Shard3 Proj
+	MoonlitIaiProj.DisplayName: Moonlit Iai Proj
+	FlowerPetal.DisplayName: Flower Petal
+	MoonlitSwingProj.DisplayName: Moonlit Swing Proj
+	MoonlitThrustProj.DisplayName: Moonlit Thrust Proj
+	BloodOrb.DisplayName: Blood Orb
+	ScarletBloodSpatter.DisplayName: Scarlet Blood Spatter
+	ScarletSwingProj.DisplayName: Scarlet Swing Proj
+	ScarletThrustProj.DisplayName: Scarlet Thrust Proj
+	ScarletParryProj.DisplayName: Scarlet Parry Proj
+	ScarletWhipProj.DisplayName: Scarlet Whip Proj
+	ScarletCounterProj.DisplayName: Scarlet Counter Proj
+	AmbahookTip.DisplayName: Ambahook Tip
+	AmbariumEyeBall.DisplayName: Ambarium Eye Ball
+	AmbariumExpRing.DisplayName: Ambarium Exp Ring
+	AmbariumCodexOrb.DisplayName: Ambarium Codex Orb
+	AmbariumDeathBeam.DisplayName: Ambarium Death Beam
+	AmbariumSentinelProj.DisplayName: Ambarium Sentinel Proj
+	AmbariumShardProj.DisplayName: Ambarium Shard Proj
+	AmbariumSupernovaCore.DisplayName: Ambarium Supernova Core
+	AmbariumTargetMarker.DisplayName: Ambarium Target Marker
+	AmbariumShadowShotProj.DisplayName: Ambarium Shadow Shot Proj
+	AmbariumShadowCloneProj.DisplayName: Ambarium Shadow Clone Proj
+	AmbariumSentinelShardProj.DisplayName: Ambarium Sentinel Shard Proj
+	KindDemonMinion.DisplayName: Kind Demon Minion
+	NautilusBubbleProj.DisplayName: Nautilus Bubble Proj
+	AzureBeamProj.DisplayName: Azure Beam Proj
+	DeathSickleProjectile.DisplayName: Death Sickle Projectile
+	GlitchCompanionProj.DisplayName: Glitch Companion Proj
+	StaticBombProj.DisplayName: Static Bomb Proj
+	TvHeadTelegraphLine.DisplayName: Tv Head Telegraph Line
+	StaticSnowProj.DisplayName: Static Snow Proj
+	CustomTvLaser.DisplayName: Custom Tv Laser
+	BioLaser.DisplayName: Bio Laser
+	ChronoLaser.DisplayName: Chrono Laser
+	TimeSlowOrb.DisplayName: Time Slow Orb
+	ToxicSporeProj.DisplayName: Toxic Spore Proj
+	BioLaserProj.DisplayName: Bio Laser Proj
+	ChronoLaserProj.DisplayName: Chrono Laser Proj
+	TimeSlowOrbProj.DisplayName: Time Slow Orb Proj
+	ToxicStingerProj.DisplayName: Toxic Stinger Proj
+}
+
+Buffs: {
+	DistruptedTime: {
+		Description: Your Timeline is broken
+		DisplayName: Distrupted Time
+	}
+
+	icantfly: {
+		Description: You forgot how to fly
+		DisplayName: I Can't Fly!
+	}
+
+	falling: {
+		DisplayName: Falling
+		Description: You Forgot How To Use Hook And Cannot Stand On Platfrom
+	}
+
+	MeleeLockout: {
+		Description: You Cannot use Melee type weapon
+		DisplayName: Melee Lockout
+	}
+
+	HeavyWings: {
+		Description: You Flight Time Cut in Halve
+		DisplayName: Heavy Wings
+	}
+
+	SardineMarkBuff: {
+		Description: The Eagle is Hungrry
+		DisplayName: Sardine Mark Buff
+	}
+
+	BlackwhipTagBuff: {
+		Description: Your summons are absolutely hyped up. Increased damage for the next minion strike!
+		DisplayName: Blackwhip Tag Buff
+	}
+
+	TwinkleTwinkleBuff: {
+		Description: '''"She Can't See the enemy but She can Fell Energy from Enemy"'''
+		DisplayName: Twinkle Twinkle Buff
+	}
+
+	FeatherFrenzy: {
+		DisplayName: Feather Frenzy
+		Description: Minion attack speed increased by 10%
+	}
+
+	HaloMinionBuff: {
+		Description: Halo Minion Protect You!
+		DisplayName: Halo Minion Buff
+	}
+
+	ComboBuff: {
+		DisplayName: Combo Buff
+		Description: Mods.TheSanity.Buffs.ComboBuff.Description
+	}
+
+	ElementalCurse: {
+		DisplayName: Elemental Curse
+		Description: Mods.TheSanity.Buffs.ElementalCurse.Description
+	}
+
+	EmeraldSpell: {
+		DisplayName: Emerald Spell
+		Description: Mods.TheSanity.Buffs.EmeraldSpell.Description
+	}
+
+	EmeraldSpellEnraged: {
+		DisplayName: Emerald Spell Enraged
+		Description: Mods.TheSanity.Buffs.EmeraldSpellEnraged.Description
+	}
+
+	HomunculusBuff: {
+		DisplayName: Homunculus Buff
+		Description: Mods.TheSanity.Buffs.HomunculusBuff.Description
+	}
+
+	SkullOfEdgeTag: {
+		DisplayName: Skull Of Edge Tag
+		Description: Mods.TheSanity.Buffs.SkullOfEdgeTag.Description
+	}
+
+	MoonlitCooldown: {
+		DisplayName: Moonlit Cooldown
+		Description: The Moonlit Bloom Right Click is on cooldown.
+	}
+
+	ScarletBleed: {
+		DisplayName: Scarlet Bleed
+		Description: Losing life over time.
+	}
+
+	ScarletCooldown: {
+		DisplayName: Scarlet Cooldown
+		Description: Cannot use Cursed Sheath Parry right now.
+	}
+
+	ScarletEmpowered: {
+		DisplayName: Scarlet Empowered
+		Description: All weapon stats increased by 30%!
+	}
+
+	DemonsBookBuff: {
+		DisplayName: Demons Book Buff
+		Description: A friendly demon is fighting by your side
+	}
+
+	GlitchCompanionBuff: {
+		Description: A miniature CRT TV is hovering above your head!
+		DisplayName: Glitch Companion Buff
+	}
+}
+
+Configs: {
+	SanityConfig: {
+		DisplayName: Sanity Config
+
+		SkipCredits: {
+			Label: Skip Credits
+			Tooltip: Skip Moonlord Credit Chene
+		}
+	}
+
+	BossStatusConfig: {
+		DisplayName: Boss Status Config
+
+		EnableBossLog: {
+			Label: Enable Chat Log Broadcast
+			Tooltip: ""
+		}
+	}
+
+	DialogueClientConfig: {
+		DisplayName: Dialogue Client Config
+
+		Headers: {
+			Appearance: Appearance Header
+			SkipTyping: Skip Typing Header
+			OpenCloseAnimation: Open Close Animation Header
+		}
+
+		Theme: {
+			Label: Theme
+			Tooltip: Your preferred Dialogue Box color theme. A mod hook can still force a specific theme via SetTheme(), but if no hook ever calls that, the theme selected here is used instead.
+		}
+
+		EnableSkipTypingButton: {
+			Label: Enable Skip Typing Button
+			Tooltip: Show or hide the skip-typing toggle button ("S") in the button row.
+		}
+
+		SkipTypingByDefault: {
+			Label: Skip Typing By Default
+			Tooltip: If ON, every new dialogue opens already in skip-typing mode (text appears fully instantly, no typing animation).
+		}
+
+		TypingSpeed: {
+			Label: Typing Speed
+			Tooltip: Typing animation speed, in characters per second.
+		}
+
+		DisableOpenCloseAnimation: {
+			Label: Disable Open Close Animation
+			Tooltip: If ON, the box's open/close animation (panel, icon tab, name tag, buttons) is instant with no animation.
+		}
+	}
+
+	DialogueThemeChoice: {
+		Tooltip: ""
+
+		DarkRetro: {
+			Label: Dark Retro
+			Tooltip: ""
+		}
+
+		Dark: {
+			Label: Dark
+			Tooltip: ""
+		}
+
+		Blood: {
+			Label: Blood
+			Tooltip: ""
+		}
+
+		YellowOrangeSunset: {
+			Label: Yellow Orange Sunset
+			Tooltip: ""
+		}
+
+		GreenForest: {
+			Label: Green Forest
+			Tooltip: ""
+		}
+
+		BlueOcean: {
+			Label: Blue Ocean
+			Tooltip: ""
+		}
+
+		WhiteMoon: {
+			Label: White Moon
+			Tooltip: ""
+		}
+
+		PurpleRoyal: {
+			Label: Purple Royal
+			Tooltip: ""
+		}
+
+		CyberNeon: {
+			Label: Cyber Neon
+			Tooltip: ""
+		}
+
+		DesertSand: {
+			Label: Desert Sand
+			Tooltip: ""
+		}
+	}
+}
+
+Keybinds: {
+	EvilBeltDashOverride.DisplayName: Evil Belt Dash Override
+	SwitchBroadcasterMode.DisplayName: Switch Broadcaster Mode
+	"Mighty Eagle Strike.DisplayName": Mighty Eagle Strike
+	"Blackwhip Web Walk.DisplayName": Blackwhip Web Walk
+	"Blackwhip Tether.DisplayName": Blackwhip Tether
+	"Toggle Dummy UI.DisplayName": Toggle  Dummy  U I
+	"Toggle Boss Status GUI.DisplayName": Toggle  Boss  Status  G U I
+	"Open Debug Damage UI.DisplayName": Open  Debug  Damage  U I
+	"Open Dialogue History.DisplayName": Open  Dialogue  History
+	"Switch Broadcaster Mode.DisplayName": Switch  Broadcaster  Mode
+	AetherfinFloodgate.DisplayName: Aetherfin Floodgate
+}
+
+Conditions: {
+	KillTwinkle: After Twinkle Has Defeated
+	NearBoneSerpent: "Near Alive Bone Serpent "
+}
+
+Tiles: {
+	AmbariumBarTile.MapEntry: Ambarium Bar Tile
+
+	AmbariumOreTile: {
+		MapEntry: Ambarium Ore
+		MapEntryStone: " "
+	}
+}

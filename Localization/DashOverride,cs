@@ -1,0 +1,68 @@
+// MyPlayer.cs
+using Terraria;
+using Terraria.ModLoader;
+using Microsoft.Xna.Framework;
+
+public class MyPlayer : ModPlayer
+{
+    // Status dash
+    public bool isDashing = false;
+    public int dashTimer = 0;        // durasi dash (frame)
+    public int dashCooldown = 0;     // cooldown (frame)
+
+    // Kecepatan dash
+    private const float dashSpeed = 18f;
+    private const int dashDuration = 10;   // 10 frame (≈0.17 detik)
+    private const int dashCooldownMax = 60; // 1 detik (60 frame)
+
+    public override void ProcessTriggers(TriggersSet triggersSet)
+    {
+        // Hanya jika tombol ditekan (JustPressed) dan tidak sedang cooldown/dash
+        if (MyMod.DashKeybind.JustPressed && dashCooldown <= 0 && !isDashing)
+        {
+            // Mulai dash
+            isDashing = true;
+            dashTimer = dashDuration;
+            dashCooldown = dashCooldownMax;
+
+            // Arah dash berdasarkan arah hadap player
+            int direction = Player.direction;
+            Player.velocity.X = direction * dashSpeed;
+            // Biarkan vertikal tetap (bisa diatur agar dash horizontal murni)
+            // Player.velocity.Y = 0f; // opsional
+
+            // Efek visual (opsional)
+            for (int i = 0; i < 10; i++)
+            {
+                Dust.NewDust(Player.position, Player.width, Player.height, 
+                             DustID.FireworkFountain_Red, 
+                             -Player.velocity.X * 0.5f, -Player.velocity.Y * 0.5f);
+            }
+        }
+    }
+
+    public override void PostUpdate()
+    {
+        // Update cooldown
+        if (dashCooldown > 0)
+            dashCooldown--;
+
+        // Update durasi dash
+        if (isDashing)
+        {
+            dashTimer--;
+            if (dashTimer <= 0)
+            {
+                isDashing = false;
+                // Hentikan dash dengan mengembalikan kecepatan normal (opsional)
+                // Player.velocity.X *= 0.5f; // contoh
+            }
+        }
+    }
+
+    // (Opsional) Reset status saat player mati atau respawn
+    public override void ResetEffects()
+    {
+        // jika perlu reset cooldown saat mati, bisa di sini
+    }
+}

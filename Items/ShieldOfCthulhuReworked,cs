@@ -1,0 +1,270 @@
+using System;
+using System.Collections.Generic;
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.ID;
+using Terraria.ModLoader;
+using Terraria.Audio;
+
+namespace TheSanity
+{
+    // =========================================================================
+    // 1. SYSTEM LOGIKA GERAKAN & RAM DASH (MODPLAYER)
+    // =========================================================================
+    public class SoCPlayer : ModPlayer
+    {
+        // Tracker kustom untuk durasi ram dash
+        public int customDashTimer = 0;
+        public int customDashDir = 0;
+        public int customDashCooldown = 0; 
+        public bool hasSoCRework = false;
+        private List<int> hitNPCs = new List<int>();
+
+        // System Tracker untuk mendeteksi Double-Tap Manual
+        private int leftTapTimer = 0;
+        private int rightTapTimer = 0;
+        private bool leftReleased = true;
+        private bool rightReleased = true;
+
+        public override void ResetEffects() {
+            hasSoCRework = false; 
+            // Jika rework tidak aktif, bersihkan state dash custom agar tidak mengganggu
+            if (!hasSoCRework) {
+                customDashTimer = 0;
+                customDashCooldown = 0;
+                customDashDir = 0;
+                hitNPCs.Clear();
+            }
+        }
+
+        public override void PostUpdateEquips() {
+            // 🔥 PERBAIKAN: Hanya cek slot aksesoris aktif (indeks 3 sampai 8)
+            // Indeks 9 adalah vanity, jadi jangan disertakan.
+            if (Player.dashType == 2) {
+                bool foundShield = false;
+                for (int i = 3; i <= 8; i++) {
+                    if (Player.armor[i].type == ItemID.EoCShield) {
+                        foundShield = true;
+                        break;
+                    }
+                }
+                hasSoCRework = foundShield;
+            }
+            // Jika dashType bukan 2, hasSoCRework tetap false dari ResetEffects
+        }
+
+        public override void PreUpdateMovement() {
+            // Jika player TIDAK sedang memakai Shield of Cthulhu asli, 
+            // LANGSUNG RETURN agar tidak mengganggu dash lain (Tabi, MNG, Solar)
+            if (!hasSoCRework) return;
+
+            // 1. Jalankan hitung mundur cooldown kustom
+            if (customDashCooldown > 0) {
+                customDashCooldown--;
+            }
+
+            // 2. Amankan pemicu dari Mod Shortcut/Hotkey eksternal agar tetap berfungsi
+            if (Player.dashDelay == -1) {
+                Player.dashDelay = 0;
+                if (customDashTimer <= 0 && customDashCooldown <= 0) {
+                    StartCustomDash(Player.direction);
+                }
+            }
+
+            // 3. Jalankan pembaca Double-Tap buatan kita sendiri
+            HandleDoubleTapInput();
+
+            // 4. KUNCI UTAMA: Matikan sistem asli SoC Vanilla agar tidak memicu mental bawaannya
+            //    Karena kita sudah mengganti dash dengan sistem sendiri.
+            if (Player.dashType == 2) {
+                Player.dashType = 0;
+            }
+
+            // 5. EKSEKUSI PERGERAKAN DASH KUSTOM (MURNI DORONGAN HORIZONTAL)
+            if (customDashTimer > 0) {
+                customDashTimer--;
+
+                // Terapkan kecepatan horizontal kustom (16f = Sesuai kecepatan asli vanilla)
+                float dashSpeed = 16f; 
+                Player.velocity.X = customDashDir * dashSpeed;
+
+                // Berikan kekebalan kontak damage selama tubuh meluncur menembus musuh
+                Player.immune = true;
+                Player.immuneTime = Math.Max(Player.immuneTime, 2);
+                Player.fallStart = (int)(Player.position.Y / 16f); // Amankan fall damage
+
+                // Dust jejak (trail) darah tipis di belakang player saat meluncur
+                if (Main.rand.NextBool(2)) {
+                    Dust d = Dust.NewDustDirect(Player.position, Player.width, Player.height, DustID.Blood, customDashDir * -2f, 0f, 100, default, 1.1f);
+                    d.noGravity = true;
+                }
+
+                // LOGIKA TABRAKAN HITBOX (Menerjang lurus tanpa terpental ke belakang)
+                Rectangle playerRect = Player.getRect();
+                for (int i = 0; i < Main.maxNPCs; i++) {
+                    NPC npc = Main.npc[i];
+                    if (npc.active && !npc.friendly && npc.damage > 0 && !npc.dontTakeDamage) {
+                        if (playerRect.Intersects(npc.getRect())) {
+                            if (!hitNPCs.Contains(npc.whoAmI)) {
+                                hitNPCs.Add(npc.whoAmI);
+
+                                // Mengambil base damage asli tameng dari game (Bawaan aslinya = 30)
+                                int baseDamage = ContentSamples.ItemsByType[ItemID.EoCShield].damage; 
+
+                                // REWORK: Hitung damage hantaman menggunakan data Class tertinggi player saat itu
+                                StatModifier highestModifier = GetHighestClassModifier(Player);
+                                int finalDamage = (int)highestModifier.ApplyTo(baseDamage);
+
+                                // Berikan damage ke musuh (Knockback di-set ke 0f agar tidak mempengaruhi momentum)
+                                Player.ApplyDamageToNPC(npc, finalDamage, 0f, customDashDir, false);
+
+                                // EFEK SUARA: Mainkan sound effect hantaman monster kustom saat menembus musuh
+                                SoundEngine.PlaySound(SoundID.DD2_WitherBeastDeath, Player.Center);
+                            }
+                        }
+                    }
+                }
+
+                // Jika durasi lari dash habis di frame ini
+                if (customDashTimer == 0) {
+                    customDashCooldown = 30; // Set Cooldown 0.5 Detik
+                    Player.velocity.X *= 0.75f; // Rem halus di ujung gerakan
+                }
+            }
+        }
+
+        // Fungsi pembantu untuk membaca ketukan tombol A atau D secara mandiri
+        private void HandleDoubleTapInput() {
+            if (leftTapTimer > 0) leftTapTimer--;
+            if (rightTapTimer > 0) rightTapTimer--;
+
+            // Double Tap Kiri (Tombol A)
+            if (Player.controlLeft) {
+                if (leftReleased) {
+                    if (leftTapTimer > 0 && customDashCooldown <= 0 && customDashTimer <= 0) {
+                        StartCustomDash(-1);
+                    } else {
+                        leftTapTimer = 15; // Jeda batas waktu mendeteksi double-tap (15 frame)
+                    }
+                }
+                leftReleased = false;
+            } else {
+                leftReleased = true;
+            }
+
+            // Double Tap Kanan (Tombol D)
+            if (Player.controlRight) {
+                if (rightReleased) {
+                    if (rightTapTimer > 0 && customDashCooldown <= 0 && customDashTimer <= 0) {
+                        StartCustomDash(1);
+                    } else {
+                        rightTapTimer = 15;
+                    }
+                }
+                rightReleased = false;
+            } else {
+                rightReleased = true;
+            }
+        }
+
+        // Fungsi pemicu saat inisiasi hentakan dash pertama dimulai
+        private void StartCustomDash(int direction) {
+            customDashDir = direction;
+            customDashTimer = Main.hardMode ? 15 : 11; // Durasi dash kustom
+            hitNPCs.Clear();
+
+            // Efek visual ledakan partikel debu darah saat tombol pertama ditekan
+            for (int i = 0; i < 12; i++) {
+                Dust d = Dust.NewDustDirect(Player.position, Player.width, Player.height, DustID.Blood, customDashDir * 4f, Main.rand.NextFloat(-2f, 2f), 100, default, 1.4f);
+                d.noGravity = true;
+            }
+
+            // Suara kibasan kain biasa saat awal peluncuran dash
+            SoundEngine.PlaySound(SoundID.Item1, Player.Center);
+        }
+
+        // =========================================================================
+        // REWORK SCALING: MENGADOPSI DATA MODIFIER DARI CLASS TERTINGGI PLAYER
+        // =========================================================================
+        private StatModifier GetHighestClassModifier(Player player) {
+            StatModifier melee = player.GetTotalDamage(DamageClass.Melee);
+            StatModifier ranged = player.GetTotalDamage(DamageClass.Ranged);
+            StatModifier magic = player.GetTotalDamage(DamageClass.Magic);
+            StatModifier summon = player.GetTotalDamage(DamageClass.Summon);
+
+            float meleeVal = melee.ApplyTo(1f);
+            float rangedVal = ranged.ApplyTo(1f);
+            float magicVal = magic.ApplyTo(1f);
+            float summonVal = summon.ApplyTo(1f);
+
+            StatModifier highestModifier = melee;
+            float maxDamageValue = meleeVal;
+
+            if (rangedVal > maxDamageValue) {
+                maxDamageValue = rangedVal;
+                highestModifier = ranged;
+            }
+            if (magicVal > maxDamageValue) {
+                maxDamageValue = magicVal;
+                highestModifier = magic;
+            }
+            if (summonVal > maxDamageValue) {
+                maxDamageValue = summonVal;
+                highestModifier = summon;
+            }
+
+            return highestModifier;
+        }
+    }
+
+    // =========================================================================
+    // 2. SYSTEM MODIFIKASI DESKRIPSI & TIPE DAMAGE ITEM (GLOBALITEM)
+    // =========================================================================
+    public class SoCItemOverride : GlobalItem
+    {
+        public override void SetDefaults(Item item) {
+            if (item.type == ItemID.EoCShield) {
+                item.DamageType = DamageClass.Default;
+            }
+        }
+
+        public override void ModifyWeaponDamage(Item item, Player player, ref StatModifier damage) {
+            if (item.type == ItemID.EoCShield) {
+                StatModifier melee = player.GetTotalDamage(DamageClass.Melee);
+                StatModifier ranged = player.GetTotalDamage(DamageClass.Ranged);
+                StatModifier magic = player.GetTotalDamage(DamageClass.Magic);
+                StatModifier summon = player.GetTotalDamage(DamageClass.Summon);
+
+                float meleeVal = melee.ApplyTo(1f);
+                float rangedVal = ranged.ApplyTo(1f);
+                float magicVal = magic.ApplyTo(1f);
+                float summonVal = summon.ApplyTo(1f);
+
+                StatModifier highestModifier = melee;
+                float maxDamageValue = meleeVal;
+
+                if (rangedVal > maxDamageValue) {
+                    maxDamageValue = rangedVal;
+                    highestModifier = ranged;
+                }
+                if (magicVal > maxDamageValue) {
+                    maxDamageValue = magicVal;
+                    highestModifier = magic;
+                }
+                if (summonVal > maxDamageValue) {
+                    maxDamageValue = summonVal;
+                    highestModifier = summon;
+                }
+
+                damage = highestModifier;
+            }
+        }
+
+        public override void ModifyTooltips(Item item, List<TooltipLine> tooltips) {
+            if (item.type == ItemID.EoCShield) {
+                TooltipLine sanityLine = new TooltipLine(Mod, "SanityReworkText", "[c/FF0000:Sanity] Change: Able to Ram Dash through enemies safely");
+                tooltips.Add(sanityLine);
+            }
+        }
+    }
+}

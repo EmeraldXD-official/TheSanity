@@ -1,0 +1,20 @@
+using Terraria;
+using Terraria.ModLoader;
+
+namespace TheSanity.Buff
+{
+    public class EmeraldSpellPlayer : ModPlayer
+    {
+        public override void PreUpdateBuffs() {
+            // 🔒 SISTEM PROTEKSI MUTLAK
+            // Jika player sedang dalam pengaruh Stage Maut (EmeraldSpellEnraged),
+            // hapus paksa Debuff pertama jika ada projectile musuh yang mencoba menempelkannya lagi!
+            if (Player.HasBuff(ModContent.BuffType<EmeraldSpellEnraged>())) {
+                int index = Player.FindBuffIndex(ModContent.BuffType<EmeraldSpell>());
+                if (index != -1) {
+                    Player.DelBuff(index); // Langsung kick debuff pertama dari badan player
+                }
+            }
+        }
+    }
+}
