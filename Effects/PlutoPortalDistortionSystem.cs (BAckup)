@@ -1,0 +1,155 @@
+using System;
+using System.Collections.Generic;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using ReLogic.Content;
+using Terraria;
+using Terraria.Graphics.Effects;
+using Terraria.Graphics.Shaders;
+using Terraria.ModLoader;
+
+namespace TheSanity.Effects
+{
+    // ==================================================================================
+    // 🌀 PlutoPortalDistortionSystem
+    // Loader + registry buat efek distorsi full-screen PlutoPortal. Alurnya:
+    //
+    // 1. PlutoPortal.AI() manggil RegisterPortalSource(...) tiap tick portal itu aktif.
+    // 2. Part manapun yang mau IMMUNE (Head, Body, Tail, Hook, Chain, Portal sendiri,
+    //    Laser Aim) manggil RegisterExemptZone(...) tiap tick mereka aktif.
+    // 3. Di akhir frame (PostDrawTiles, yaitu SETELAH tiles digambar tapi SEBELUM NPC/
+    //    Projectile/Player -- ini timing yang aman buat nge-push parameter shader &
+    //    Activate/Deactivate filter-nya sebelum filter itu sendiri jalan di akhir draw),
+    //    semua data yang kekumpul dikonversi ke screen-space UV terus didorong ke shader.
+    // 4. List di-clear tiap frame, jadi part yang udah mati/nonaktif otomatis "hilang"
+    //    dari radar exemption di frame berikutnya (gak perlu manual unregister).
+    //
+    // ⚠️ CATATAN VERSI: 3 baris yang paling mungkin butuh disesuaikan ke versi
+    // tModLoader kamu ditandain komentar "⚠️ SESUAIKAN" di bawah -- constructor
+    // Ref<Effect>/ScreenShaderData/Filter, dan signature Filters.Scene.Activate/Deactivate.
+    // Kalau ada yang beda dikit, itu cuma soal nama/urutan parameter, logic besarnya
+    // (load sekali di awal, push parameter tiap frame) tetep sama.
+    // ==================================================================================
+    public class PlutoPortalDistortionSystem : ModSystem
+    {
+        public const string ShaderKey = "TheSanity:PlutoPortalDistortion";
+
+        // 20 block = 20 tile. 1 tile Terraria = 16 pixel world-space.
+        public const float DistortionRadiusTiles = 20f;
+        public const float DistortionRadiusWorldPixels = DistortionRadiusTiles * 16f;
+
+        private const int MaxPortalSources = 4;
+        private const int MaxExemptZones = 28;
+
+        private static readonly List<(Vector2 worldPos, float strength)> activePortals = new();
+        private static readonly List<(Vector2 worldPos, float worldRadius)> exemptZones = new();
+
+        public override void Load()
+        {
+            if (Main.dedServ) return; // server gak perlu shader
+
+            Asset<Effect> effectAsset = Mod.Assets.Request<Effect>("Effects/PlutoPortalDistortion", AssetRequestMode.ImmediateLoad);
+
+            // Konstruktor Asset<Effect> ini yang direkomendasikan sejak tML 1.4.5 (versi Ref<Effect>
+            // udah obsolete, walau masih kepake & tetep jalan di ShockwaveSystem.cs kamu).
+            var shaderData = new ScreenShaderData(effectAsset, "PortalDistortionPass");
+
+            Filters.Scene[ShaderKey] = new Filter(shaderData, EffectPriority.High);
+            Filters.Scene[ShaderKey].Load();
+        }
+
+        public override void Unload()
+        {
+            activePortals.Clear();
+            exemptZones.Clear();
+        }
+
+        /// <summary>
+        /// Dipanggil dari PlutoPortal.AI() tiap tick portal itu masih hidup/kegambar.
+        /// strength 0..1 -- disaranin ngikutin Projectile.scale & (1 - alpha/255) biar
+        /// distorsinya ikut fade in/out bareng portal, bukan langsung on/off mendadak.
+        /// </summary>
+        public static void RegisterPortalSource(Vector2 worldCenter, float strength)
+        {
+            if (Main.dedServ || Main.gameMenu) return;
+            if (activePortals.Count < MaxPortalSources)
+                activePortals.Add((worldCenter, MathHelper.Clamp(strength, 0f, 1f)));
+        }
+
+        /// <summary>
+        /// Dipanggil dari part MANAPUN yang mau kebal dari distorsi (Head, Body, Tail,
+        /// Hook, titik-titik sepanjang Chain, Portal sendiri, titik-titik sepanjang
+        /// Laser Aim). worldRadius = jari-jari zona aman di sekitar worldCenter, dalam
+        /// pixel world-space (bukan tile).
+        /// </summary>
+        public static void RegisterExemptZone(Vector2 worldCenter, float worldRadius)
+        {
+            if (Main.dedServ || Main.gameMenu) return;
+            if (exemptZones.Count < MaxExemptZones && worldRadius > 0f)
+                exemptZones.Add((worldCenter, worldRadius));
+        }
+
+        // PostDrawTiles jalan tiap frame SETELAH tile/wall digambar, SEBELUM NPC/Projectile/
+        // Player, dan JAUH sebelum Filters.Scene benar-benar di-composite di akhir Main.DoDraw.
+        // Jadi ini timing yang pas buat "kunci" parameter shader untuk frame ini.
+        public override void PostDrawTiles()
+        {
+            if (Main.dedServ) return;
+
+            if (activePortals.Count == 0)
+            {
+                // ⚠️ SESUAIKAN kalau nama method IsActive()/Deactivate beda di versi kamu.
+                if (Filters.Scene[ShaderKey].IsActive())
+                    Filters.Scene.Deactivate(ShaderKey);
+
+                exemptZones.Clear();
+                return;
+            }
+
+            float aspect = Main.screenHeight > 0 ? (float)Main.screenWidth / Main.screenHeight : 1f;
+            var aspectCorrection = new Vector2(aspect, 1f);
+
+            var sourcePositions = new Vector2[MaxPortalSources];
+            var sourceStrengths = new float[MaxPortalSources];
+            int portalCount = Math.Min(activePortals.Count, MaxPortalSources);
+            for (int i = 0; i < portalCount; i++)
+            {
+                Vector2 screenPos = activePortals[i].worldPos - Main.screenPosition;
+                sourcePositions[i] = new Vector2(screenPos.X / Main.screenWidth, screenPos.Y / Main.screenHeight);
+                sourceStrengths[i] = activePortals[i].strength;
+            }
+
+            var exemptPositions = new Vector2[MaxExemptZones];
+            var exemptRadii = new float[MaxExemptZones];
+            int exemptTotal = Math.Min(exemptZones.Count, MaxExemptZones);
+            for (int i = 0; i < exemptTotal; i++)
+            {
+                Vector2 screenPos = exemptZones[i].worldPos - Main.screenPosition;
+                exemptPositions[i] = new Vector2(screenPos.X / Main.screenWidth, screenPos.Y / Main.screenHeight);
+                exemptRadii[i] = exemptZones[i].worldRadius / Main.screenWidth;
+            }
+
+            float radiusUV = DistortionRadiusWorldPixels / Main.screenWidth;
+
+            ScreenShaderData shader = Filters.Scene[ShaderKey].GetShader();
+            Effect fx = shader.Shader;
+
+            fx.Parameters["globalTime"]?.SetValue(Main.GlobalTimeWrappedHourly);
+            fx.Parameters["portalCount"]?.SetValue(portalCount);
+            fx.Parameters["sourcePositions"]?.SetValue(sourcePositions);
+            fx.Parameters["sourceStrengths"]?.SetValue(sourceStrengths);
+            fx.Parameters["distortionRadius"]?.SetValue(radiusUV);
+            fx.Parameters["aspectRatioCorrectionFactor"]?.SetValue(aspectCorrection);
+            fx.Parameters["exemptCount"]?.SetValue(exemptTotal);
+            fx.Parameters["exemptPositions"]?.SetValue(exemptPositions);
+            fx.Parameters["exemptRadii"]?.SetValue(exemptRadii);
+
+            // ⚠️ SESUAIKAN kalau signature Activate beda (beberapa versi minta Vector2 posisi).
+            if (!Filters.Scene[ShaderKey].IsActive())
+                Filters.Scene.Activate(ShaderKey, activePortals[0].worldPos);
+
+            activePortals.Clear();
+            exemptZones.Clear();
+        }
+    }
+}
