@@ -664,12 +664,12 @@ Items: {
 
 	ReligiaBar: {
 		DisplayName: Religia Bar
-		Tooltip: "Smelted from Religia Ore, it hums faintly with leftover power"
+		Tooltip: Smelted from Religia Ore, it hums faintly with leftover power
 	}
 
 	ReligiaOre: {
 		DisplayName: Religia Ore
-		Tooltip: "A strange violet ore, said to have fallen from a fractured piece of the sky"
+		Tooltip: A strange violet ore, said to have fallen from a fractured piece of the sky
 	}
 }
 
