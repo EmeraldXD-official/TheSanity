@@ -52,6 +52,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private const float BoomerangCatchDistance = 40f;
         private const int BoomerangMaxLifetime = 240;   // safety net (~4 detik) kalau boss ilang dsb
 
+        // Cambuk manual: extend keluar ke arah target, tahan sebentar di titik puncak (biar
+        // hitbox-nya kebaca jelas), lalu retract balik ke boss dan Kill(). Nggak butuh state
+        // segmen/mouse-tracking bawaan vanilla sama sekali - cukup satu titik "ujung cambuk" yang
+        // digerakkin manual tiap tick, sama kayak pendekatan yoyo/boomerang di atas.
+        private const int WhipExtendTicks = 12;
+        private const int WhipHoldTicks = 6;
+        private const int WhipRetractTicks = 10;
+        private const float WhipMaxRange = 180f;
+
         public override bool PreAI(Projectile projectile)
         {
             if (projectile.owner == proxySlot)
@@ -67,6 +76,23 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 if (projectile.aiStyle == ProjAIStyleID.Boomerang)
                 {
                     UpdateBossBoomerang(projectile);
+                    return false;
+                }
+                // ================== FIX: crash "Index was outside the bounds of the array" pas
+                // boss megang senjata Whip ==================
+                // Sama persis kayak Yoyo & Boomerang di atas: AI vanilla buat aiStyle Whip (161) juga
+                // baca state owner PLAYER SUNGGUHAN (posisi kursor mouse / target arah cambuk) buat
+                // nentuin lintasan & panjang segmen cambuknya. Owner di sini cuma dummyPlayer palsu
+                // (proxySlot) yang gak pernah "dikontrol" beneran, jadi data yang dibaca vanilla nggak
+                // pernah ke-set dengan benar - dan itu bikin Terraria.Projectile.VanillaAI() nge-index
+                // array segmen cambuk pakai nilai yang gak valid -> IndexOutOfRangeException, persis
+                // yang muncul di client.log ("Index was outside the bounds of the array.") pas
+                // STATE_WHIP_LASH_CAGE / archetype Whip lagi aktif. Whip archetype ini sebelumnya
+                // kelewat waktu Yoyo & Boomerang dipatch - fix-nya sama: skip total AI vanilla, gerakin
+                // manual sendiri.
+                if (projectile.aiStyle == ProjAIStyleID.Whip)
+                {
+                    UpdateBossWhip(projectile);
                     return false;
                 }
 
@@ -170,6 +196,50 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             projectile.position += projectile.velocity;
             projectile.rotation += 0.3f;
+        }
+
+        // Extend -> hold -> retract, all driven off projectile.ai[0] as a manual frame counter -
+        // exactly the same shape as UpdateBossYoyo/UpdateBossBoomerang above, just with a
+        // straight-line extend instead of an orbit. projectile.ai[1] locks in the extend direction
+        // on the first tick so the cambuk doesn't re-aim mid-swing if the player moves.
+        private void UpdateBossWhip(Projectile projectile)
+        {
+            int idx = NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>());
+            if (idx == -1) { projectile.Kill(); return; }
+            NPC boss = Main.npc[idx];
+
+            projectile.tileCollide = false;
+            projectile.ai[0] += 1f;
+            float t = projectile.ai[0];
+
+            if (t == 1f)
+            {
+                Vector2 dir = projectile.velocity != Vector2.Zero ? projectile.velocity.SafeNormalize(Vector2.UnitX) : new Vector2(boss.direction, 0f);
+                projectile.ai[1] = dir.ToRotation();
+            }
+            float angle = projectile.ai[1];
+            Vector2 aimDir = angle.ToRotationVector2();
+
+            float reach;
+            if (t <= WhipExtendTicks)
+            {
+                reach = MathHelper.Lerp(0f, WhipMaxRange, t / WhipExtendTicks);
+            }
+            else if (t <= WhipExtendTicks + WhipHoldTicks)
+            {
+                reach = WhipMaxRange;
+            }
+            else
+            {
+                float retractT = MathHelper.Clamp((t - WhipExtendTicks - WhipHoldTicks) / WhipRetractTicks, 0f, 1f);
+                reach = MathHelper.Lerp(WhipMaxRange, 0f, retractT);
+                if (retractT >= 1f) { projectile.Kill(); return; }
+            }
+
+            Vector2 newCenter = boss.Center + aimDir * reach;
+            projectile.velocity = newCenter - projectile.Center;
+            projectile.Center = newCenter;
+            projectile.rotation = angle;
         }
 
         // BALANCING: potongan damage bertingkat buat semua proyektil senjata boss (yoyo, boomerang,

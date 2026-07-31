@@ -1,6 +1,7 @@
 using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
+using TheSanity.Items.Summons.WandOfMirrorImage;
 
 namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 {
@@ -23,6 +24,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             if (dropType != 0)
                 Item.NewItem(npc.GetSource_Loot(), npc.getRect(), dropType, 1);
+
+            if (npc.type == ModContent.NPCType<WhoAmI>() && npc.ModNPC is WhoAmI realBoss && !realBoss.isMirageDecoy)
+            {
+                Item.NewItem(npc.GetSource_Loot(), npc.getRect(), ModContent.ItemType<WandOfMirrorImageItem>(), 1);
+            }
         }
     }
 }

@@ -123,11 +123,28 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // dikonsumsi percuma.
         public static bool TrySummon(Point16 paintingPos, Player player)
         {
-            if (NPC.AnyNPCs(ModContent.NPCType<WhoAmI>())) return false;
+            if (NPC.AnyNPCs(ModContent.NPCType<WhoAmI>()))
+            {
+                Main.NewText("Something is already emerging from the mirror...", 255, 90, 90);
+                return false;
+            }
 
             Tile t = Main.tile[paintingPos.X, paintingPos.Y];
             if (t == null || !t.HasTile || t.TileType != ModContent.TileType<WhoAmIMirrorPaintingTile>())
                 return false;
+
+            // ================== SYARAT SUMMON: SENJATA CLASS SESUAI GEAR PLAYER ==================
+            // Lihat WhoAmI.TryCheckWeaponRequirement & WhoAmI.TryDetectPlayerClass (WhoAmI_Helpers.cs)
+            // buat detail deteksi class dari gear + perhitungan senjatanya. Dicek di sini (bukan di
+            // BloodBagItem.UseItem) supaya SATU-SATUNYA jalur yang beneran nge-spawn NPC-nya
+            // (TrySummon) juga yang jadi satu-satunya sumber kebenaran soal syarat summon - kalau
+            // nanti ada cara lain buat trigger summon selain blood bag, syaratnya otomatis ikut
+            // kepakai tanpa perlu diduplikasi di tempat lain.
+            if (!WhoAmI.TryCheckWeaponRequirement(player, out string failMessage))
+            {
+                Main.NewText(failMessage, 255, 90, 90);
+                return false;
+            }
 
             // Titik spawn: tepat di depan bagian bawah-tengah lukisan, tapi bisa ditarik
             // sedikit ke atas kalau boss terlalu rendah.

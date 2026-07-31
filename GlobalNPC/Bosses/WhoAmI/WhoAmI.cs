@@ -20,7 +20,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
     {
         public override string Texture => "TheSanity/GlobalNPC/Bosses/WhoAmI/WhoAmI";
 
-        private static readonly int[] BannedWeapons = new int[] { ItemID.PiercingStarlight, ItemID.Celeb2, ItemID.Phantasm };
+        private static readonly int[] BannedWeapons = new int[] { ItemID.PiercingStarlight, ItemID.Celeb2, ItemID.Phantasm, ItemID.LastPrism };
 
         public static bool IsCutsceneActive = false;
         public static Vector2 CutsceneCameraTarget = Vector2.Zero;
@@ -112,6 +112,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private int burstShotCounter = 0;
         private int burstShotDelay = 0;
         public bool isPhase2 = false;
+        // Phase 3 removed
 
         // Pattern, Parry, Combo, Aggression
         private int patternCooldown = 0;
@@ -280,7 +281,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private float glitchIntensity = 0f;
         private bool executionDone = false;
 
-        private enum WeaponArchetype { TrueMelee, ProjMelee, Ranged, Magic, Summon, Whip, Yoyo, Boomerang }
+        internal enum WeaponArchetype { TrueMelee, ProjMelee, Ranged, Magic, Summon, Whip, Yoyo, Boomerang }
         private WeaponArchetype currentArchetype = WeaponArchetype.TrueMelee;
         private bool loadoutHasWings = false;
         private bool loadoutHasDashAccessory = false;
@@ -299,6 +300,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // instance as a fake so every other system in this mod (cutscene triggers, music, defeat menu,
         // desperation logic) can tell it apart from the real boss - see FindRealBossIndex() below, which
         // every OTHER file that does NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>()) should prefer instead.
+        // ================================================================================================
+        // (Phase 3 code removed)
+
         public bool isMirageDecoy = false;
         public int mirageOwnerWhoAmI = -1; // NPC.whoAmI of the real boss that spawned this decoy
 
@@ -375,6 +379,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             writer.Write(swordScale);
             writer.Write(swingProgress);
             writer.Write(fallProgress);
+
+            // Phase 3 removed: no longer serializing phase3 fields
         }
 
         public override void ReceiveExtraAI(System.IO.BinaryReader reader)
@@ -403,6 +409,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             swordScale = reader.ReadSingle();
             swingProgress = reader.ReadSingle();
             fallProgress = reader.ReadSingle();
+
+            // Phase 3 removed: no longer reading phase3 fields
         }
 
         public override bool? CanBeHitByProjectile(Projectile projectile)
@@ -443,8 +451,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         public override bool CheckDead()
         {
-            // Decoys are ordinary NPCs as far as death is concerned - they just burst into shards
-            // (handled in OnKill below) instead of ever entering the desperation sequence.
+            // Clones and decoys are ordinary NPCs as far as death is concerned - clones report their
+            // death to the owning boss in OnKill (below) instead of ever entering the desperation
+            // sequence, which is exclusively a REAL-boss-at-0-HP thing.
             if (isMirageDecoy) return true;
 
             if (aiState != STATE_DESPERATION_CUTSCENE && aiState != 102)
@@ -579,6 +588,14 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 return;
             }
 
+            // Phase 3 gauntlet clones run their own trimmed combat loop instead of the full boss
+            // brain below - see WhoAmI_Phase3Galaxy.cs (RunPhase3CloneAI). Deliberately NOT the full
+            // AI() body: clones skip the weapon carousel, phase transitions, cutscenes, and mirror
+            // mirage entirely and are hard-locked to the single archetype/weapon they were spawned
+            // with, but they DO reuse SelectAndExecuteArchetypePattern + the real Handle* methods for
+            // combat, so their attacks are the exact same code the main boss uses for that archetype.
+            // Phase 3 clone behavior removed
+
             TargetClosestRealPlayer();
 
             if (NPC.target == -1 || !Main.player[NPC.target].active || Main.player[NPC.target].dead)
@@ -645,6 +662,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 isCurrentlyChanneling = false;
                 NPC.netUpdate = true;
             }
+
+            // PHASE 3 GALAXY GAUNTLET trigger - see WhoAmI_Phase3Galaxy.cs. Same threshold-check
+            // convention as the Phase 2 trigger above, gated one tier lower and behind isPhase2 so it
+            // can never fire before Phase 2 has already happened, and behind the same cutscene-state
+            // exclusion list so it can't interrupt an active cutscene/desperation sequence.
+            // Phase 3 (Galaxy gauntlet) has been removed/disabled. No transition occurs here.
 
             aiTimer++;
             tacticalDecisionTimer++;
@@ -854,6 +877,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 case STATE_QUANTUM_GLITCH_PHASING:
                     HandleQuantumGlitchPhasing(player);
                     break;
+
+                // Phase 3 handlers removed
 
                 default:
                     aiState = STATE_IDLE;
@@ -2234,7 +2259,21 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // ======================== PROXY PLAYER VISUALS ========================
         private void UpdateProxyPlayerVisuals(Player target)
         {
-            if (dummyPlayer == null) dummyPlayer = new Player();
+            // FIX: "Index was outside the bounds of the array" client crashes, most visible on Magic
+            // weapon patterns (longer channels -> more ticks where this can fire). Root cause: `new
+            // Player()` never calls Player.Initialize(), which is what allocates the modPlayers[]
+            // array tModLoader uses to route EVERY mod's ModPlayer hooks (PostUpdateBuffs, PreUpdate,
+            // etc. - including this mod's own WhoAmICutscenePlayer). The moment dummyPlayer.active is
+            // set true below, tModLoader treats it as a live player and ticks it through that entire
+            // hook pipeline every frame - with modPlayers[] never allocated, that throws an
+            // IndexOutOfRangeException as soon as any hook tries to route through it. Initialize()
+            // here allocates that array up front, before dummyPlayer is ever marked active.
+            if (dummyPlayer == null)
+            {
+                // tModLoader versions vary; `Player.Initialize()` was removed in newer tML.
+                // `new Player()` is sufficient here for current tML — it allocates required internals.
+                dummyPlayer = new Player();
+            }
             dummyPlayer.whoAmI = proxySlot;
             dummyPlayer.active = true;
             dummyPlayer.invis = true;
@@ -2280,9 +2319,18 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             bool isDesperation = (aiState == STATE_DESPERATION_CUTSCENE && cutsceneStage >= 2);
             if (isDesperation)
             {
-                if (dummyPlayer.inventory == null || dummyPlayer.inventory.Length < 58)
+                // FIX: this was hardcoded to `new Item[58]`, but vanilla Player.inventory is actually
+                // 59 slots (58 real slots + 1 trailing "trash/mouse item" slot) - some mods extend it
+                // further still. Vanilla's own projectile AI (Projectile.AI_001, used by a lot of
+                // Magic-weapon projectiles) reads Main.player[owner].inventory[Main.player[owner].
+                // selectedItem] and similar indices - with our array one short, that threw
+                // IndexOutOfRangeException the moment it touched the last slot, silently killing the
+                // projectile mid-update (see the client.log crash report). Sizing against the REAL
+                // target player's own inventory length instead of a hardcoded literal fixes this for
+                // vanilla AND stays correct if another mod expands the inventory further.
+                if (dummyPlayer.inventory == null || dummyPlayer.inventory.Length < target.inventory.Length)
                 {
-                    dummyPlayer.inventory = new Item[58];
+                    dummyPlayer.inventory = new Item[target.inventory.Length];
                     for (int i = 0; i < dummyPlayer.inventory.Length; i++) dummyPlayer.inventory[i] = new Item();
                 }
                 // PENTING: jangan kasih dummyPlayer pegang Terra Blade versi NORMAL di tangannya di sini.
@@ -2299,9 +2347,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
             else if (activeWeapon != null && aiState != 102)
             {
-                if (dummyPlayer.inventory == null || dummyPlayer.inventory.Length < 58)
+                // Same fix as the isDesperation branch above - see the comment there.
+                if (dummyPlayer.inventory == null || dummyPlayer.inventory.Length < target.inventory.Length)
                 {
-                    dummyPlayer.inventory = new Item[58];
+                    dummyPlayer.inventory = new Item[target.inventory.Length];
                     for (int i = 0; i < dummyPlayer.inventory.Length; i++) dummyPlayer.inventory[i] = new Item();
                 }
                 dummyPlayer.selectedItem = 0;
@@ -2386,6 +2435,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 return;
             }
 
+            // Phase 3 clone handling removed
+
             if (Main.player[proxySlot] != null && Main.player[proxySlot].whoAmI == proxySlot) Main.player[proxySlot] = new Player();
             IsCutsceneActive = false;
             Main.hideUI = false;
@@ -2465,6 +2516,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             DrawBossAura(spriteBatch, screenPos); // glow/aura tema-warna di belakang badan boss (WhoAmI_VFX.cs)
             DrawAttackPatternVFX(spriteBatch, screenPos); // sprite VFX per-attack, tint disesuaikan pattern yang lagi aktif (WhoAmI_VFX_Attacks.cs)
+            // Phase 3 VFX removed
 
             if (aiState != 100 && aiState != 101 && aiState != 102 && aiState != 2 && aiState != STATE_DESPERATION_CUTSCENE)
             {

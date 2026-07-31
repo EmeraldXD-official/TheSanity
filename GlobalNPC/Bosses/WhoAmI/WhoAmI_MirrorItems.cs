@@ -184,12 +184,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 return false;
             }
 
+            // NOTE: kalau TrySummon() gagal (boss udah ada / syarat minimal senjata per class belum
+            // kepenuhi / dsb), TrySummon() SENDIRI yang udah nge-print alasan spesifiknya ke chat
+            // (lihat WhoAmI_MirrorPainting.cs) - jangan tambahin pesan generik lagi di sini, biar
+            // player nggak dapet 2 pesan yang nimpang-nimpangin/bikin bingung soal alasan sebenernya.
             bool started = WhoAmIMirrorPaintingTile.TrySummon(paintingPos.Value, player);
-            if (!started)
-            {
-                Main.NewText("Something is already emerging from the mirror...", 255, 90, 90);
-                return false;
-            }
+            if (!started) return false; // item nggak dikonsumsi
 
             return true; // konsumsi 1 stack, summon udah jalan di TrySummon()
         }

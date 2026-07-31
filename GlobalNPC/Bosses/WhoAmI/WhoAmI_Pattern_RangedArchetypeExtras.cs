@@ -39,6 +39,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleVectorLaserGrid(Player target)
         {
+            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
+            // in the telegraph phase (aiTimer solidify/end checks never advance).
+            aiTimer++;
+
             int solidifyDuration = isPhase2 ? 26 : 20;
             int lineCount = isPhase2 ? 7 : 5;
             float spacing = isPhase2 ? 90f : 110f;
@@ -164,6 +168,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleHomingClusterComet(Player target)
         {
+            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
+            // (fracture/homing-window checks that key off aiTimer would never advance).
+            aiTimer++;
+
             int fractureTick = isPhase2 ? 45 : 60;
             int pelletCount = isPhase2 ? 28 : 18;
             int homingWindow = isPhase2 ? 55 : 40; // ticks after fracture the pellets keep actively homing
@@ -324,6 +332,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleSingularityOverdrive(Player target)
         {
+            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
+            // (travel/ring-interval/active-duration checks that key off aiTimer would never advance).
+            aiTimer++;
+
             const int travelTicks = 20;
             int activeDuration = isPhase2 ? 130 : 100;
             int ringInterval = isPhase2 ? 30 : 42;
