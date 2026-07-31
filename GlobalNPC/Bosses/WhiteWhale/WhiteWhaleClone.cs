@@ -361,6 +361,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
             Color alphaColor = (NPC.localAI[3] == 1f) ? Color.Black * 0.7f : (drawColor * NPC.Opacity);
 
+            // Ganti sampler ke LinearClamp biar body & trail clone-nya ga burik/patah pas rotate/scale
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+
             for (int i = 1; i < NPC.oldPos.Length; i++) {
                 if (NPC.oldPos[i] == Vector2.Zero) continue;
 
@@ -373,6 +377,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
             Vector2 mainDrawPos = NPC.Center - screenPos + visualOffset;
             spriteBatch.Draw(cloneTexture, mainDrawPos, NPC.frame, alphaColor, NPC.rotation, origin, 1.0f, cloneEffects, 0f);
+
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
 
             return false; 
         }

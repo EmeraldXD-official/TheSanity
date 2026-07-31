@@ -93,6 +93,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             npcLoot.Add(ItemDropRule.BossBag(ModContent.ItemType<WhaleWhiteRelic>()));
         }
 
+        public override void OnKill() {
+            WhiteWhaleDownedSystem.downedWhiteWhale = true;
+        }
+
         public override void FindFrame(int frameHeight) {
             bool useFrameThree = false;
 
@@ -716,11 +720,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
             for (int i = 0; i < intensity; i++) {
                 Vector2 spawnPos = fogCenter + new Vector2(Main.rand.Next(-1400, 1400), Main.rand.Next(minY, maxY));
-                
+
                 if (Main.netMode != NetmodeID.Server) {
-                    int graveyardCloudID = Main.rand.Next(1087, 1094); 
-                    Gore fogGore = Gore.NewGoreDirect(NPC.GetSource_FromAI(), spawnPos, Vector2.Zero, graveyardCloudID, Main.rand.NextFloat(0.9f, 1.3f));
-                    fogGore.velocity *= 0.1f; 
+                    WhiteWhaleFogSystem.SpawnFog(spawnPos);
                 }
             }
         }
@@ -751,7 +753,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                 Texture2D texture = TextureAssets.Npc[NPC.type].Value;
                 Vector2 drawPos = NPC.Center - screenPos + visualOffset;
                 SpriteEffects effects = NPC.spriteDirection == 1 ? SpriteEffects.FlipHorizontally : SpriteEffects.None;
+
+                // Ganti sampler ke LinearClamp sebentar biar tepi sprite ga burik/patah-patah
+                spriteBatch.End();
+                spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+
                 spriteBatch.Draw(texture, drawPos, NPC.frame, Color.Black * 0.9f, NPC.rotation, origin, 1.0f, effects, 0f);
+
+                spriteBatch.End();
+                spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
                 return false; 
             }
 
@@ -790,6 +800,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             // Ubah warna menjadi hitam agak transparan jika flag siluet menyala
             Color alphaColor = (NPC.localAI[3] == 1f) ? Color.Black * 0.7f : (drawColor * NPC.Opacity); 
 
+            // Ganti sampler ke LinearClamp biar body & trail whale-nya ga burik/patah pas rotate/scale
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+
             for (int i = 1; i < NPC.oldPos.Length; i++) {
                 if (NPC.oldPos[i] == Vector2.Zero) continue;
 
@@ -802,6 +816,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
             Vector2 mainDrawPos = NPC.Center - screenPos + visualOffset;
             spriteBatch.Draw(mainTexture, mainDrawPos, NPC.frame, alphaColor, NPC.rotation, origin, 1.0f, mainEffects, 0f);
+
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.PointClamp, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
 
             return false; 
         }
