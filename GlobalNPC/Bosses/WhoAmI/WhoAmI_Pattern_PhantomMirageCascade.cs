@@ -79,6 +79,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // ─────────────────────────────────────────────────────────────────────────────────────────
         private void HandleMagicSpiralRift(Player target)
         {
+            // BUGFIX: aiTimer was never incremented in this handler, so every check below
+            // (aiTimer == 1, aiTimer < PmcOrbitEnd, etc.) would stay stuck at its initial value
+            // forever - the boss would freeze in this state permanently the first time it fired.
+            aiTimer++;
+
             // Safety exits — should never trigger mid-fight, but keeps things crash-free.
             if (target == null || !target.active || target.dead)
             {

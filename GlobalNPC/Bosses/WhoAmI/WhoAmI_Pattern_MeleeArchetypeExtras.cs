@@ -47,6 +47,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleAbyssalCleave(Player target)
         {
+            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
+            // in the windup phase (aiTimer < windup never becomes false).
+            aiTimer++;
+
             int windup = isPhase2 ? 12 : 18;
             int dashDuration = isPhase2 ? 16 : 20;
             float dashSpeed = isPhase2 ? 30f : 22f;
@@ -219,6 +223,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleOrbitingBladeRing(Player target)
         {
+            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
+            // right after spawning the blade ring (aiTimer >= channelDuration never becomes true).
+            aiTimer++;
+
             int channelDuration = isPhase2 ? 55 : 75;
             float rotSpeed = isPhase2 ? 0.05f : 0.03f;
             int fireInterval = isPhase2 ? 5 : 8;
@@ -350,6 +358,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleDimensionalPierce(Player target)
         {
+            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
+            // (blink/lunge timing checks that key off aiTimer would never advance).
+            aiTimer++;
+
             NPC.damage = 0;
             float triangleRadius = isPhase2 ? 420f : 340f;
             int blinkInterval = isPhase2 ? 11 : 15;

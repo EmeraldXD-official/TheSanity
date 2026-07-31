@@ -40,6 +40,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleAureolaSignetRain(Player target)
         {
+            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
+            // in the channel phase (aiTimer < channelDuration never becomes false).
+            aiTimer++;
+
             int signetCount = isPhase2 ? 5 : 3;
             int channelDuration = isPhase2 ? 40 : 55;
             int rainDuration = isPhase2 ? 90 : 70;
@@ -158,6 +162,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleDoubleHelixSweep(Player target)
         {
+            // BUGFIX: aiTimer was never incremented here, so the sweep would freeze permanently
+            // at its start position (aiTimer >= sweepDuration never becomes true).
+            aiTimer++;
+
             int sweepDuration = isPhase2 ? 100 : 130;
             float halfWidth = isPhase2 ? 900f : 750f;
             float amplitude = isPhase2 ? 260f : 200f;
@@ -254,6 +262,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleQuantumGlitchPhasing(Player target)
         {
+            // BUGFIX: aiTimer was never incremented here, so the orb ring would freeze permanently
+            // (aiTimer >= activeDuration never becomes true, and it would keep re-spawning orbs
+            // every tick since "glitchOrbIndices.Count == 0 && aiTimer == 0" never stops matching
+            // once cleared).
+            aiTimer++;
+
             int orbCount = isPhase2 ? 7 : 5;
             int activeDuration = isPhase2 ? 140 : 110;
             int cycleLength = isPhase2 ? 26 : 34; // ticks per solid/phased half-cycle

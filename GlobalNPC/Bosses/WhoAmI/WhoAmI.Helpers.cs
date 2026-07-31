@@ -422,6 +422,144 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
         }
 
+        // ======================== WEAPON UTILITIES ========================
+        internal static bool IsWeaponItem(Item item)
+        {
+            if (item == null || item.IsAir) return false;
+            if (item.damage <= 0) return false;
+            if (item.pick > 0 || item.axe > 0 || item.hammer > 0 || item.tileBoost > 0) return false;
+            return true;
+        }
+
+        internal static WeaponArchetype ResolveArchetypeForItem(Item item)
+        {
+            if (item == null || item.IsAir) return WeaponArchetype.TrueMelee;
+            // Yoyo check: hold-up + shoot and not a whip projectile
+            if (item.useStyle == ItemUseStyleID.HoldUp && item.shoot > 0 && !ProjectileID.Sets.IsAWhip[item.shoot]) return WeaponArchetype.Yoyo;
+            if (item.useStyle == ItemUseStyleID.Swing && item.shoot > 0)
+            {
+                int t = item.shoot;
+                if (t == ProjectileID.EnchantedBoomerang || t == ProjectileID.LightDisc || t == ProjectileID.Bananarang || t == ProjectileID.ThornChakram || t == ProjectileID.FruitcakeChakram || t == ProjectileID.IceBoomerang || t == ProjectileID.Flamarang || t == ProjectileID.WoodenBoomerang)
+                    return WeaponArchetype.Boomerang;
+            }
+            if (item.shoot > 0 && ProjectileID.Sets.IsAWhip[item.shoot]) return WeaponArchetype.Whip;
+            if (item.CountsAsClass(DamageClass.Ranged)) return WeaponArchetype.Ranged;
+            if (item.CountsAsClass(DamageClass.Magic)) return WeaponArchetype.Magic;
+            if (item.CountsAsClass(DamageClass.Summon)) return WeaponArchetype.Summon;
+
+            bool swing = item.useStyle == ItemUseStyleID.Swing;
+            bool hasProj = item.shoot > 0;
+            if (swing && !hasProj) return WeaponArchetype.TrueMelee;
+            return WeaponArchetype.ProjMelee;
+        }
+
+        // ======================== SPAWN REQUIREMENT: CLASS-SPECIFIC WEAPON VARIETY ========================
+        // Syarat summon (dicek di WhoAmIMirrorPaintingTile.TrySummon, WhoAmI_MirrorPainting.cs,
+        // SEBELUM NPC.NewNPC dipanggil): DETEKSI dulu class player lagi main sebagai apa dari
+        // GEAR-nya (armor set bonus + aksesoris yang nge-boost damage class - lihat
+        // TryDetectPlayerClass di bawah), lalu HANYA class itu yang perlu dipenuhi syaratnya -
+        // player harus bawa minimal RequiredWeaponsForDetectedClass senjata BERBEDA (item.type
+        // unik) dari class yang kedeteksi itu. Class lain yang nggak dia mainkan SAMA SEKALI nggak
+        // disyaratkan - beda dari versi lama yang minta ke-4 class sekaligus.
+        //
+        // KENAPA DETEKSI DARI GEAR, BUKAN DARI SENJATA YANG DIPEGANG: pas klik blood bag buat
+        // summon, item yang lagi dipegang player ITU SENDIRI blood bag-nya (bukan senjata) - jadi
+        // "senjata yang lagi dipegang" bukan sinyal yang valid buat nentuin class. Gear (armor +
+        // aksesoris) yang lebih nunjukin class beneran yang mau dia mainkan sepanjang fight.
+        internal const int RequiredWeaponsForDetectedClass = 8;
+
+        private static readonly (string label, Func<Item, bool> matches)[] WeaponClassChecks = new (string, Func<Item, bool>)[]
+        {
+            ("Melee",  item => item.CountsAsClass(DamageClass.Melee)),
+            ("Ranged", item => item.CountsAsClass(DamageClass.Ranged)),
+            ("Magic",  item => item.CountsAsClass(DamageClass.Magic)),
+            ("Summon", item => item.CountsAsClass(DamageClass.Summon)),
+        };
+
+        // Deteksi class player dari gear-nya SEKARANG (bukan dari senjata yang dipegang - lihat
+        // catatan di atas): bandingin ke-4 damage multiplier (Player.GetDamage(class), yang udah
+        // ngerangkum bonus dari armor set bonus + SEMUA aksesoris yang dipakai) terhadap baseline
+        // 1x-nya, terus ambil yang paling besar deviasinya. Ini HEURISTIK, bukan pembacaan
+        // literal "tag class" dari armornya - tModLoader nggak punya tag universal semacam itu
+        // yang juga otomatis kepakai buat armor modded manapun - tapi praktiknya, gear yang
+        // di-build ke arah 1 class (vanilla atau modded) hampir selalu nambahin damage multiplier
+        // class itu spesifik, jadi ini proxy yang cukup reliable buat "gear dia lagi ngarah ke
+        // class apa".
+        //
+        // Balikin false (gak ada class yang kedeteksi) kalau ke-4 nilainya SAMA (paling sering:
+        // semuanya masih di baseline 1x karena player belum pakai armor/aksesoris yang nambahin
+        // damage class manapun) - di kasus itu nggak ada dasar buat milih 1 class, jadi player
+        // disuruh pakai gear class dulu sebelum nyoba summon.
+        internal static bool TryDetectPlayerClass(Player player, out int classIndex, out float margin)
+        {
+            classIndex = -1;
+            margin = 0f;
+            if (player == null) return false;
+
+            float[] values = new float[]
+            {
+                player.GetDamage(DamageClass.Melee).ApplyTo(1f) - 1f,
+                player.GetDamage(DamageClass.Ranged).ApplyTo(1f) - 1f,
+                player.GetDamage(DamageClass.Magic).ApplyTo(1f) - 1f,
+                player.GetDamage(DamageClass.Summon).ApplyTo(1f) - 1f,
+            };
+
+            int bestIdx = 0;
+            for (int i = 1; i < values.Length; i++)
+                if (values[i] > values[bestIdx]) bestIdx = i;
+
+            bool allTied = true;
+            for (int i = 0; i < values.Length; i++)
+                if (Math.Abs(values[i] - values[bestIdx]) > 0.0001f) { allTied = false; break; }
+
+            if (allTied) return false; // gak ada gear yang condong ke class manapun
+
+            classIndex = bestIdx;
+            margin = values[bestIdx];
+            return true;
+        }
+
+        // Cek lengkap syarat summon: deteksi class dari gear, lalu hitung senjata unik class itu
+        // aja (dari held item + inventory utama slot 0-49, sumbernya sama kayak ScanAndSelectWeapon
+        // di bawah, dengan filter IsWeaponItem/BannedWeapons yang sama juga biar konsisten sama
+        // senjata yang beneran bisa dipilih carousel-nya). Balikin true kalau syarat terpenuhi;
+        // kalau nggak, `failMessage` udah diisi teks siap-tampil ke player yang ngejelasin
+        // alasannya (belum ada gear class jelas, ATAU class X kedeteksi tapi senjatanya masih
+        // kurang dari RequiredWeaponsForDetectedClass).
+        internal static bool TryCheckWeaponRequirement(Player player, out string failMessage)
+        {
+            failMessage = null;
+
+            if (!TryDetectPlayerClass(player, out int classIndex, out _))
+            {
+                failMessage = "The Perfect Mirror can't read your intent - equip a class-focused armor set or accessories first (Melee/Ranged/Magic/Summon).";
+                return false;
+            }
+
+            string label = WeaponClassChecks[classIndex].label;
+            var matches = WeaponClassChecks[classIndex].matches;
+            var unique = new HashSet<int>();
+
+            void Tally(Item item)
+            {
+                if (item == null || !IsWeaponItem(item) || BannedWeapons.Contains(item.type)) return;
+                if (matches(item)) unique.Add(item.type);
+            }
+
+            if (player.selectedItem >= 0 && player.selectedItem < player.inventory.Length)
+                Tally(player.inventory[player.selectedItem]);
+            for (int i = 0; i < 50 && i < player.inventory.Length; i++)
+                Tally(player.inventory[i]);
+
+            if (unique.Count < RequiredWeaponsForDetectedClass)
+            {
+                failMessage = $"The Perfect Mirror senses you're built for {label}, but you only carry {unique.Count}/{RequiredWeaponsForDetectedClass} different {label} weapons.";
+                return false;
+            }
+
+            return true;
+        }
+
         // ======================== WEAPON SCANNING ========================
         private void ScanAndSelectWeapon(Player player)
         {
@@ -432,15 +570,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 weaponPool.Clear();
                 HashSet<int> unique = new HashSet<int>();
 
-                bool IsTool(Item item)
-                {
-                    if (item == null || item.IsAir) return false;
-                    if (item.pick > 0 || item.axe > 0 || item.hammer > 0 || item.tileBoost > 0) return true;
-                    return false;
-                }
-
                 Item held = player.inventory[player.selectedItem];
-                if (held != null && !held.IsAir && held.damage > 0 && !BannedWeapons.Contains(held.type) && !IsTool(held))
+                if (IsWeaponItem(held) && !BannedWeapons.Contains(held.type))
                 {
                     bool isTome = held.Name == "Tome of Eclipsa" || (held.ModItem != null && held.ModItem.Name == "TomeOfEclipsa");
                     if (!isTome) { Item w = new Item(); w.SetDefaults(held.type); weaponPool.Add(w); unique.Add(held.type); }
@@ -449,7 +580,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 for (int i = 0; i < 50; i++)
                 {
                     Item item = player.inventory[i];
-                    if (item == null || item.IsAir || item.damage <= 0 || BannedWeapons.Contains(item.type) || IsTool(item)) continue;
+                    if (!IsWeaponItem(item) || BannedWeapons.Contains(item.type)) continue;
                     if (item.Name == "Tome of Eclipsa" || (item.ModItem != null && item.ModItem.Name == "TomeOfEclipsa")) continue;
                     if (item.CountsAsClass(DamageClass.Summon) && !(item.shoot > 0 && ProjectileID.Sets.IsAWhip[item.shoot])) continue;
                     if (!unique.Contains(item.type)) { Item w = new Item(); w.SetDefaults(item.type); weaponPool.Add(w); unique.Add(item.type); }
@@ -546,23 +677,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             isTrueMelee = false;
             if (activeWeapon != null && !activeWeapon.IsAir && activeWeapon.type != ItemID.None)
             {
-                if (activeWeapon.useStyle == ItemUseStyleID.HoldUp && activeWeapon.shoot > 0 && !ProjectileID.Sets.IsAWhip[activeWeapon.shoot]) { currentArchetype = WeaponArchetype.Yoyo; return; }
-                if (activeWeapon.useStyle == ItemUseStyleID.Swing && activeWeapon.shoot > 0)
-                {
-                    int t = activeWeapon.shoot;
-                    if (t == ProjectileID.EnchantedBoomerang || t == ProjectileID.LightDisc || t == ProjectileID.Bananarang || t == ProjectileID.ThornChakram || t == ProjectileID.FruitcakeChakram || t == ProjectileID.IceBoomerang || t == ProjectileID.Flamarang || t == ProjectileID.WoodenBoomerang) { currentArchetype = WeaponArchetype.Boomerang; return; }
-                }
-                if (activeWeapon.shoot > 0 && ProjectileID.Sets.IsAWhip[activeWeapon.shoot]) currentArchetype = WeaponArchetype.Whip;
-                else if (activeWeapon.CountsAsClass(DamageClass.Ranged)) currentArchetype = WeaponArchetype.Ranged;
-                else if (activeWeapon.CountsAsClass(DamageClass.Magic)) currentArchetype = WeaponArchetype.Magic;
-                else if (activeWeapon.CountsAsClass(DamageClass.Summon)) currentArchetype = WeaponArchetype.Summon;
-                else
-                {
-                    bool swing = activeWeapon.useStyle == ItemUseStyleID.Swing;
-                    bool hasProj = activeWeapon.shoot > 0;
-                    if (swing && !hasProj) { currentArchetype = WeaponArchetype.TrueMelee; isTrueMelee = true; }
-                    else currentArchetype = WeaponArchetype.ProjMelee;
-                }
+                currentArchetype = ResolveArchetypeForItem(activeWeapon);
+                isTrueMelee = currentArchetype == WeaponArchetype.TrueMelee;
             }
         }
 
@@ -736,6 +852,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void FireAttackProjectileAimed(Player target, Vector2 aim)
         {
+            if (activeWeapon != null && CustomWeaponFireOverrides.TryGetValue(activeWeapon.type, out var customFire))
+            {
+                try { customFire(this, target); }
+                catch (Exception ex) { Mod.Logger.WarnFormat("CustomWeaponFire override for {0} threw: {1}", activeWeapon.type, ex); }
+                return;
+            }
             int dmg = CalculateScaledDamage(activeWeapon);
             float speed = activeWeapon.shootSpeed > 0 ? activeWeapon.shootSpeed : 11f;
             Vector2 vel = aim * speed;

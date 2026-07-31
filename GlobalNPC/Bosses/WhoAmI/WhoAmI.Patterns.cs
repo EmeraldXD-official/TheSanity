@@ -876,13 +876,37 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         else
                         {
+                            // FIX: "Index was outside the bounds of the array" crashes + projectiles
+                            // silently vanishing whenever the boss channels a Magic weapon. This used
+                            // to write target.Center.X/Y straight into p.ai[0]/p.ai[1] every tick,
+                            // assuming EVERY magic projectile type stores a "homing target world
+                            // position" there. That's only true for a handful of vanilla types -
+                            // for most, ai[0]/ai[1] mean something else entirely (frame/stage
+                            // counters, charge level), and for vanilla's actual homing-style AIs
+                            // ai[0] specifically holds the TARGET'S NPC ARRAY INDEX (an int like
+                            // 0-199), not a coordinate. Dumping a raw world-space X (often in the
+                            // thousands) into that slot made vanilla's own AI do something like
+                            // Main.npc[(int)projectile.ai[0]] with a wildly out-of-range index ->
+                            // IndexOutOfRangeException, killing the projectile mid-update (hence it
+                            // "disappearing") right as the crash happened.
+                            // Fix: don't touch ai[] at all (its layout isn't ours to assume) - steer
+                            // velocity directly toward the target instead, which gives the same
+                            // "tracks the player while channeled" feel and is safe for any projectile
+                            // type regardless of its internal AI.
                             for (int i = 0; i < Main.maxProjectiles; i++)
                             {
                                 Projectile p = Main.projectile[i];
                                 if (p.active && p.owner == proxySlot && p.type == activeWeapon.shoot)
                                 {
-                                    p.ai[0] = target.Center.X;
-                                    p.ai[1] = target.Center.Y;
+                                    Vector2 toTarget = target.Center - p.Center;
+                                    if (toTarget != Vector2.Zero)
+                                    {
+                                        float speed = p.velocity.Length();
+                                        if (speed < 0.01f) speed = activeWeapon.shootSpeed > 0 ? activeWeapon.shootSpeed : 11f;
+                                        toTarget.Normalize();
+                                        p.velocity = Vector2.Lerp(p.velocity, toTarget * speed, 0.08f);
+                                        p.rotation = p.velocity.ToRotation();
+                                    }
                                 }
                             }
                             if (aiTimer > 60) { isCurrentlyChanneling = false; aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
@@ -998,13 +1022,27 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         else
                         {
+                            // Same fix as the Phase 2 case 0 branch above (see the full explanation
+                            // there): don't clobber p.ai[0]/ai[1] with raw world coordinates, since
+                            // that field means something else for most magic projectile types and,
+                            // for vanilla homing AIs specifically, holds an NPC array index - writing
+                            // a coordinate there caused IndexOutOfRangeException crashes and the
+                            // projectile dying (disappearing) the instant it happened. Steer velocity
+                            // toward the target instead - safe for any projectile type.
                             for (int i = 0; i < Main.maxProjectiles; i++)
                             {
                                 Projectile p = Main.projectile[i];
                                 if (p.active && p.owner == proxySlot && p.type == activeWeapon.shoot)
                                 {
-                                    p.ai[0] = target.Center.X;
-                                    p.ai[1] = target.Center.Y;
+                                    Vector2 toTarget = target.Center - p.Center;
+                                    if (toTarget != Vector2.Zero)
+                                    {
+                                        float speed = p.velocity.Length();
+                                        if (speed < 0.01f) speed = activeWeapon.shootSpeed > 0 ? activeWeapon.shootSpeed : 11f;
+                                        toTarget.Normalize();
+                                        p.velocity = Vector2.Lerp(p.velocity, toTarget * speed, 0.08f);
+                                        p.rotation = p.velocity.ToRotation();
+                                    }
                                 }
                             }
                             if (aiTimer > 90) { isCurrentlyChanneling = false; aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
