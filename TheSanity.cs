@@ -10,6 +10,10 @@ namespace TheSanity
 	// Please read https://github.com/tModLoader/tModLoader/wiki/Basic-tModLoader-Modding-Guide#mod-skeleton-contents for more information about the various files in a mod.
 	public class TheSanity : Mod
 	{
+		public override void PostSetupContent()
+		{
+			global::TheSanity.GlobalNPC.Bosses.WhoAmI.WhoAmI.RegisterCustomWeaponOverrides();
+		}
 
 	}
 
