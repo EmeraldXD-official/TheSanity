@@ -41,8 +41,11 @@ namespace TheSanity.Structure
         {
             progress.Message = "Constructing Starter House...";
 
-            int structureWidth = 38;
-            int structureHeight = 51;
+            // FIXED: ukuran asli file StarterHouseReal2.shstruct adalah 51 (lebar) x 38 (tinggi),
+            // sebelumnya tertukar (38x51) sehingga area clearing/fondasi/frame-update tidak
+            // pas dengan struktur asli.
+            int structureWidth = 51;
+            int structureHeight = 38;
 
             int startX = Main.maxTilesX / 2 - (structureWidth / 2); 
             
@@ -91,7 +94,15 @@ namespace TheSanity.Structure
 
             // Generate Rumah dari File .shstruct
             Point16 position = new Point16(startX, finalY);
-            Generator.GenerateStructure("Structure/StarterHouseReal2", position, Mod);
+            try
+            {
+                Generator.GenerateStructure("Structure/StarterHouseReal2", position, Mod);
+            }
+            catch (System.Exception ex)
+            {
+                Mod.Logger.Error($"[SpawnStructureSystem] EXCEPTION saat generate 'Structure/StarterHouseReal2' di ({startX},{finalY}): {ex}. " +
+                    "Rumah starter TIDAK akan muncul dan posisi spawn player kemungkinan salah.");
+            }
 
             // =========================================================================
             // [GUIDE 4: PONDASI OTOMATIS BAWAH RUMAH (FIXED UNTUK PLANTS)]

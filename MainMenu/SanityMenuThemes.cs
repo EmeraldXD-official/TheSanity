@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Content;
 using Terraria;
 using Terraria.ModLoader;
+using TheSanity.Content.Skies;
 
 namespace TheSanity.MainMenu
 {
@@ -25,8 +26,10 @@ namespace TheSanity.MainMenu
 
         public override bool PreDrawLogo(SpriteBatch spriteBatch, ref Vector2 logoDrawCenter, ref float logoRotation, ref float logoScale, ref Color logoColor)
         {
-            Texture2D bgTex = ModContent.Request<Texture2D>("TheSanity/MainMenu/RealityBG").Value;
-            spriteBatch.Draw(bgTex, new Rectangle(0, 0, Main.screenWidth, Main.screenHeight), Color.White);
+            // Background statis RealityBG diganti animasi background Pluto (gradient merah-hitam,
+            // scanline, pillar glow, planet + detak jantung, petir) yang sudah kita buat
+            // (sama gayanya dengan PlutoBackgroundSky, cuma versi khusus menu -> lihat PlutoMenuBackground.cs).
+            PlutoMenuBackground.Draw(spriteBatch);
             logoColor = Color.White;
             return true;
         }
@@ -77,8 +80,9 @@ namespace TheSanity.MainMenu
 
         public override bool PreDrawLogo(SpriteBatch spriteBatch, ref Vector2 logoDrawCenter, ref float logoRotation, ref float logoScale, ref Color logoColor)
         {
-            Texture2D bgTex = ModContent.Request<Texture2D>("TheSanity/MainMenu/TwilightBG").Value;
-            spriteBatch.Draw(bgTex, new Rectangle(0, 0, Main.screenWidth, Main.screenHeight), Color.White);
+            // Background statis TwilightBG diganti animasi galaxy spiral yang sudah kita buat
+            // (sama gayanya dengan GalaxySky, cuma versi khusus menu -> lihat GalaxyMenuBackground.cs).
+            GalaxyMenuBackground.Draw(spriteBatch);
             logoColor = Color.White;
             return true;
         }

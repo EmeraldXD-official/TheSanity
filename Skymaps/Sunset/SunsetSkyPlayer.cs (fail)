@@ -1,0 +1,46 @@
+using Terraria;
+using Terraria.Graphics.Effects;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace TheSanity.Content.Skies
+{
+    /// <summary>
+    /// Trigger untuk testing: background SunsetSky aktif selama player memakai Wood Helmet.
+    /// Sengaja dipisah dari Iron Helmet (yang dipakai GalaxySky) supaya kamu bisa test
+    /// dua background berbeda tanpa bentrok -- tinggal pakai head slot yang beda.
+    ///
+    /// Kalau nanti mau dipindah ke item modmu sendiri, tinggal ganti kondisi
+    /// "ItemID.WoodHelmet" di bawah menjadi ModContent.ItemType&lt;YourCustomHelmet&gt;().
+    /// </summary>
+    public class SunsetSkyPlayer : ModPlayer
+    {
+        private const string SkyKey = "TheSanity:SunsetSky";
+        private const string ShaderKey = "TheSanity:SunsetWater";
+
+        public override void PostUpdateEquips()
+        {
+            // Jaga-jaga kalau sky belum sempat terdaftar (misal timing Load())
+            if (SkyManager.Instance[SkyKey] == null)
+            {
+                SkyManager.Instance[SkyKey] = new SunsetSky();
+            }
+
+            bool wearingWoodHelmet = Player.armor[0].type == ItemID.WoodHelmet;
+            bool skyIsActive = SkyManager.Instance[SkyKey].IsActive();
+
+            if (wearingWoodHelmet && !skyIsActive)
+            {
+                SkyManager.Instance.Activate(SkyKey, Player.Center);
+                Filters.Scene.Activate(ShaderKey);
+            }
+            else if (!wearingWoodHelmet && skyIsActive)
+            {
+                SkyManager.Instance.Deactivate(SkyKey);
+                if (Filters.Scene[ShaderKey] != null)
+                    Filters.Scene[ShaderKey].Deactivate();
+            }
+        }
+
+    }
+}

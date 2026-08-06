@@ -39,8 +39,8 @@ namespace TheSanity.GlobalNPC.Enemy
 
             // [FROG NPC STATS BALANCING LOCATION]
             NPC.damage = 35;       
-            NPC.lifeMax = 400;     
-            NPC.defense = 10;      
+            NPC.lifeMax = 100;     
+            NPC.defense = 40;      
             
             NPC.noGravity = false;     
             NPC.noTileCollide = false; 

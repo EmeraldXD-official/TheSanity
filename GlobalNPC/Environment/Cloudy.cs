@@ -56,12 +56,15 @@ namespace TheSanity.NPCs
 
         public override float SpawnChance(NPCSpawnInfo spawnInfo)
         {
-            if (NPC.CountNPCS(Type) >= 150) 
+            // Catatan: Main.raining SENGAJA ga dicek di sini — hujan cuma syarat buat
+            // aktifin skill petir Cloudy (lihat AI()), bukan syarat spawn-nya.
+            int cap = Main.raining ? 60 : 30; // cap dikali 2 pas hujan
+            if (NPC.CountNPCS(Type) >= cap)
                 return 0f;
 
             if (spawnInfo.Player.ZoneSkyHeight || spawnInfo.Player.ZoneOverworldHeight)
-                return 900.0f;
-            
+                return 0.3f;
+
             return 0f;
         }
 
@@ -331,7 +334,12 @@ namespace TheSanity.NPCs
                     {
                         adaHookMenempel = true;
 
-                        if (playerHook.active && !playerHook.dead)
+                        // PENTING: hanya client pemilik player ini yang boleh menimpa posisi/velocity-nya.
+                        // NPC.AI() dieksekusi di SEMUA client (bukan cuma server/pemilik hook), jadi kalau
+                        // tidak dibatasi, client lain yang cuma "nonton" ikut menghitung ulang posisi player
+                        // tersebut secara lokal dan bentrok dengan update posisi asli yang datang dari jaringan
+                        // -> hasilnya player kelihatan diam/teleport-teleport di layar orang lain.
+                        if (playerHook.active && !playerHook.dead && playerHook.whoAmI == Main.myPlayer)
                         {
                             float jarakKeAwan = Vector2.Distance(playerHook.Center, NPC.Center);
                             if (jarakKeAwan < 54f)
@@ -685,8 +693,11 @@ namespace TheSanity.NPCs
         {
             if (Main.raining && (player.ZoneOverworldHeight || player.ZoneSkyHeight))
             {
-                spawnRate = 140;
-                maxSpawns = 6;
+                // "dikali 2": spawnRate makin KECIL = spawn makin sering, jadi dibagi 2
+                // (bukan dikali) supaya frekuensi spawn-nya beneran 2x lipat.
+                // maxSpawns (slot enemy) dikali 2 seperti biasa.
+                spawnRate /= 2;
+                maxSpawns *= 2;
             }
         }
     }

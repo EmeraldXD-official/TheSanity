@@ -11,6 +11,14 @@ namespace TheSanity.Mecanic
         // =========================================================================
         private void EnforceMasterOrLegendary()
         {
+            // PENGECUALIAN: Kalau world ini emang dibuat sebagai Journey Mode, jangan diapa-apain.
+            // Main.GameMode sendiri yang jadi penentu apakah ini world Journey (Creative), jadi
+            // dicek duluan sebelum dipaksa, supaya world Journey tetap Journey.
+            if (Main.GameMode == GameModeID.Creative)
+            {
+                return;
+            }
+
             // Cek apakah world saat ini menggunakan seed rahasia 'For The Worthy' atau 'Get Fixed Boi'
             if (Main.getGoodWorld || Main.zenithWorld)
             {
@@ -22,7 +30,8 @@ namespace TheSanity.Mecanic
             }
             else
             {
-                // Jika world biasa (Classic/Expert/Journey), paksa dan kunci langsung ke Master Mode (ID 2)
+                // Jika world biasa (Classic/Expert), paksa dan kunci langsung ke Master Mode (ID 2)
+                // Journey Mode sudah di-skip di atas.
                 Main.GameMode = GameModeID.Master;
             }
         }

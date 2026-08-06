@@ -1,0 +1,18 @@
+using Microsoft.Xna.Framework.Graphics;
+using ReLogic.Content;
+using Terraria.Graphics.Shaders;
+
+namespace TheSanity.Content.Skies
+{
+    /// <summary>
+    /// Wrapper untuk SunsetWater.fx. Posisi horizon di-hardcode langsung di dalam .fx (lihat
+    /// komentar di SunsetWater.fx), jadi class ini juga tidak perlu override Update() -- uTime
+    /// dan uIntensity sudah otomatis di-set tiap frame oleh engine.
+    /// </summary>
+    public class SunsetShaderData : ScreenShaderData
+    {
+        public SunsetShaderData(Asset<Effect> shader, string passName) : base(shader, passName)
+        {
+        }
+    }
+}

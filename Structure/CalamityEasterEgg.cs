@@ -70,8 +70,10 @@ namespace TheSanity.GlobalNPCs
         // =========================================================================
         private void GenerateCalamityLantern()
         {
-            int structureWidth = 55;
-            int structureHeight = 42;
+            // FIXED: ukuran asli file ForgottenCalamityLantern.shstruct adalah 42 (lebar) x 55 (tinggi),
+            // sebelumnya tertukar (55x42) sehingga posisi X/Y hasil generate meleset.
+            int structureWidth = 42;
+            int structureHeight = 55;
 
             int startX = 0;
             int startY = 0;
@@ -112,7 +114,17 @@ namespace TheSanity.GlobalNPCs
             Point16 placePoint = new Point16(placementX, placementY);
             string structurePath = "Structure/ForgottenCalamityLantern";
 
-            Generator.GenerateStructure(structurePath, placePoint, Mod);
+            // Catatan: GenerateStructure() di versi API ini return-nya void, jadi kita
+            // bungkus try/catch supaya kalau ada exception tetap ketahuan dari log.
+            try
+            {
+                Generator.GenerateStructure(structurePath, placePoint, Mod);
+            }
+            catch (System.Exception ex)
+            {
+                Mod.Logger.Error($"[CalamityEasterEgg] EXCEPTION saat generate '{structurePath}' di ({placementX},{placementY}): {ex}");
+                return; // jangan update frame kalau strukturnya sendiri gagal dibuat
+            }
 
             // =========================================================================
             // UPDATE FRAME (Mencegah Glitch Cat/Painting)

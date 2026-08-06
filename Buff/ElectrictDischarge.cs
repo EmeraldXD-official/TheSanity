@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.ID;
 using Terraria.ModLoader;
+using TheSanity.GlobalNPC.Bosses.Pluto.PlutoExtra; // Namespace partikel PlutoAbstract
 
 namespace TheSanity.Buff
 {
@@ -42,12 +43,9 @@ namespace TheSanity.Buff
         public override void UpdateLifeRegen() {
             if (!HasElectricDischarge) return;
 
-            // -----------------------------------------------------------------
-            // 🛑 [LOKASI BALANCING DAMAGE PLAYER]
             // Terraria menghitung lifeRegen dengan perbandingan: 2 poin = 1 HP/Detik.
-            // -----------------------------------------------------------------
-            bool isMoving = Player.velocity.LengthSquared() > 0.01f; // Deteksi pergerakan player
-            int hpLossPerSecond = isMoving ? 40 : 20; // <-- UBAH DI SINI: HP dikurang per detik (Gerak : Diam)
+            bool isMoving = Player.velocity.LengthSquared() > 0.01f;
+            int hpLossPerSecond = isMoving ? 40 : 20;
 
             if (Player.lifeRegen > 0) Player.lifeRegen = 0;
             Player.lifeRegenTime = 0;
@@ -55,52 +53,41 @@ namespace TheSanity.Buff
             Player.lifeRegen -= hpLossPerSecond * 2; 
         }
 
-        // 🌟 [VISUAL EFEK & PARTIKEL PLAYER - FIXED]
+        // 🌟 [VISUAL EFEK & PARTIKEL PLAYER - PLUTOABSTRACT RADIUS 5 BLOCK]
         public override void PostUpdate() {
             if (!HasElectricDischarge) return;
 
-            // 💡 Memberikan aura cahaya lampu neon Pink/Magenta di sekitar player
-            Lighting.AddLight(Player.Center, 0.6f, 0.1f, 0.5f);
+            // Aura cahaya merah neon di sekitar player
+            Lighting.AddLight(Player.Center, 0.8f, 0.1f, 0.2f);
 
-            // ⚡ Efek Petir Electrified (Light Blue/Cyan)
-            if (Main.rand.NextBool(3)) { // <-- UBAH DI SINI: Peluang muncul (1 banding X)
-                int dustElec = Dust.NewDust(Player.position, Player.width, Player.height, DustID.Electric, 0f, 0f, 100, default, 0.7f); // <-- 0.7f adalah ukuran partikel
-                Main.dust[dustElec].noGravity = true;
-                Main.dust[dustElec].velocity *= 0.6f; // Kecepatan gerak partikel petir
-            }
+            // 🔴 SPAWN PARTIKEL MENYEBAR HINGGA 5 BLOCK (80 PIXEL) DARI PUSAT
+            if (Main.rand.NextBool(2)) {
+                // 5 Block = 80 Pixel (1 Block = 16 Pixel)
+                Vector2 offset = Main.rand.NextVector2Circular(80f, 80f); 
+                Vector2 spawnPos = Player.Center + offset;
 
-            // 🌸 Efek Bonus Partikel Pink Gemerlap
-            if (Main.rand.NextBool(4)) { 
-                int dustPink = Dust.NewDust(Player.position, Player.width, Player.height, DustID.PinkTorch, 0f, 0f, 80, default, 1.1f);
-                Main.dust[dustPink].noGravity = true;
-                Main.dust[dustPink].velocity.Y -= 1.2f; // Membuat partikel pink sedikit melayang ke atas
-                Main.dust[dustPink].velocity.X *= 0.8f;
+                // Kecepatan terdorong menjauh dari titik pusat Player
+                Vector2 velocity = offset.SafeNormalize(Vector2.Zero) * Main.rand.NextFloat(1f, 3.5f);
+                float scale = Main.rand.NextFloat(0.5f, 1.2f);
+                int lifetime = Main.rand.Next(20, 35);
+
+                new PlutoAbstract(spawnPos, velocity, Color.Red, scale, lifetime).Spawn();
             }
         }
 
-        // Efek serangan masuk dari NPC (Sentuhan fisik/Contact Damage)
         public override void ModifyHitByNPC(NPC npc, ref Player.HurtModifiers modifiers) {
             if (HasElectricDischarge) {
-                // -------------------------------------------------------------
-                // 📈 [LOKASI BALANCING MULTIPLIER PLAYER]
-                // -------------------------------------------------------------
-                modifiers.IncomingDamageMultiplier *= 1.30f; // <-- UBAH DI SINI: +30% More Damage
+                modifiers.IncomingDamageMultiplier *= 1.30f; // +30% More Damage
                 
-                // 🛡️ [IGNORE DEFENSE & REDUCTION PLAYER]
                 Player.statDefense = default;
                 Player.endurance = 0f; 
             }
         }
 
-        // Efek serangan masuk dari Projectile musuh (Peluru/Laser/Sihir)
         public override void ModifyHitByProjectile(Projectile proj, ref Player.HurtModifiers modifiers) {
             if (HasElectricDischarge) {
-                // -------------------------------------------------------------
-                // 📈 [LOKASI BALANCING MULTIPLIER PLAYER]
-                // -------------------------------------------------------------
-                modifiers.IncomingDamageMultiplier *= 1.30f; // <-- UBAH DI SINI: +30% More Damage dari proyektil
+                modifiers.IncomingDamageMultiplier *= 1.30f; // +30% More Damage
                 
-                // 🛡️ [IGNORE DEFENSE & REDUCTION PLAYER]
                 Player.statDefense = default;
                 Player.endurance = 0f;
             }
@@ -122,12 +109,8 @@ namespace TheSanity.Buff
         public override void UpdateLifeRegen(NPC npc, ref int damage) {
             if (!HasElectricDischarge) return;
 
-            // -----------------------------------------------------------------
-            // 🛑 [LOKASI BALANCING DAMAGE NPC]
-            // 2 poin lifeRegen = 1 HP/Detik untuk NPC.
-            // -----------------------------------------------------------------
             bool isMoving = npc.velocity.LengthSquared() > 0.01f; 
-            int npcHpLossPerSecond = isMoving ? 4000 : 2000; // <-- UBAH DI SINI: HP musuh berkurang per detik (Gerak : Diam)
+            int npcHpLossPerSecond = isMoving ? 4000 : 2000;
 
             if (npc.lifeRegen > 0) npc.lifeRegen = 0;
             
@@ -138,47 +121,44 @@ namespace TheSanity.Buff
             }
         }
 
-        // 🌟 [VISUAL EFEK & PARTIKEL NPC]
+        // 🌟 [VISUAL EFEK & PARTIKEL NPC - PLUTOABSTRACT RADIUS 5 BLOCK]
         public override void DrawEffects(NPC npc, ref Color drawColor) {
             if (!HasElectricDischarge) return;
 
-            // 💡 Memberikan aura cahaya lampu neon Pink/Magenta di sekitar NPC musuh
-            Lighting.AddLight(npc.Center, 0.7f, 0.1f, 0.6f);
+            // Aura cahaya merah neon di sekitar NPC
+            Lighting.AddLight(npc.Center, 0.8f, 0.1f, 0.2f);
 
-            // ⚡ Efek Petir Electrified pada NPC
-            if (Main.rand.NextBool(3)) {
-                int dustElec = Dust.NewDust(npc.position, npc.width, npc.height, DustID.Electric, 0f, 0f, 100, default, 0.7f);
-                Main.dust[dustElec].noGravity = true;
-                Main.dust[dustElec].velocity *= 0.6f;
+            // 🔴 SPAWN PARTIKEL MENYEBAR HINGGA 5 BLOCK (80 PIXEL) DARI PUSAT
+            if (Main.rand.NextBool(2)) {
+                // 5 Block = 80 Pixel (1 Block = 16 Pixel)
+                Vector2 offset = Main.rand.NextVector2Circular(80f, 80f); 
+                Vector2 spawnPos = npc.Center + offset;
+
+                // Kecepatan terdorong menjauh dari titik pusat NPC
+                Vector2 velocity = offset.SafeNormalize(Vector2.Zero) * Main.rand.NextFloat(1f, 3.5f);
+                float scale = Main.rand.NextFloat(0.5f, 1.2f);
+                int lifetime = Main.rand.Next(20, 35);
+
+                new PlutoAbstract(spawnPos, velocity, Color.Red, scale, lifetime).Spawn();
             }
 
-            // 🌸 Efek Bonus Partikel Pink pada NPC
-            if (Main.rand.NextBool(4)) {
-                int dustPink = Dust.NewDust(npc.position, npc.width, npc.height, DustID.PinkTorch, 0f, 0f, 80, default, 1.2f);
-                Main.dust[dustPink].noGravity = true;
-                Main.dust[dustPink].velocity *= 1.1f; 
-            }
-
-            // 🎨 Memberikan sedikit sentuhan warna pink/ungu langsung pada sprite badan NPC
-            drawColor.R = (byte)(drawColor.R * 0.9f);
-            drawColor.G = (byte)(drawColor.G * 0.6f); 
-            drawColor.B = (byte)(drawColor.B * 1.1f);
+            // Warna merah glowing pada badan NPC
+            drawColor.R = (byte)Math.Min(255, drawColor.R * 1.3f);
+            drawColor.G = (byte)(drawColor.G * 0.5f); 
+            drawColor.B = (byte)(drawColor.B * 0.5f);
         }
 
         public override void ModifyHitByItem(NPC npc, Player player, Item item, ref NPC.HitModifiers modifiers) {
             if (HasElectricDischarge) {
-                // -------------------------------------------------------------
-                // 📈 [LOKASI BALANCING MULTIPLIER & IGNORE DEFENSE NPC]
-                // -------------------------------------------------------------
-                modifiers.FinalDamage *= 1.60f; // <-- UBAH DI SINI: +60% damage diterima musuh
-                modifiers.Defense *= 0f;        // <-- Mengabaikan Defense NPC total
+                modifiers.FinalDamage *= 1.60f; // +60% damage diterima musuh
+                modifiers.Defense *= 0f;        // Mengabaikan Defense NPC
             }
         }
 
         public override void ModifyHitByProjectile(NPC npc, Projectile projectile, ref NPC.HitModifiers modifiers) {
             if (HasElectricDischarge) {
-                modifiers.FinalDamage *= 1.60f; // <-- UBAH DI SINI: +60% damage diterima musuh
-                modifiers.Defense *= 0f;        // <-- Mengabaikan Defense NPC total
+                modifiers.FinalDamage *= 1.60f; // +60% damage diterima musuh
+                modifiers.Defense *= 0f;        // Mengabaikan Defense NPC
             }
         }
     }

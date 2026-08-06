@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<XnaContent xmlns:Graphics="ReLogic.Content.Pipeline">
+  <Asset Type="Graphics:DynamicFontDescription">
+
+    <!--
+    🛑 [NAMA INTERNAL FONT] Ini WAJIB sama persis kayak nama family yang tertanam di dalem file
+    TTF-nya (dicek langsung dari name table font-nya, BUKAN dari nama file "HerrFochGradient-lLYD.ttf").
+    Nama family aslinya: "HerrFoch Gradient".
+
+    Karena .dynamicfont ini di-compile pas build mod (content pipeline nyari font ini dari yang
+    ke-install di OS build machine), font TTF-nya HARUS di-install dulu di Windows/system font
+    sebelum kamu build modnya, biar compiler nemuin "HerrFoch Gradient" ini. Ini logic bawaan
+    tModLoader buat .dynamicfont, bukan raw-embed .ttf langsung.
+    -->
+    <FontName>HerrFoch Gradient</FontName>
+
+    <!--
+    Size dasar font (points). Dipake buat generate atlas glyph-nya. Nilai gede biar teks boss
+    intro yang di-scale-up (title "Mechanical Collapse") tetep tajam pas di-draw gede di layar.
+    -->
+    <Size>72</Size>
+
+    <Spacing>0</Spacing>
+
+    <UseKerning>true</UseKerning>
+
+    <Style>Regular</Style>
+
+    <DefaultCharacter>*</DefaultCharacter>
+
+    <VerticalOffset>DefaultFontAscent</VerticalOffset>
+
+    <CharacterRegions>
+      <!-- Basic Latin + Latin-1 Supplement, udah cukup buat "Mechanical Collapse" & "XL-08 Pluto" -->
+      <CharacterRegion>
+        <Start>&#x20;</Start>
+        <End>&#xFF;</End>
+      </CharacterRegion>
+    </CharacterRegions>
+
+  </Asset>
+</XnaContent>

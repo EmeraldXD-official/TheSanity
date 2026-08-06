@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using ReLogic.Content;
@@ -16,30 +17,47 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
     // TANPA perlu kita utak-atik render sun/moon manual sama sekali.
     //
     // Aktivasi/nonaktivasi diatur dari PlutoBackgroundSystem.cs (ModSystem terpisah), yang
-    // sekarang nyalain sky ini PERSIS pas Pluto roar di Spawn Animation (Pattern 9, lihat
-    // PlutoSpawnDash.cs) -- bukan dari awal Pluto ke-spawn.
+    // nyalain sky ini PERSIS pas Pluto roar di Spawn Animation (Pattern 9, lihat PlutoSpawnDash.cs)
+    // -- bukan dari awal Pluto ke-spawn.
     //
-    // 🛑 [REVEAL "WUSH" DARI TENGAH] SESUAI REQUEST: begitu sky ini aktif, Planet Pluto POP duluan
+    // 🛑 [RALAT - ANTI SUNDIAL] SEMUA timer/animasi di file ini (rotasi planet, detak jantung,
+    // petir, scanline gunung, dll) SEKARANG jalan berdasarkan WAKTU NYATA (real wall-clock time,
+    // lewat Stopwatch manual), BUKAN dari `gameTime.ElapsedGameTime` bawaan Update(). Alasannya:
+    // pas dipercepat pakai Enchanted Sundial, method Update() CustomSky ini bisa kepanggil
+    // berkali-kali dalam waktu nyata yang SANGAT SINGKAT (buat nyimulasiin lompatan waktu ke pagi),
+    // dan kalau kita percaya `gameTime.ElapsedGameTime` di tiap panggilan itu, hasilnya animasi
+    // jadi keliatan dipercepat gila-gilaan (numpuk semua elapsed time yang "disimulasikan" itu).
+    // Dengan Stopwatch manual, delta yang dihitung SELALU cuma sebesar waktu NYATA yang beneran
+    // lewat antar panggilan Update() -- jadi kalau Update() dipanggil berkali-kali dalam sepersekian
+    // detik nyata (efek si Sundial), delta-nya otomatis jadi kecil/nol, animasi TETAP jalan normal
+    // ga ikut kepercepat.
+    //
+    // 🛑 [REVEAL "WUSH" DARI TENGAH] Begitu sky ini aktif, Planet Pluto POP duluan
     // (planetPopElapsed, bounce kecil), abis itu SEDIKIT jeda (RevealStartDelay) baru background-
-    // nya "wush" nyebar CEPAT dari titik tengah layar ke seluruh layar (revealElapsed, dipakai buat
-    // nge-gate grid cell background berdasarkan jarak ke tengah -- lihat DrawGradientBackground).
-    // Efek radial ini CUMA jalan selama window transient reveal-nya (~RevealDuration detik), abis
-    // itu balik gambar strip biasa (murah, sama kayak versi lama) karena udah full ke-reveal.
+    // nya "wush" nyebar CEPAT dari titik tengah layar ke seluruh layar (revealElapsed).
     //
-    // 🛑 [PETIR - REWRITE TOTAL] Dulu petir digambar manual pakai garis zig-zag (midpoint
-    // displacement). SEKARANG pakai 2 sprite: PluFlash.png (boleh dirotate acak) & PluBolt.png
-    // (TIDAK dirotate, "biarin aja" sesuai orientasi asli-nya) -- keduanya di-recolor MERAH (di
-    // file asli warnanya biru) lewat tint Color + additive blend, ukuran macem-macem tapi
-    // dibatasin biar ga gede-gede banget, dan lokasi spawn-nya RANDOM di seluruh langit (bukan
-    // cuma dari atas doang kayak sebelumnya).
+    // 🛑 [DETAK JANTUNG - PlutoPulse.png] Tiap beberapa detik, dari BELAKANG sprite planet muncul
+    // gelombang merah yang nyebar, BARENGAN itu si Planet ikut "berdetak" (scale kedut sesaat).
     //
-    // 🛑 [LAUT DARAH] Ditambahin lapisan gelombang sinus animasi di bagian bawah layar (reuse
-    // helper DrawLine yang sama dipakai gambar petir), numpuk beberapa layer beda kecepatan/
-    // amplitudo biar keliatan berlapis kek permukaan lautan darah yang bergerak pelan.
+    // 🛑 [PLANET SEKARANG PARALLAX - NGIKUTIN PLAYER] SESUAI REQUEST: planet BUKAN lagi nempel
+    // statis pas persis di tengah layar terus -- sekarang dia geser dikit ngikutin arah gerak
+    // player (lihat parallaxAnchor & GetPlanetParallaxOffset), kek efek depth background biasa,
+    // TAPI di-clamp jaraknya (PlanetParallaxMaxOffset) biar ga kebablasan jauh dari tengah kalau
+    // player lari jauh banget pas fight. PlutoPulse ikut kegeser bareng planet (biar tetep nempel
+    // pas di belakangnya).
     //
-    // 🛑 [ASET YANG PERLU DITAMBAHIN MANUAL] taruh 2 file ini di:
+    // 🛑 [RALAT - MOUNTAIN DIHAPUS] Layer PlutoMountain.png DIHAPUS TOTAL sesuai request. Efek
+    // scanline yang tadinya nyapu di sprite gunung itu SEKARANG dipindah ke BACKGROUND UTAMA
+    // (lihat DrawBackgroundScan) -- garis terang nyapu dari ujung atas layar ke bawah berulang,
+    // dengan beberapa "ekor" fading di belakangnya, full-width layar.
+    //
+    // 🛑 [PETIR - PluFlash & PluBolt INDEPENDEN] Masing-masing punya timer & lokasi spawn sendiri,
+    // gak lagi nyambung/bareng kayak sebelumnya.
+    //
+    // 🛑 [ASET YANG PERLU DITAMBAHIN MANUAL] taruh 3 file ini di:
     //   TheSanity/GlobalNPC/Bosses/Pluto/PlutoBackground/PluFlash.png
     //   TheSanity/GlobalNPC/Bosses/Pluto/PlutoBackground/PluBolt.png
+    //   TheSanity/GlobalNPC/Bosses/Pluto/PlutoBackground/PlutoPulse.png    (96x96, putih polos)
     public class PlutoBackgroundSky : CustomSky
     {
         // Depth "background jauh" tempat sun/moon & sky vanilla lain digambar. Konvensi umum
@@ -49,13 +67,20 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
         private const string PlanetTexturePath = "TheSanity/GlobalNPC/Bosses/Pluto/PlutoBackground/plutoplanet";
         private const string FlashTexturePath = "TheSanity/GlobalNPC/Bosses/Pluto/PlutoBackground/PluFlash";
         private const string BoltTexturePath = "TheSanity/GlobalNPC/Bosses/Pluto/PlutoBackground/PluBolt";
+        private const string PulseTexturePath = "TheSanity/GlobalNPC/Bosses/Pluto/PlutoBackground/PlutoPulse";
 
-        // Muter searah jarum jam, PELAN -- ini radian per detik.
+        // Muter searah jarum jam, PELAN -- ini radian per detik (waktu NYATA, lihat catatan anti-Sundial).
         private const float PlanetRotationSpeed = 0.035f;
 
         private bool isActive = false;
         private bool wasActiveLastFrame = false;
         private float intensity = 0f; // 0 = full ilang, 1 = full nutupin layar (buat transisi fade in/out yg mulus)
+
+        // 🛑 [ANTI SUNDIAL] Stopwatch manual buat ngitung delta waktu NYATA antar panggilan
+        // Update(), independen total dari `gameTime` bawaan yang bisa "dipercepat" pas ada
+        // event kayak Enchanted Sundial.
+        private static readonly Stopwatch RealTimeClock = Stopwatch.StartNew();
+        private double lastRealTimeSeconds = -1d;
 
         // 🛑 [REVEAL "WUSH"] Lihat penjelasan panjang di komentar atas class.
         private const float PlanetPopDuration = 0.22f;   // planet pop duluan (bounce kecil)
@@ -66,23 +91,72 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
 
         private float planetRotation = 0f;
         private float pillarPulseTimer = 0f;
-        private float bloodOceanTimer = 0f;
+        private float backgroundScanTimer = 0f;
 
+        // 🛑 [PARALLAX PLANET] Titik acuan (posisi player world SAAT sky ini baru nyala) --
+        // pergeseran planet dihitung dari SEBERAPA JAUH player udah gerak dari titik ini, BUKAN
+        // dari posisi absolut player (biar selalu "fresh" mulai dari tengah tiap boss baru nyala).
+        private const float PlanetParallaxFactorX = 0.10f;
+        private const float PlanetParallaxFactorY = 0.05f;
+        private const float PlanetParallaxMaxOffset = 220f; // clamp biar ga geser kebablasan jauh
+        private Vector2 parallaxAnchor = Vector2.Zero;
+
+        // 🛑 [DETAK JANTUNG]
+        private const float PulseIntervalMin = 2.2f;
+        private const float PulseIntervalMax = 3.6f;
+        private const float PulseLifeDuration = 0.9f;   // berapa lama 1 gelombang nyebar sampai ilang
+        private const float PulseStartCoverage = 0.55f; // gelombang mulai dari ~55% lebar planet (dari belakangnya)
+        private const float PulseEndCoverage = 2.1f;    // nyebar sampai ~2.1x lebar planet
+        private const float BeatDuration = 0.45f;       // durasi 1 "kedutan" detak planet
+        private const float BeatStrength = 0.16f;       // seberapa kentara kedutannya (scale bump)
+        private float pulseSpawnTimer = 0f;
+        private float planetBeatTimer = 999f; // gede biar ga langsung "berdetak" di frame pertama
+        private readonly List<PulseWave> pulses = new();
+
+        // 🛑 [PETIR INDEPENDEN] Flash & Bolt masing-masing punya timer & list sendiri.
+        private const float FlashIntervalMin = 0.5f;
+        private const float FlashIntervalMax = 1.6f;
+        private const float BoltIntervalMin = 0.8f;
+        private const float BoltIntervalMax = 2.3f;
+        private float flashSpawnTimer = 0f;
         private float boltSpawnTimer = 0f;
-        private readonly List<LightningStrike> strikes = new();
+        private readonly List<FlashInstance> flashes = new();
+        private readonly List<BoltInstance> bolts = new();
+
+        // 🛑 [SCANLINE BACKGROUND UTAMA] Garis terang full-width yang nyapu dari atas ke bawah
+        // layar berulang-ulang (lihat DrawBackgroundScan) -- dulu ada di sprite gunung, sekarang
+        // dipindah ke background utama sesuai request.
+        private const float BackgroundScanCycleDuration = 3.2f; // detik buat 1 sapuan penuh atas->bawah
+        private const int BackgroundScanStripHeight = 18;       // tinggi garis scan (px layar)
+        private const int BackgroundScanTrailCount = 5;         // berapa "ekor" garis di belakangnya
+        private const float BackgroundScanTrailSpacing = 26f;   // jarak antar ekor (px layar)
 
         private Asset<Texture2D> planetAsset;
         private Asset<Texture2D> flashAsset;
         private Asset<Texture2D> boltAsset;
+        private Asset<Texture2D> pulseAsset;
 
-        private class LightningStrike
+        private class PulseWave
+        {
+            public float Life;
+            public float MaxLife;
+        }
+
+        private class FlashInstance
         {
             public Vector2 Position;
             public float Life;
             public float MaxLife;
-            public float FlashRotation;
-            public float FlashScale;
-            public float BoltScale;
+            public float Rotation;
+            public float Scale;
+        }
+
+        private class BoltInstance
+        {
+            public Vector2 Position;
+            public float Life;
+            public float MaxLife;
+            public float Scale;
         }
 
         public override void Activate(Vector2 position, params object[] args) {
@@ -99,7 +173,12 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
             intensity = 0f;
             planetPopElapsed = 0f;
             revealElapsed = 0f;
-            strikes.Clear();
+            planetBeatTimer = 999f;
+            backgroundScanTimer = 0f;
+            parallaxAnchor = Vector2.Zero;
+            pulses.Clear();
+            flashes.Clear();
+            bolts.Clear();
         }
 
         public override bool IsActive() => isActive || intensity > 0.001f;
@@ -111,8 +190,14 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
         public override float GetCloudAlpha() => MathHelper.Clamp(1f - intensity, 0f, 1f);
 
         public override void Update(GameTime gameTime) {
-            float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
-            if (dt <= 0f) return;
+            // 🛑 [ANTI SUNDIAL] dt DIHITUNG DARI STOPWATCH NYATA, BUKAN dari gameTime bawaan --
+            // lihat penjelasan panjang di komentar atas class kenapa ini penting.
+            double now = RealTimeClock.Elapsed.TotalSeconds;
+            if (lastRealTimeSeconds < 0d) lastRealTimeSeconds = now; // panggilan pertama, ga ada delta
+            float dt = (float)(now - lastRealTimeSeconds);
+            lastRealTimeSeconds = now;
+            if (dt <= 0f) return; // Update() nyusul kepanggil lagi dalam waktu nyata yg sama persis (efek Sundial) -- skip, jangan animasi maju sama sekali
+            if (dt > 0.5f) dt = 1f / 60f; // safety net kalau ada lag spike gede / baru pertama load
 
             // Fade in/out halus pas boss mulai/selesai, bukan langsung "creg" nyala/mati.
             float fadeSpeed = 1.2f * dt;
@@ -120,12 +205,16 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
                 ? MathHelper.Clamp(intensity + fadeSpeed, 0f, 1f)
                 : MathHelper.Clamp(intensity - fadeSpeed, 0f, 1f);
 
-            // 🛑 [RESET REVEAL] Begitu transisi dari "mati total" ke "baru nyala" kedeteksi, paksa
-            // planetPopElapsed & revealElapsed balik ke 0 -- biar reveal-nya selalu "fresh" tiap
-            // kali Pluto baru muncul lagi (bukan nyambung dari sisa progress sebelumnya).
+            // 🛑 [RESET REVEAL + PARALLAX ANCHOR] Begitu transisi dari "mati total" ke "baru nyala"
+            // kedeteksi, paksa semua progress balik ke 0 & re-anchor parallax ke posisi player
+            // SEKARANG -- biar reveal & parallax-nya selalu "fresh" tiap kali Pluto baru muncul.
             if (isActive && !wasActiveLastFrame) {
                 planetPopElapsed = 0f;
                 revealElapsed = 0f;
+                pulseSpawnTimer = Main.rand.NextFloat(0.6f, 1.2f); // pulse pertama ga langsung nyamber pas baru pop
+                planetBeatTimer = 999f;
+                backgroundScanTimer = 0f;
+                parallaxAnchor = Main.LocalPlayer.Center;
             }
             wasActiveLastFrame = isActive;
 
@@ -143,7 +232,9 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
             }
 
             if (intensity <= 0f) {
-                strikes.Clear();
+                flashes.Clear();
+                bolts.Clear();
+                pulses.Clear();
                 return;
             }
 
@@ -151,54 +242,73 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
             if (planetRotation > MathHelper.TwoPi) planetRotation -= MathHelper.TwoPi;
 
             pillarPulseTimer += dt * 1.3f;
-            bloodOceanTimer += dt;
+            planetBeatTimer += dt;
+            backgroundScanTimer += dt;
 
+            UpdatePulse(dt);
             UpdateLightning(dt);
         }
 
-        private void UpdateLightning(float dt) {
-            boltSpawnTimer -= dt;
-            if (boltSpawnTimer <= 0f) {
-                SpawnLightningStrike();
-                // Makin gede intensity (makin "masuk" ke fase boss), makin sering kilatnya nyamber.
-                boltSpawnTimer = MathHelper.Lerp(2.6f, 0.7f, intensity) * (0.5f + Main.rand.NextFloat());
+        // 🛑 [DETAK JANTUNG] Munculin gelombang PlutoPulse baru tiap PulseIntervalMin-Max detik,
+        // BARENGAN itu reset planetBeatTimer ke 0 biar planet ikut "berkedut" PERSIS di momen yang
+        // sama gelombangnya mulai nyebar (lihat GetHeartbeatBump).
+        private void UpdatePulse(float dt) {
+            pulseSpawnTimer -= dt;
+            if (pulseSpawnTimer <= 0f) {
+                pulses.Add(new PulseWave { Life = 0f, MaxLife = PulseLifeDuration });
+                planetBeatTimer = 0f;
+                pulseSpawnTimer = Main.rand.NextFloat(PulseIntervalMin, PulseIntervalMax);
             }
 
-            for (int i = strikes.Count - 1; i >= 0; i--) {
-                strikes[i].Life += dt;
-                if (strikes[i].Life >= strikes[i].MaxLife) strikes.RemoveAt(i);
+            for (int i = pulses.Count - 1; i >= 0; i--) {
+                pulses[i].Life += dt;
+                if (pulses[i].Life >= pulses[i].MaxLife) pulses.RemoveAt(i);
             }
         }
 
-        // 🛑 [LOKASI RANDOM LOKASI PETIR] SESUAI REQUEST: sekarang posisinya BENER-BENER random
-        // di seluruh area langit (bukan cuma dari atas & sekitar tengah doang kayak sebelumnya).
-        // Ukuran (scale) juga di-random tapi dibatasin biar ga gede-gede banget nutupin layar.
-        private void SpawnLightningStrike() {
+        // 🛑 [PETIR INDEPENDEN] Flash & Bolt sekarang punya timer & interval SENDIRI-SENDIRI,
+        // jadi kapan & di mana mereka nongol ga lagi nyambung satu sama lain.
+        private void UpdateLightning(float dt) {
             int w = Main.screenWidth;
             int h = Main.screenHeight;
-            if (w <= 0 || h <= 0) return;
 
-            Vector2 pos = new(
-                Main.rand.NextFloat(w * 0.05f, w * 0.95f),
-                Main.rand.NextFloat(h * 0.05f, h * 0.65f)
-            );
+            flashSpawnTimer -= dt;
+            if (flashSpawnTimer <= 0f && w > 0 && h > 0) {
+                flashes.Add(new FlashInstance {
+                    Position = new Vector2(Main.rand.NextFloat(w * 0.05f, w * 0.95f), Main.rand.NextFloat(h * 0.05f, h * 0.65f)),
+                    Life = 0f,
+                    MaxLife = Main.rand.NextFloat(0.30f, 0.50f),
+                    Rotation = Main.rand.NextFloat(0f, MathHelper.TwoPi), // Flash boleh muter bebas.
+                    Scale = Main.rand.NextFloat(0.35f, 0.80f),
+                });
+                flashSpawnTimer = MathHelper.Lerp(FlashIntervalMax, FlashIntervalMin, intensity) * (0.5f + Main.rand.NextFloat());
+            }
 
-            strikes.Add(new LightningStrike {
-                Position = pos,
-                Life = 0f,
-                MaxLife = Main.rand.NextFloat(0.35f, 0.55f),
-                // Flash boleh muter bebas -- SESUAI REQUEST.
-                FlashRotation = Main.rand.NextFloat(0f, MathHelper.TwoPi),
-                FlashScale = Main.rand.NextFloat(0.35f, 0.75f),
-                // Bolt TIDAK dirotate (dibiarin sesuai orientasi asli) -- SESUAI REQUEST.
-                BoltScale = Main.rand.NextFloat(0.30f, 0.60f),
-            });
+            boltSpawnTimer -= dt;
+            if (boltSpawnTimer <= 0f && w > 0 && h > 0) {
+                bolts.Add(new BoltInstance {
+                    Position = new Vector2(Main.rand.NextFloat(w * 0.05f, w * 0.95f), Main.rand.NextFloat(h * 0.05f, h * 0.65f)),
+                    Life = 0f,
+                    MaxLife = Main.rand.NextFloat(0.35f, 0.55f),
+                    Scale = Main.rand.NextFloat(0.30f, 0.65f), // Bolt TIDAK dirotate -- dibiarin sesuai orientasi asli.
+                });
+                boltSpawnTimer = MathHelper.Lerp(BoltIntervalMax, BoltIntervalMin, intensity) * (0.5f + Main.rand.NextFloat());
+            }
+
+            for (int i = flashes.Count - 1; i >= 0; i--) {
+                flashes[i].Life += dt;
+                if (flashes[i].Life >= flashes[i].MaxLife) flashes.RemoveAt(i);
+            }
+            for (int i = bolts.Count - 1; i >= 0; i--) {
+                bolts[i].Life += dt;
+                if (bolts[i].Life >= bolts[i].MaxLife) bolts.RemoveAt(i);
+            }
         }
 
         // Kurva "kedip ganda" khas kilat: nyambar cepet, sempet redup sekilas, nyambar lagi
-        // lebih kecil, baru fade abis. Bukan cuma naik-turun linear biasa.
-        private static float GetStrikeAlpha(LightningStrike s) {
-            float t = s.Life / s.MaxLife;
+        // lebih kecil, baru fade abis. Reusable buat Flash maupun Bolt.
+        private static float GetFlickerAlpha(float life, float maxLife) {
+            float t = life / maxLife;
             if (t < 0.12f) return t / 0.12f;
             if (t < 0.22f) return 1f - (t - 0.12f) / 0.10f;
             if (t < 0.30f) return (t - 0.22f) / 0.08f * 0.85f;
@@ -220,6 +330,26 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
             return 1f + c3 * (p * p * p) + c1 * (p * p);
         }
 
+        // 🛑 [DETAK JANTUNG] Kurva "kedutan" planet: naik cepet dari 0, balik turun ke 0 lagi
+        // dalam BeatDuration detik -- dikaliin BeatStrength jadi tambahan scale sesaat.
+        private static float GetHeartbeatBump(float beatTimer) {
+            if (beatTimer >= BeatDuration || beatTimer < 0f) return 0f;
+            float p = beatTimer / BeatDuration;
+            return MathF.Sin(p * MathHelper.Pi) * (1f - p);
+        }
+
+        // 🛑 [PARALLAX PLANET] Seberapa jauh planet digeser dari posisi tengah normalnya,
+        // berdasarkan seberapa jauh player udah gerak dari parallaxAnchor -- di-clamp biar ga
+        // kebablasan walau player lari jauh banget selagi fight.
+        private Vector2 GetPlanetParallaxOffset() {
+            Vector2 playerDelta = Main.LocalPlayer.Center - parallaxAnchor;
+            Vector2 offset = new(playerDelta.X * PlanetParallaxFactorX, playerDelta.Y * PlanetParallaxFactorY);
+            if (offset.LengthSquared() > PlanetParallaxMaxOffset * PlanetParallaxMaxOffset) {
+                offset = offset.SafeNormalize(Vector2.Zero) * PlanetParallaxMaxOffset;
+            }
+            return offset;
+        }
+
         public override void Draw(SpriteBatch spriteBatch, float minDepth, float maxDepth) {
             if (intensity <= 0.001f) return;
             if (minDepth > FarBackgroundDepth || maxDepth < FarBackgroundDepth) return;
@@ -227,11 +357,13 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
             int w = Main.screenWidth;
             int h = Main.screenHeight;
             Texture2D pixel = TextureAssets.MagicPixel.Value;
+            Vector2 planetPos = new Vector2(w * 0.5f, h * 0.34f) + GetPlanetParallaxOffset();
 
             DrawGradientBackground(spriteBatch, pixel, w, h);
+            DrawBackgroundScan(spriteBatch, pixel, w, h);  // 🛑 scanline full-width di background utama (gantiin yang dulu di sprite gunung)
             DrawPillarGlow(spriteBatch, pixel, w, h);
-            DrawPlutoPlanet(spriteBatch, w, h);
-            DrawBloodOcean(spriteBatch, pixel, w, h);
+            DrawPlutoPulse(spriteBatch, planetPos);      // 🛑 di belakang planet -- gelombangnya nyebar DARI BELAKANG planet, ikut parallax bareng.
+            DrawPlutoPlanet(spriteBatch, planetPos);      // 🛑 SEKARANG parallax, ga statis lagi.
             DrawLightning(spriteBatch);
         }
 
@@ -323,15 +455,52 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
             sb.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
         }
 
-        // Planet Pluto di tengah-tengah background, muter pelan searah jarum jam. SESUAI REQUEST:
-        // planet ini yang "pop" MUNCUL DULUAN (pakai EaseOutBack biar ada kesan mantul kecil)
-        // sebelum background gradient-nya sendiri selesai "wush" nyebar dari tengah.
-        private void DrawPlutoPlanet(SpriteBatch sb, int w, int h) {
+        // 🛑 [DETAK JANTUNG] Gelombang PlutoPulse (96x96 asli, putih polos) di-recolor merah &
+        // di-scale BESAR (relatif ke lebar planet, otomatis nyesuain berapapun ukuran
+        // plutoplanet.png yang beneran dipakai) -- mulai dari nutupin ~55% lebar planet (makanya
+        // keliatan "keluar dari belakangnya"), terus nyebar sampai ~2.1x lebar planet sambil pudar.
+        // `planetPos` dioper dari Draw() biar tetep nempel di posisi planet yang SEKARANG parallax.
+        private void DrawPlutoPulse(SpriteBatch sb, Vector2 planetPos) {
+            if (pulses.Count == 0) return;
+
+            planetAsset ??= ModContent.Request<Texture2D>(PlanetTexturePath, AssetRequestMode.ImmediateLoad);
+            pulseAsset ??= ModContent.Request<Texture2D>(PulseTexturePath, AssetRequestMode.ImmediateLoad);
+            if (!planetAsset.IsLoaded || !pulseAsset.IsLoaded) return;
+
+            Texture2D planetTex = planetAsset.Value;
+            Texture2D pulseTex = pulseAsset.Value;
+            Vector2 origin = pulseTex.Size() * 0.5f;
+
+            float minScale = (planetTex.Width * PulseStartCoverage) / pulseTex.Width;
+            float maxScale = (planetTex.Width * PulseEndCoverage) / pulseTex.Width;
+
+            sb.End();
+            sb.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+
+            foreach (PulseWave p in pulses) {
+                float t = EaseOutCubic(p.Life / p.MaxLife);
+                float scale = MathHelper.Lerp(minScale, maxScale, t);
+                float alpha = (1f - t) * intensity;
+                if (alpha <= 0.01f) continue;
+
+                Color color = new Color(255, 35, 30) * (alpha * 0.85f);
+                sb.Draw(pulseTex, planetPos, null, color, planetRotation, origin, scale, SpriteEffects.None, 0f);
+            }
+
+            sb.End();
+            sb.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+        }
+
+        // Planet Pluto, muter pelan searah jarum jam. Planet ini yang "pop" MUNCUL DULUAN
+        // (EaseOutBack, kesan mantul kecil) sebelum background gradient-nya sendiri selesai "wush"
+        // nyebar dari tengah, DAN ikut "berdetak" (GetHeartbeatBump) PERSIS pas gelombang
+        // PlutoPulse mulai nyebar. `planetPos` SEKARANG parallax (lihat GetPlanetParallaxOffset),
+        // BUKAN lagi posisi tetap di tengah layar terus-terusan.
+        private void DrawPlutoPlanet(SpriteBatch sb, Vector2 planetPos) {
             planetAsset ??= ModContent.Request<Texture2D>(PlanetTexturePath, AssetRequestMode.ImmediateLoad);
             if (!planetAsset.IsLoaded) return;
 
             Texture2D planet = planetAsset.Value;
-            Vector2 pos = new(w * 0.5f, h * 0.34f);
             Vector2 origin = new(planet.Width * 0.5f, planet.Height * 0.5f);
 
             float popT = planetPopElapsed / PlanetPopDuration;
@@ -339,62 +508,59 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
             float popAlpha = MathHelper.Clamp(popT, 0f, 1f);
             if (popAlpha <= 0f) return;
 
+            float beatBump = GetHeartbeatBump(planetBeatTimer);
+            float finalScale = popScale * (1f + beatBump * BeatStrength);
+
             // Halo merah lembut di belakang planet (bloom murahan: gambar planetnya sendiri,
-            // diperbesar & additive transparan, biar berasa "berpendar").
+            // diperbesar & additive transparan, biar berasa "berpendar") -- ikut kedut dikit juga.
             sb.End();
             sb.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
 
             float haloPulse = 0.7f + 0.3f * MathF.Sin(pillarPulseTimer * 0.6f);
-            sb.Draw(planet, pos, null, new Color(255, 35, 35) * (0.32f * haloPulse * intensity * popAlpha), planetRotation, origin, 1.20f * popScale, SpriteEffects.None, 0f);
-            sb.Draw(planet, pos, null, new Color(255, 90, 90) * (0.16f * haloPulse * intensity * popAlpha), planetRotation, origin, 1.40f * popScale, SpriteEffects.None, 0f);
+            sb.Draw(planet, planetPos, null, new Color(255, 35, 35) * (0.32f * haloPulse * intensity * popAlpha), planetRotation, origin, 1.20f * finalScale, SpriteEffects.None, 0f);
+            sb.Draw(planet, planetPos, null, new Color(255, 90, 90) * (0.16f * haloPulse * intensity * popAlpha), planetRotation, origin, 1.40f * finalScale, SpriteEffects.None, 0f);
 
             sb.End();
             sb.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
 
             // Planet aslinya -- warna dibiarin natural (ga di-tint merah), biar tetep kebaca
-            // sebagai "Planet Pluto", cuma alpha & scale-nya ngikutin pop-in + fade in/out sky.
-            sb.Draw(planet, pos, null, Color.White * intensity * popAlpha, planetRotation, origin, popScale, SpriteEffects.None, 0f);
+            // sebagai "Planet Pluto", cuma alpha & scale-nya ngikutin pop-in + detak + fade sky.
+            sb.Draw(planet, planetPos, null, Color.White * intensity * popAlpha, planetRotation, origin, finalScale, SpriteEffects.None, 0f);
         }
 
-        // 🩸 [LAUT DARAH] Beberapa layer gelombang sinus digambar sebagai garis patah-patah (reuse
-        // DrawLine yang sama dipakai buat kilat), numpuk beberapa layer beda kecepatan & amplitudo
-        // biar keliatan berlapis kek permukaan lautan darah yang bergerak pelan di bagian bawah layar.
-        private void DrawBloodOcean(SpriteBatch sb, Texture2D pixel, int w, int h) {
-            float revealAlpha = MathHelper.Clamp(revealElapsed / RevealDuration, 0f, 1f);
-            float alpha = intensity * revealAlpha;
+        // 🛑 [SCANLINE BACKGROUND UTAMA] Garis terang full-width yang nyapu dari ujung ATAS layar
+        // ke BAWAH berulang-ulang, dikasih beberapa "ekor" fading di belakangnya biar ada kesan
+        // gerak -- dulu ini nempel di sprite gunung, sekarang langsung di atas background utama.
+        private void DrawBackgroundScan(SpriteBatch sb, Texture2D pixel, int w, int h) {
+            float alpha = intensity;
             if (alpha <= 0.01f) return;
+
+            float cycleT = (backgroundScanTimer % BackgroundScanCycleDuration) / BackgroundScanCycleDuration;
+            float scanYBase = cycleT * h;
 
             sb.End();
             sb.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
 
-            DrawWaveLayer(sb, pixel, w, h, 0.80f, 14f, 0.010f, 0.6f, 5f, new Color(120, 10, 10) * (alpha * 0.55f));
-            DrawWaveLayer(sb, pixel, w, h, 0.86f, 10f, 0.016f, -0.9f, 4f, new Color(200, 20, 20) * (alpha * 0.50f));
-            DrawWaveLayer(sb, pixel, w, h, 0.93f, 7f, 0.024f, 1.3f, 3f, new Color(255, 60, 50) * (alpha * 0.65f));
+            for (int i = 0; i < BackgroundScanTrailCount; i++) {
+                float scanY = scanYBase - i * BackgroundScanTrailSpacing;
+                if (scanY < 0f || scanY > h - BackgroundScanStripHeight) continue; // di luar layar / abis wrap -- skip aja
+
+                float trailAlpha = (1f - i / (float)BackgroundScanTrailCount) * alpha;
+                if (trailAlpha <= 0.01f) continue;
+
+                Color color = new Color(255, 60, 40) * (trailAlpha * 0.55f);
+                Rectangle dest = new(0, (int)scanY, w, BackgroundScanStripHeight);
+                sb.Draw(pixel, dest, color);
+            }
 
             sb.End();
             sb.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
         }
 
-        private void DrawWaveLayer(SpriteBatch sb, Texture2D pixel, int w, int h, float baseYFrac, float amplitude, float freq, float speed, float thickness, Color color) {
-            const int segments = 36;
-            float segW = w / (float)segments;
-
-            Vector2 prev = new(0f, h * baseYFrac + MathF.Sin(bloodOceanTimer * speed) * amplitude);
-            for (int i = 1; i <= segments; i++) {
-                float x = i * segW;
-                float y = h * baseYFrac + MathF.Sin(x * freq + bloodOceanTimer * speed) * amplitude;
-                Vector2 cur = new(x, y);
-                DrawLine(sb, pixel, prev, cur, thickness, color);
-                prev = cur;
-            }
-        }
-
-        // Kilat MERAH: Flash (boleh dirotate acak, ukuran macem-macem) + Bolt (dibiarin sesuai
-        // orientasi asli, cuma lokasinya yang random) digambar bareng di titik yang sama tiap
-        // strike -- keduanya di-recolor merah lewat tint Color + additive blend (asetnya sendiri
-        // biru di file asli).
+        // Kilat MERAH: Flash & Bolt INDEPENDEN -- masing-masing di-loop dari list-nya sendiri, ga
+        // digambar berpasangan di titik & waktu yang sama.
         private void DrawLightning(SpriteBatch sb) {
-            if (strikes.Count == 0) return;
+            if (flashes.Count == 0 && bolts.Count == 0) return;
 
             flashAsset ??= ModContent.Request<Texture2D>(FlashTexturePath, AssetRequestMode.ImmediateLoad);
             boltAsset ??= ModContent.Request<Texture2D>(BoltTexturePath, AssetRequestMode.ImmediateLoad);
@@ -408,34 +574,28 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoBackground
             sb.End();
             sb.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
 
-            foreach (LightningStrike s in strikes) {
-                float alpha = GetStrikeAlpha(s) * intensity;
+            // 🛑 [RECOLOR MERAH] Tint lewat Color (bukan Color.White) + additive blend -- cara
+            // paling ringan buat "narik" hue asli (biru) ke arah merah tanpa perlu shader baru.
+            // Kalau ternyata di file asli-nya banyak area biru SOLID/opaque (bukan cuma glow
+            // putih+alpha), hasil tint ini bisa keliatan agak gelap di area itu -- kabarin aja
+            // kalau begitu, nanti dibikinin shader recolor khusus (mirip PlutoElectroRimLight.fx
+            // yang udah ada) biar hasilnya presisi.
+            foreach (FlashInstance f in flashes) {
+                float alpha = GetFlickerAlpha(f.Life, f.MaxLife) * intensity;
                 if (alpha <= 0.01f) continue;
-
-                // 🛑 [RECOLOR MERAH] Tint lewat Color (bukan Color.White) + additive blend --
-                // ini cara paling ringan buat "narik" hue asli (biru) ke arah merah tanpa perlu
-                // shader baru. Kalau ternyata di file asli-nya banyak area biru SOLID/opaque
-                // (bukan cuma glow putih+alpha), hasil tint ini bisa keliatan agak gelap di area
-                // itu -- kabarin aja kalau begitu, nanti dibikinin shader recolor khusus (mirip
-                // PlutoElectroRimLight.fx yang udah ada) biar hasilnya presisi.
                 Color flashColor = new Color(255, 70, 60) * (alpha * 0.9f);
-                Color boltColor = new Color(255, 45, 40) * alpha;
+                sb.Draw(flashTex, f.Position, null, flashColor, f.Rotation, flashOrigin, f.Scale, SpriteEffects.None, 0f);
+            }
 
-                sb.Draw(flashTex, s.Position, null, flashColor, s.FlashRotation, flashOrigin, s.FlashScale, SpriteEffects.None, 0f);
-                sb.Draw(boltTex, s.Position, null, boltColor, 0f, boltOrigin, s.BoltScale, SpriteEffects.None, 0f);
+            foreach (BoltInstance b in bolts) {
+                float alpha = GetFlickerAlpha(b.Life, b.MaxLife) * intensity;
+                if (alpha <= 0.01f) continue;
+                Color boltColor = new Color(255, 45, 40) * alpha;
+                sb.Draw(boltTex, b.Position, null, boltColor, 0f, boltOrigin, b.Scale, SpriteEffects.None, 0f);
             }
 
             sb.End();
             sb.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
-        }
-
-        private static void DrawLine(SpriteBatch sb, Texture2D pixel, Vector2 start, Vector2 end, float thickness, Color color) {
-            Vector2 edge = end - start;
-            float length = edge.Length();
-            if (length < 0.01f) return;
-
-            float angle = MathF.Atan2(edge.Y, edge.X);
-            sb.Draw(pixel, start, null, color, angle, new Vector2(0f, 0.5f), new Vector2(length, thickness), SpriteEffects.None, 0f);
         }
     }
 }

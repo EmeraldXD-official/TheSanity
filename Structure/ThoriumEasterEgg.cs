@@ -52,8 +52,11 @@ namespace TheSanity.GlobalNPCs
 
         private void GenerateThoriumNotes()
         {
-            int structureWidth = 34;
-            int structureHeight = 40;
+            // FIXED: ukuran asli file NoteOfThorium.shstruct adalah 40 (lebar) x 33 (tinggi),
+            // sebelumnya kode pakai 34x40 yang meleset dari file aslinya -> posisi Y hasil
+            // generate bisa naik/turun sampai belasan tile dari yang seharusnya (bisa ke-bury).
+            int structureWidth = 40;
+            int structureHeight = 33;
             
             // Pengaturan jumlah spawn dan jarak
             int structuresToSpawn = 3;
@@ -152,7 +155,16 @@ namespace TheSanity.GlobalNPCs
                 string structurePath = "Structure/NoteOfThorium";
 
                 // Generate struktur
-                Generator.GenerateStructure(structurePath, placePoint, Mod);
+                try
+                {
+                    Generator.GenerateStructure(structurePath, placePoint, Mod);
+                }
+                catch (Exception ex)
+                {
+                    Mod.Logger.Error(
+                        $"[ThoriumEasterEgg] EXCEPTION saat generate '{structurePath}' (struktur ke-{i + 1}) di ({placementX},{placementY}): {ex}");
+                    continue; // lewati frame-update & jangan catat lokasi kalau gagal
+                }
 
                 // =========================================================================
                 // UPDATE FRAME KESELURUHAN (FIX RENDER CAT / PAINTING & WALL)

@@ -17,7 +17,9 @@ namespace TheSanity
                     "The Sanity: Also try Saihate Station!",
                     "The Sanity: Also try Twilight Railway",
                     "The Sanity: Wake up, Terrarian.",
-                    "The Sanity: Special Thanks to びぶ / viv."
+                    "The Sanity: Special Thanks to びぶ / viv.",
+					"The Sanity: Tempe",
+					"The Sanity: Tahu"
                 });
 
                 // Pilih satu teks acak untuk judul jendela
@@ -34,7 +36,9 @@ namespace TheSanity
                     "The Sanity: Also try Saihate Station!",
                     "The Sanity: Also try Twilight Railway!",
                     "The Sanity: Wake up, Terrarian.",
-                    "The Sanity: Special Thanks to びぶ / viv >v<"
+                    "The Sanity: Special Thanks to びぶ / viv >v<",
+					"The Sanity: Tempe",
+					"The Sanity: Tahu"
                 };
                 Main.instance.Window.Title = fallbackTexts[Main.rand.Next(fallbackTexts.Length)];
             }

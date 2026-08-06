@@ -9,50 +9,55 @@ using TheSanity.Buff;
 namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoProjectile
 {
     // =====================================================================================
-    // 🛑 [RED BEAM] Laser lurus statis, ditembak sekali sama RedCrystal, lalu HIDUP CUMA 0,5
-    // DETIK (auto-Kill sendiri lewat lifeTimer -- independen, gak nunggu RedCrystal-nya dash/
-    // mati). ai[0] = whoAmI player yang jadi acuan smart-scan-nya. rotation di-set SEKALI pas
-    // spawn (lihat RedCrystal.SpawnBeam) dan TIDAK berubah lagi selama beam ini hidup.
+    // 🛑 [RED BEAM] Laser lurus statis, ditembak sekali sama RedCrystal. ai[0] = whoAmI player
+    // yang jadi acuan smart-scan-nya. rotation di-set SEKALI pas spawn (lihat
+    // RedCrystal.SpawnBeam) dan TIDAK berubah lagi selama beam ini hidup.
     //
-    // 🛑 [ANIMASI MUNCUL/HILANG] Beam "timbul" (tipis -> tebal) di beberapa tick pertama, dan
-    // "mengecil"/fade balik ke tipis-transparan di beberapa tick terakhir sebelum mati -- lihat
-    // GetVisualScale().
+    // 🛑 [SESUAI REQUEST - HIDUP LEBIH LAMA] Dulu beam cuma hidup 0,5 detik (30 tick) --
+    // KEPENDEKAN sampai animasi "membesar"-nya nyaris gak sempet kelihatan. Sekarang hidup
+    // BeamLifeTime = 90 tick (1,5 detik), dan durasi animasi membesarnya (GrowTicks) juga
+    // dipanjangin jadi 20 tick (~0,33 detik) biar proses "tipis -> tebal"-nya beneran kebaca
+    // mata, bukan sekelebat doang.
     //
-    // 🛑 [SMART SCAN] Beam ini SELALU nembus block yang ada DI ANTARA titik tembak & posisi
-    // player (jadi player nggak bisa "cheese" nyembunyi di balik tembok), TAPI berhenti di
-    // block solid PERTAMA yang ketemu SETELAH posisi player (+ buffer kecil). Jarak "sampai
-    // player" dihitung pakai proyeksi dot-product di sepanjang arah beam -- jadi otomatis
-    // benar buat beam arah manapun (horizontal, vertikal, diagonal), bukan cuma kiri-kanan,
-    // dan blok yang levelnya "sejajar" player tapi masih di depan tetap ditembus wajar.
+    // 🛑 [SESUAI REQUEST - PANJANG "TAK TERBATAS"] ScanSafetyCap cuma jaring pengaman performa
+    // (biar loop scan-nya gak jalan selamanya kalau somehow gak ada tembok sama sekali) --
+    // secara praktis beam ini SELALU nembus sampai ketemu block solid pertama (smart-scan),
+    // BUKAN batas visual/gameplay yang bakal kena di pertarungan normal.
+    //
+    // 🛑 [SESUAI REQUEST - PAKAI SPRITE PNG LAGI, TAPI TETAP MURAH] Balik pakai 3 sprite asli
+    // (Bottom/Middle/Top) kayak versi awal, TAPI render-nya TIDAK LAGI nge-tile sprite Middle
+    // berkali-kali sepanjang beam (itu yang bikin lag ala boss cacing pas beam-nya numpuk jauh).
+    // Sekarang badan beam digambar dengan CUMA SATU sprite Middle yang di-STRETCH (scale.X)
+    // buat nutupin seluruh sisa panjangnya di antara ujung Bottom & Top -- jadi TOTAL draw
+    // call TETAP FIX (3 sprite: Bottom + 1 Middle stretched + Top) gak peduli beam-nya
+    // sepanjang apa atau berapa banyak beam yang lagi numpuk bareng di layar.
     // =====================================================================================
     public class RedBeam : ModProjectile
     {
-        // 🛑 [FIX MissingResourceException] Loader tModLoader WAJIB dikasih 1 path Texture yang
-        // valid buat tiap ModProjectile, walau kita gambar semuanya manual lewat PreDraw() (3
-        // part: Bottom/Middle/Top). Tanpa override ini, dia bakal nebak default
-        // ".../PlutoProjectile/RedBeam" (file yang emang sengaja gak dibikin, soalnya asetnya
-        // 3 sprite terpisah) dan bikin mod gagal load. Diarahin ke Middle karena paling netral.
         public override string Texture => "TheSanity/GlobalNPC/Bosses/Pluto/PlutoProjectile/RedBeamMiddle";
 
-        private const float MaxBeamLength = 2600f;
+        // 🛑 [TAK TERBATAS] Jaring pengaman performa doang -- lihat catatan panjang di atas.
+        private const float ScanSafetyCap = 50000f; // ~3125 block, jauh di atas ukuran arena manapun
         private const float PastPlayerBuffer = 80f;
-        private const float ScanStep = 16f; // 1 tile
-        private const float BeamHitThickness = 22f;
+        private const float ScanStep = 32f; // 2 tile -- dikasarin dikit biar loop scan yang panjang tetep murah
+        private const float BeamHitThickness = 22f; // ketebalan FINAL buat hit-detection (gak ikut animasi)
         private const int RecomputeInterval = 6; // recompute tiap 0,1 detik biar murah di performa
 
         private const int BeamDebuffTime = 120; // 2 detik
 
-        // 🛑 [AUTO-KILL 0,5 DETIK] SESUAI REQUEST: beam sekarang gak lagi idup selama
-        // Projectile.timeLeft (3600 tick / 1 menit) -- dia bunuh diri sendiri (Kill()) tepat
-        // 30 tick (0,5 detik) setelah nembak, gak peduli RedCrystal-nya lagi ngapain.
-        private const int BeamLifeTime = 30; // 0,5 detik @60 tick/detik
-        // 🛑 [ANIMASI MUNCUL/HILANG] Beam gak lagi langsung nongol/ilang instan -- di FadeTicks
-        // pertama dia "timbul" (tipis -> tebal penuh), dan di FadeTicks terakhir sebelum mati
-        // dia "mengecil"/fade balik ke tipis -> transparan. Dihitung dari lifeTimer, BUKAN dari
-        // histori posisi, jadi murah & gak butuh state tambahan selain 1 int timer.
-        private const int FadeTicks = 6; // ~0,1 detik buat animasi muncul & ilang
+        // 🛑 [HIDUP LEBIH LAMA] SESUAI REQUEST: dari 30 tick (0,5 detik) jadi 90 tick (1,5 detik).
+        private const int BeamLifeTime = 90;
+        // 🛑 [ANIMASI MEMBESAR LEBIH LAMA] Dari 6 tick (0,1 detik) jadi 20 tick (~0,33 detik) di
+        // awal (tipis -> tebal) supaya proses "melebar"-nya beneran kelihatan, bukan sekelebat.
+        // Ketebalan mulai dari StartThickness (SAMA PERSIS kayak garis aim RedCrystal, biar
+        // nyambung mulus) ke FullThickness. Di akhir umurnya (ShrinkTicks tick terakhir sebelum
+        // Kill()), ketebalan mengecil balik ke nyaris 0.
+        private const float StartThickness = 2f; // = lineThickness di RedCrystal.DrawAimLine
+        private const float FullThickness = BeamHitThickness;
+        private const int GrowTicks = 20;
+        private const int ShrinkTicks = 15;
 
-        private float beamLength = MaxBeamLength;
+        private float beamLength = ScanSafetyCap;
         private int recomputeTimer = 0;
         private int lifeTimer = 0;
 
@@ -61,20 +66,21 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoProjectile
         }
 
         public override void SetDefaults() {
-            // 🛑 [FIX HILANG SAAT ORIGIN OFF-SCREEN] Terraria nge-skip PreDraw() sebuah projectile
-            // kalau bounding box (width/height) bawaannya dianggap di luar layar -- padahal beam
-            // ini SECARA VISUAL bisa "menjulur" jauh (sampai MaxBeamLength = 2600px) dari titik
-            // originnya. Kalau width/height cuma 8x8 (ukuran lama), begitu titik ORIGIN (paling
-            // deket RedCrystal) keluar layar dikit aja, Terraria anggep seluruh projectile ini
-            // "di luar layar" dan LANGSUNG skip manggil PreDraw() sama sekali -- padahal ujung
-            // beam yang jauh masih kelihatan di layar. Fix: bikin bounding box-nya persegi GEDE
-            // yang nutupin radius MaxBeamLength ke SEGALA arah (karena beam bisa ngarah ke mana
-            // aja), supaya Terraria tetap manggil PreDraw() selama SEBAGIAN mana pun beam ini
-            // masih kelihatan -- ini AMAN buat collision karena Colliding() di-override total
-            // (gak pernah pakai width/height bawaan buat deteksi hit).
-            int hitboxSize = (int)(MaxBeamLength * 2f);
-            Projectile.width = hitboxSize;
-            Projectile.height = hitboxSize;
+            // 🛑 [FIX LASER GAK KELIHATAN - INI AKAR MASALAHNYA] Sebelumnya di sini width/height
+            // dipaksa RAKSASA (~100.000px), dengan ASUMSI Terraria bakal nyembunyiin (cull) beam
+            // ini kalau hitboxnya kecil dan titik tembaknya keluar layar. Asumsi itu SALAH --
+            // Projectile (beda sama NPC) TERNYATA GAK di-cull berdasarkan hitbox di sini sama
+            // sekali. Buktinya: garis aim RedCrystal (lihat DrawAimLine() di RedCrystal.cs) itu
+            // PANJANGNYA SAMA (50.000px) dan tetap kegambar mulus walau hitbox crystal-nya cuma
+            // 28x28 kecil. Jadi hitbox raksasa itu manfaatnya NOL, tapi efek sampingnya FATAL:
+            // Terraria.Projectile.NewProjectile() memperlakukan posisi yang dikasih sebagai POJOK
+            // KIRI-ATAS hitbox (bukan titik tengah) -- begitu hitboxnya sebesar itu, titik pusat
+            // beam yang BENERAN kegambar (Projectile.Center) kegeser PULUHAN RIBU pixel dari titik
+            // tembak yang bener, alias render-nya nongol RATUSAN layar jauhnya dari kamera manapun.
+            // Ini biang kerok "laser gak kelihatan"-nya. Sekarang hitbox dibalikin ke ukuran wajar
+            // (sama kecilnya kayak RedCrystal), lebih murah buat engine juga.
+            Projectile.width = 28;
+            Projectile.height = 28;
             Projectile.hostile = true;
             Projectile.friendly = false;
             Projectile.tileCollide = false;
@@ -90,8 +96,6 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoProjectile
                 return;
             }
 
-            // 🛑 [AUTO-KILL 0,5 DETIK] Beam sekarang punya umur sendiri yang pendek & pasti --
-            // gak lagi nunggu RedCrystal-nya dash/mati atau nunggu timeLeft abis.
             lifeTimer++;
             if (lifeTimer >= BeamLifeTime) {
                 Projectile.Kill();
@@ -111,29 +115,33 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoProjectile
             Projectile.velocity = Vector2.Zero;
         }
 
+        // 🛑 [SMART SCAN - TAK TERBATAS] SELALU nembus block yang ada DI ANTARA titik tembak &
+        // posisi player (jadi player nggak bisa "cheese" nyembunyi di balik tembok), TAPI
+        // berhenti di block solid PERTAMA yang ketemu SETELAH posisi player (+ buffer kecil).
         private float ComputeBeamLength(Player target) {
             Vector2 dir = Projectile.rotation.ToRotationVector2();
-            if (!target.active || target.dead) return MaxBeamLength;
+            if (!target.active || target.dead) return ScanSafetyCap;
 
             float projectedDist = Vector2.Dot(target.Center - Projectile.Center, dir);
             if (projectedDist < 0f) projectedDist = 0f;
 
             float scanStart = projectedDist + PastPlayerBuffer;
-            if (scanStart >= MaxBeamLength) return MaxBeamLength;
+            if (scanStart >= ScanSafetyCap) return ScanSafetyCap;
 
             float dist = scanStart;
-            while (dist < MaxBeamLength) {
+            while (dist < ScanSafetyCap) {
                 Vector2 point = Projectile.Center + dir * dist;
                 if (Collision.SolidCollision(point - new Vector2(4f, 4f), 8, 8)) {
                     return dist;
                 }
                 dist += ScanStep;
             }
-            return MaxBeamLength;
+            return ScanSafetyCap;
         }
 
         // Hitbox custom: garis tipis dari titik tembak sampai beamLength (bukan kotak default
         // projectile), supaya collision-nya sesuai visual laser yang panjang & bisa miring.
+        // Damage-nya AKTIF dari tick pertama beam ini ada (gak nunggu animasi membesar kelar).
         public override bool? Colliding(Rectangle projHitbox, Rectangle targetHitbox) {
             Vector2 dir = Projectile.rotation.ToRotationVector2();
             Vector2 start = Projectile.Center;
@@ -164,84 +172,85 @@ namespace TheSanity.GlobalNPC.Bosses.Pluto.PlutoProjectile
             Texture2D texMiddle = ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Bosses/Pluto/PlutoProjectile/RedBeamMiddle").Value;
             Texture2D texTop = ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Bosses/Pluto/PlutoProjectile/RedBeamTop").Value;
 
-            // 🛑 Beda sama RedCrystal: sprite beam (Bottom/Middle/Top) semuanya digambar MENGHADAP
-            // KANAN, jadi rotasinya langsung dipakai apa adanya, TANPA offset PiOver2.
+            // Sprite (Bottom/Middle/Top) semuanya digambar MENGHADAP KANAN, jadi rotasinya
+            // langsung dipakai apa adanya, TANPA offset PiOver2.
             float rotation = Projectile.rotation;
             Vector2 dir = rotation.ToRotationVector2();
             Vector2 screenOrigin = Projectile.Center - Main.screenPosition;
 
-            // 🛑 [MUNCUL/HILANG] 0 di awal umur -> 1 (di FadeTicks pertama, "timbul"), tetap 1 di
-            // tengah, lalu 1 -> 0 di FadeTicks terakhir sebelum Kill() ("mengecil"/fade away).
-            // Dipakai buat scale ketebalan (Y) beam SEKALIGUS alpha warnanya.
+            // 🛑 [MEMBESAR] Ketebalan (scale Y) nge-lerp StartThickness -> FullThickness di
+            // GrowTicks tick pertama, lalu FullThickness -> nyaris 0 di ShrinkTicks tick
+            // terakhir sebelum Kill(). Alpha warnanya TETAP PENUH sepanjang umur beam.
             float visualScale = GetVisualScale();
 
-            // 🛑 [RECOLOR] Sebelumnya Color.White (polos, warna asli texture apa adanya). Sekarang
-            // dikasih 2 warna: INTI merah terang tapi agak gelap, dan OUTLINE/GLOW merah yang lebih
-            // TERANG dari inti (bukan lebih gelap kayak outline biasa), digambar duluan di belakang
-            // pakai blend Additive supaya numpuk jadi efek nyala, bukan garis pinggir keras.
-            Color coreColor = new Color(190, 15, 15) * visualScale;              // merah terang agak gelap (inti)
-            Color outlineColor = new Color(255, 70, 45) * 0.55f * visualScale;   // merah lebih terang (outline/glow)
+            Color coreColor = new Color(190, 15, 15);              // merah terang agak gelap (inti)
+            Color glowColor = new Color(255, 70, 45) * 0.55f;      // merah lebih terang (glow)
 
-            // Offset kecil ke 8 arah -- ini yang bikin efek "outline" ngelilingin sprite inti,
-            // soalnya kita gak punya akses gampang ke pixel-shader outline murni di draw call biasa.
-            Vector2[] outlineOffsets = {
-                new Vector2( 2f,  0f), new Vector2(-2f,  0f),
-                new Vector2( 0f,  2f), new Vector2( 0f, -2f),
-                new Vector2( 2f,  2f), new Vector2(-2f,  2f),
-                new Vector2( 2f, -2f), new Vector2(-2f, -2f),
-            };
+            // 🛑 [FIX LAG - GLOW DIPANGKAS] Dulu outline-nya "dipalsuin" dengan nge-draw ulang
+            // SELURUH beam 8 KALI (offset kecil ke 8 arah) di atas 3 sprite = 24 draw call CUMA
+            // buat glow doang, ditambah 3 draw call core = 27 draw call PER BEAM PER FRAME. Kalau
+            // ada belasan beam numpuk bareng (gampang kejadian pas banyak crystal nembak beruntun),
+            // itu ratusan draw call ekstra tiap frame CUMA buat efek pinggiran yang tipis banget
+            // bedanya -- ini sumber utama lag-nya, BUKAN soal transparent/nggak. Sekarang glow-nya
+            // cukup SATU pass ekstra (3 sprite, digambar lebih LEBAR pakai visualScale yang
+            // di-boost dikit, bukan di-offset ke 8 arah) -- visualnya tetap ada "aura" lembut di
+            // pinggiran, tapi draw call PER BEAM turun dari 27 jadi 6 (~4-5x lebih murah).
+            float glowScale = visualScale * 1.8f;
 
-            // --- PASS 1: outline/glow, Additive biar numpuk terang bukan malah nabrak jadi item ---
+            // --- PASS 1: glow, Additive biar numpuk terang bukan malah nabrak jadi item ---
             Main.spriteBatch.End();
             Main.spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
-            foreach (Vector2 off in outlineOffsets) {
-                DrawBeamSegments(texBottom, texMiddle, texTop, screenOrigin + off, dir, rotation, outlineColor, visualScale);
-            }
+            DrawBeamSegments(texBottom, texMiddle, texTop, screenOrigin, rotation, glowColor, glowScale);
             Main.spriteBatch.End();
             Main.spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
 
-            // --- PASS 2: warna inti, digambar di atas outline, TANPA offset ---
-            DrawBeamSegments(texBottom, texMiddle, texTop, screenOrigin, dir, rotation, coreColor, visualScale);
+            // --- PASS 2: warna inti, digambar di atas glow, ketebalan normal ---
+            DrawBeamSegments(texBottom, texMiddle, texTop, screenOrigin, rotation, coreColor, visualScale);
 
             return false;
         }
 
-        // 0 -> 1 pas baru nembak ("timbul"), 1 pas lagi solid di tengah umur, 1 -> 0 pas mau mati
-        // ("mengecil"/fade away). Murni fungsi dari lifeTimer, gak butuh state tambahan.
+        // StartThickness -> FullThickness di GrowTicks tick pertama (nyambung mulus dari garis
+        // aim RedCrystal yang emang udah setebal StartThickness itu). Lalu FullThickness ->
+        // ~0 di ShrinkTicks terakhir sebelum Kill() beneran.
         private float GetVisualScale() {
-            if (lifeTimer < FadeTicks) {
-                return (float)lifeTimer / FadeTicks;
+            if (lifeTimer < GrowTicks) {
+                float t = (float)lifeTimer / GrowTicks;
+                return MathHelper.Lerp(StartThickness, FullThickness, t) / FullThickness;
             }
             int remaining = BeamLifeTime - lifeTimer;
-            if (remaining < FadeTicks) {
-                return MathHelper.Clamp((float)remaining / FadeTicks, 0f, 1f);
+            if (remaining < ShrinkTicks) {
+                float t = MathHelper.Clamp((float)remaining / ShrinkTicks, 0f, 1f);
+                return MathHelper.Lerp(0.05f, FullThickness, t) / FullThickness;
             }
             return 1f;
         }
 
-        // Dipisah jadi method sendiri karena dipanggil 2x (outline & inti) -- cuma beda warna &
-        // titik origin (offset), logic Bottom/Middle/Top-nya sama persis kayak versi lama.
-        // `visualScale` dipakai buat scale ketebalan (Y) sprite -- ini yang bikin efek "timbul"
-        // (tipis ke tebal) & "mengecil" (tebal ke tipis) pas beam baru nongol/mau ilang.
-        private void DrawBeamSegments(Texture2D texBottom, Texture2D texMiddle, Texture2D texTop, Vector2 origin, Vector2 dir, float rotation, Color drawColor, float visualScale) {
-            Vector2 segScale = new Vector2(1f, visualScale);
+        // 🛑 [SATU DRAW BUAT BADAN BEAM, BUKAN TILE] Dulu bagian tengah beam nge-tile texMiddle
+        // berkali-kali (while-loop, sebanyak beamLength/texMiddle.Width kali) -- makin panjang
+        // beamnya, makin banyak draw call, PERSIS pola render "boss cacing" yang lag parah kalau
+        // banyak beam numpuk jauh. Sekarang texMiddle CUMA digambar SEKALI, di-STRETCH (scale.X)
+        // biar nutupin seluruh jarak antara ujung Bottom & Top -- jadi TOTAL draw call buat
+        // badan beam ini SELALU 3 (Bottom + Middle-stretched + Top), gak peduli beamLength-nya
+        // berapa atau ada berapa banyak beam lain yang lagi aktif bareng.
+        private void DrawBeamSegments(Texture2D texBottom, Texture2D texMiddle, Texture2D texTop, Vector2 origin, float rotation, Color drawColor, float visualScale) {
+            Vector2 capScale = new Vector2(1f, visualScale);
+            Vector2 dir = new Vector2((float)Math.Cos(rotation), (float)Math.Sin(rotation));
 
             Vector2 originBottom = new Vector2(0f, texBottom.Height / 2f);
-            Main.EntitySpriteDraw(texBottom, origin, null, drawColor, rotation, originBottom, segScale, SpriteEffects.None, 0);
+            Main.EntitySpriteDraw(texBottom, origin, null, drawColor, rotation, originBottom, capScale, SpriteEffects.None, 0);
 
-            float drawn = texBottom.Width;
-            float middleEnd = Math.Max(beamLength - texTop.Width, texBottom.Width);
-            Vector2 originMiddle = new Vector2(0f, texMiddle.Height / 2f);
-
-            while (drawn < middleEnd) {
-                Vector2 segPos = origin + dir * drawn;
-                Main.EntitySpriteDraw(texMiddle, segPos, null, drawColor, rotation, originMiddle, segScale, SpriteEffects.None, 0);
-                drawn += texMiddle.Width;
+            float middleSpan = beamLength - texBottom.Width - texTop.Width;
+            if (middleSpan > 0f) {
+                Vector2 middlePos = origin + dir * texBottom.Width;
+                Vector2 originMiddle = new Vector2(0f, texMiddle.Height / 2f);
+                Vector2 middleScale = new Vector2(middleSpan / texMiddle.Width, visualScale);
+                Main.EntitySpriteDraw(texMiddle, middlePos, null, drawColor, rotation, originMiddle, middleScale, SpriteEffects.None, 0);
             }
 
             Vector2 originTop = new Vector2(0f, texTop.Height / 2f);
-            Vector2 topPos = origin + dir * Math.Max(beamLength - texTop.Width, 0f);
-            Main.EntitySpriteDraw(texTop, topPos, null, drawColor, rotation, originTop, segScale, SpriteEffects.None, 0);
+            Vector2 topPos = origin + dir * Math.Max(beamLength - texTop.Width, texBottom.Width);
+            Main.EntitySpriteDraw(texTop, topPos, null, drawColor, rotation, originTop, capScale, SpriteEffects.None, 0);
         }
     }
 }

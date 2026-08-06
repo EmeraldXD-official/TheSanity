@@ -1,0 +1,173 @@
+using System;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+
+namespace TheSanity.Content.Skies
+{
+    /// <summary>
+    /// Membangun tekstur-tekstur pendukung SunsetSky secara prosedural (tanpa file gambar
+    /// tambahan). Versi ini FULL LAUT -- tidak ada pasir pantai sama sekali, jadi builder
+    /// yang berhubungan dengan pasir (gradient pasir, grain, soft band pasir-basah) dihapus.
+    /// </summary>
+    public static class SunsetTextureGenerator
+    {
+        public static void Generate(GraphicsDevice device, out Texture2D skyGradient,
+            out Texture2D oceanGradient, out Texture2D waterTexture, out Texture2D softGlow,
+            out Texture2D solidPixel, out Texture2D vignette)
+        {
+            skyGradient = BuildSkyGradient(device, 256);
+            oceanGradient = BuildOceanGradient(device, 160);
+            waterTexture = BuildWaterTexture(device, 160);
+            softGlow = BuildSoftGlow(device, 160);
+            solidPixel = BuildSolidPixel(device);
+            vignette = BuildVignette(device, 128);
+        }
+
+        /// <summary>
+        /// Strip vertikal 1px lebar, dari atas ke bawah: dusk ungu-navy gelap -> oranye hangat
+        /// -> kuning cerah dekat horizon. Nanti direntangkan (stretch) memenuhi seluruh layar.
+        /// </summary>
+        private static Texture2D BuildSkyGradient(GraphicsDevice device, int height)
+        {
+            Color top = new Color(28, 18, 56);
+            Color upperMid = new Color(120, 55, 90);
+            Color lowerMid = new Color(235, 110, 55);
+            Color horizon = new Color(255, 205, 120);
+
+            var data = new Color[height];
+            for (int y = 0; y < height; y++)
+            {
+                float t = y / (float)(height - 1);
+
+                Color c;
+                if (t < 0.35f)
+                    c = Color.Lerp(top, upperMid, t / 0.35f);
+                else if (t < 0.7f)
+                    c = Color.Lerp(upperMid, lowerMid, (t - 0.35f) / 0.35f);
+                else
+                    c = Color.Lerp(lowerMid, horizon, (t - 0.7f) / 0.3f);
+
+                data[y] = c;
+            }
+
+            var tex = new Texture2D(device, 1, height);
+            tex.SetData(data);
+            return tex;
+        }
+
+        /// <summary>
+        /// Strip vertikal untuk laut, gradasi MULUS dari dekat horizon (agak terang, kena
+        /// pantulan langit sunset) ke dekat kamera/dasar layar (gelap keunguan). Sekarang
+        /// direntangkan sampai BENAR-BENAR ke bawah layar (tidak ada pasir lagi).
+        /// </summary>
+        private static Texture2D BuildOceanGradient(GraphicsDevice device, int height)
+        {
+            Color horizonWater = new Color(55, 40, 85);
+            Color midWater = new Color(22, 20, 55);
+            Color nearWater = new Color(7, 8, 24); // paling gelap, dekat kamera/dasar layar
+
+            var data = new Color[height];
+            for (int y = 0; y < height; y++)
+            {
+                float t = y / (float)(height - 1); // 0 = horizon, 1 = dasar layar
+                Color c = t < 0.3f
+                    ? Color.Lerp(horizonWater, midWater, t / 0.3f)
+                    : Color.Lerp(midWater, nearWater, (t - 0.3f) / 0.7f);
+                data[y] = c;
+            }
+
+            var tex = new Texture2D(device, 1, height);
+            tex.SetData(data);
+            return tex;
+        }
+
+        /// <summary>
+        /// Tekstur air ber-TEKSTUR (pola riak/caustic lembut), dimaksudkan untuk DI-TILE
+        /// (diulang) menutupi seluruh permukaan laut -- ini yang menghilangkan kesan "1 blok
+        /// warna polos yang dilebarin". Dibuat dari gabungan beberapa gelombang sinus 2D yang
+        /// saling tumpang tindih, menghasilkan pola mirip pantulan cahaya di air yang bergelombang.
+        /// </summary>
+        private static Texture2D BuildWaterTexture(GraphicsDevice device, int size)
+        {
+            var data = new Color[size * size];
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float fx = x;
+                    float fy = y;
+
+                    // Gabungan 3 gelombang dengan frekuensi & arah berbeda -> pola riak organik,
+                    // bukan garis-garis lurus yang keliatan buatan
+                    float wave = (float)Math.Sin((fx * 0.11 + fy * 0.05))
+                               + (float)Math.Sin((fx * 0.04 - fy * 0.13) * 1.6)
+                               + (float)Math.Sin((fx * 0.08 + fy * 0.09) * 0.7);
+                    wave /= 3f; // -1..1
+
+                    float t = wave * 0.5f + 0.5f; // 0..1
+                    t = (float)Math.Pow(t, 3.0); // tajamkan, supaya cuma "puncak riak" yang keliatan terang
+
+                    float a = MathHelper.Clamp(t * 0.55f, 0f, 0.55f);
+                    data[y * size + x] = Color.White * a;
+                }
+            }
+
+            var tex = new Texture2D(device, size, size);
+            tex.SetData(data);
+            return tex;
+        }
+
+        /// <summary>Bulatan cahaya lembut (radial gradient), untuk glow matahari, horizon, dan sparkle laut.</summary>
+        private static Texture2D BuildSoftGlow(GraphicsDevice device, int size)
+        {
+            var data = new Color[size * size];
+            Vector2 center = new Vector2(size / 2f);
+            float maxRadius = size / 2f;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dist = Vector2.Distance(new Vector2(x, y), center);
+                    float t = MathHelper.Clamp(dist / maxRadius, 0f, 1f);
+                    float a = (float)Math.Pow(MathHelper.Clamp(1f - t, 0f, 1f), 2.0);
+                    data[y * size + x] = Color.White * a;
+                }
+            }
+
+            var tex = new Texture2D(device, size, size);
+            tex.SetData(data);
+            return tex;
+        }
+
+        private static Texture2D BuildSolidPixel(GraphicsDevice device)
+        {
+            var tex = new Texture2D(device, 1, 1);
+            tex.SetData(new[] { Color.White });
+            return tex;
+        }
+
+        private static Texture2D BuildVignette(GraphicsDevice device, int size)
+        {
+            var data = new Color[size * size];
+            Vector2 center = new Vector2(size / 2f);
+            float maxRadius = size / 2f * 1.42f;
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float dist = Vector2.Distance(new Vector2(x, y), center);
+                    float t = MathHelper.Clamp(dist / maxRadius, 0f, 1f);
+                    float a = (float)Math.Pow(t, 2.5);
+                    data[y * size + x] = Color.Black * a;
+                }
+            }
+
+            var tex = new Texture2D(device, size, size);
+            tex.SetData(data);
+            return tex;
+        }
+    }
+}

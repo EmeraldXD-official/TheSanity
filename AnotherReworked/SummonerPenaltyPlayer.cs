@@ -14,12 +14,18 @@ namespace TheSanity.Global
                 {
                     Item heldItem = player.HeldItem;
 
-                    if (heldItem != null && heldItem.damage > 0 &&
-                        !heldItem.DamageType.CountsAsClass(DamageClass.Summon) &&
-                        heldItem.DamageType != DamageClass.Default)
+                    // Whitelist: hanya senjata dengan DamageType yang masuk kelas Summon
+                    // (ini otomatis mencakup whip, karena SummonMeleeSpeed adalah turunan dari Summon)
+                    // yang boleh membuat minion damage full.
+                    bool isHoldingSummonWeapon = heldItem != null &&
+                        heldItem.DamageType.CountsAsClass(DamageClass.Summon);
+
+                    if (!isHoldingSummonWeapon)
                     {
-                        // 🔥 Penalty 95% → damage minion hanya 5%
-                        modifiers.FinalDamage *= 0.05f;
+                        // 🔥 Selain senjata Summon (Melee, Ranged, Magic, Rogue, Healer,
+                        // Thrower, Bard, class modded lain, atau bahkan tangan kosong)
+                        // → damage minion dibuat nyaris nol (efektif minimal 1).
+                        modifiers.FinalDamage *= 0.001f;
                     }
                 }
             }

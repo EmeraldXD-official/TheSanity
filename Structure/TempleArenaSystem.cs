@@ -108,7 +108,18 @@ namespace TheSanity.Structure
             string structurePath = "Structure/TampleArena"; 
 
             // Paste struktur via Structure Helper
-            Generator.GenerateStructure(structurePath, placePoint, Mod);
+            // Catatan: GenerateStructure() di versi API ini return-nya void, jadi kita
+            // bungkus try/catch supaya kalau ada exception (misal file/path salah) tetap
+            // ketahuan dari log, bukan diam-diam gagal.
+            try
+            {
+                Generator.GenerateStructure(structurePath, placePoint, Mod);
+            }
+            catch (Exception ex)
+            {
+                Mod.Logger.Error($"[TempleArenaSystem] EXCEPTION saat generate '{structurePath}' di ({placementX},{placementY}): {ex}");
+                return false;
+            }
 
             // Golem-room render safety fix (Mencegah glitch visual block/wall/actuator)
             for (int x = placementX - 5; x < placementX + structureWidth + 5; x++)

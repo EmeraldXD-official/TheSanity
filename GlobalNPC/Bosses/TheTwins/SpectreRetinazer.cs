@@ -1,0 +1,341 @@
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using System.Collections.Generic;
+using Terraria;
+using Terraria.Audio;
+using Terraria.DataStructures;
+using Terraria.GameContent;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace YourModName.Content.NPCs
+{
+    // ==========================================
+    // SpectreRetinazer — "plek ketiplek" pasangan dari SpectreSpazmatism.cs, sama persis
+    // filosofinya (baca komentar panjang di file itu buat detail AIType/Phase2/PostAI),
+    // cuma:
+    //   - Tema warna MERAH (bukan hijau).
+    //   - Numpang AI + ANIMASI VANILLA ASLI Retinazer (bukan Spazmatism).
+    //   - PENTING (beda dari versi boss "The Twins" mod ini di TwinsRework.cs): TIDAK ADA
+    //     layer glowmask mata terpisah ("Eye_Laser"/RetinazerGlowTexture) SAMA SEKALI.
+    //     Whole-body glow di sini nutupin SELURUH badan lewat pass additive yang sama
+    //     kayak SpectreSpazmatism, BUKAN glow khusus di bagian mata doang.
+    //
+    // Sama kayak SpectreSpazmatism: NPC ini berdiri sendiri secara AI/logic (bukan
+    // nempel/mirroring posisi ke pasangannya kayak Retinazer asli di TwinsReworkOverride
+    // yang literally numpang posisi Spazmatism). Kalau mau dua-duanya muncul bareng di
+    // dunia, itu urusan spawner/summon terpisah — AI Phase 2 vanilla Retinazer di sini
+    // jalan independen, gak butuh SpectreSpazmatism ada di deket buat berfungsi.
+    //
+    // UPDATE: SECARA VISUAL doang, NPC ini SEKARANG keiket ke SpectreSpazmatism terdekat
+    // lewat rantai Chain12 (lihat SpectreChainLink.cs) - lihat detail gradasi warnanya di
+    // file itu. AI/logic tetap independen total, cuma tampilannya yang disambungin.
+    // ==========================================
+    public class SpectreRetinazer : ModNPC
+    {
+        // Numpang tekstur VANILLA Retinazer langsung, gak ada asset custom.
+        public override string Texture => "Terraria/Images/NPC_" + NPCID.Retinazer;
+
+        // ---- Tema warna (MERAH) ----
+        private static readonly Color FillColor = new Color(255, 30, 30);
+        private static readonly Color GlowColor = new Color(255, 60, 60);
+
+        // Tekstur "recolor" yang di-bikin SEKALI dari tekstur vanilla Retinazer: tiap pixel
+        // yang aslinya gak transparan (alpha > 0) RGB-nya DIGANTI TOTAL jadi FillColor rata,
+        // alpha-nya dipertahankan persis (jadi bentuk siluetnya tetap ngikutin sprite asli).
+        //
+        // DEBUG FIX: versi sebelumnya nge-tint texture ASLI (multiply warna given * warna
+        // tekstur), yang artinya variasi shading/gradasi BAWAAN sprite (highlight terang,
+        // bagian gelap, dll) tetap kebawa proporsional ke hasil akhir - makanya siluetnya
+        // masih "keliatan ada corak/gradasi", bukan warna rata polos. Dengan nge-generate
+        // tekstur baru yang RGB-nya udah di-flatten jadi satu warna solid, draw call
+        // berikutnya TINGGAL nge-atur alpha/opacity doang (via tint Color.White * alpha) -
+        // itu SATU-SATUNYA yang boleh mengubah hasil (uniform di semua pixel, jadi tetap
+        // "polos", bukan ngubah warna per-pixel lagi).
+        private static Texture2D solidTexture;
+
+        private static Texture2D BuildSolidTexture(Texture2D source, Color fillColor)
+        {
+            Color[] data = new Color[source.Width * source.Height];
+            source.GetData(data);
+
+            for (int i = 0; i < data.Length; i++)
+            {
+                byte a = data[i].A;
+                data[i] = a > 0 ? new Color(fillColor.R, fillColor.G, fillColor.B, a) : Color.Transparent;
+            }
+
+            Texture2D result = new Texture2D(Main.instance.GraphicsDevice, source.Width, source.Height);
+            result.SetData(data);
+            return result;
+        }
+
+        public override void Unload()
+        {
+            // JANGAN Dispose() manual di sini — Unload() dipanggil dari background thread
+            // ('.NET TP Worker'), sedangkan Texture2D.Dispose() di FNA/XNA WAJIB dipanggil
+            // dari main thread. Melanggar ini -> ThreadStateException -> mod gagal unload
+            // bersih -> tML minta restart total. Cukup lepas referensinya; GC yang bakal
+            // beresin texture-nya setelah AssemblyLoadContext mod ini di-unload.
+            solidTexture = null;
+
+            // Tekstur rantai (Chain12) dipakai bareng sama SpectreSpazmatism lewat
+            // SpectreChainLink - beresin di sini juga biar gak ada referensi nyangkut.
+            SpectreChainLink.Unload();
+        }
+
+        // Sprite utama sekarang PURELY TRANSPARENT — cuma siluet samar-samar doang biar
+        // bentuknya masih kebaca, bukan "agak transparan" kayak sebelumnya (0.3f).
+        private const float MainSpriteAlpha = 0.08f;
+
+        // Fraksi lifeMax yang dipakai sebagai life AWAL — sengaja jauh di bawah ambang
+        // transisi Phase 2 vanilla (~50%) biar Phase 2 aktif dari detik pertama & permanen.
+        private const float PhaseTwoLifeFraction = 0.15f;
+
+        // ---- Invincibility window pas "transisi phase 2" + full heal abis itu ----
+        // Selama EmergeInvincibilityDuration tick pertama sejak spawn, NPC ini gak bisa
+        // kena damage sama sekali (dontTakeDamage) — dianggap fase "muncul"/transisi.
+        // Begitu window itu abis, life-nya langsung di-set BALIK ke max (full heal) dan baru
+        // bisa kena damage — jadi fight beneran baru mulai abis "cutscene" ini kelar.
+        private const int EmergeInvincibilityDuration = 210; // 3.5 detik (60 tick/detik)
+        private int emergeTimer = 0;
+        private bool hasEmerged = false;
+
+        // ---- After-image trail ----
+        private struct TrailSnap
+        {
+            public Vector2 Center;
+            public float Rotation;
+            public Rectangle Frame;
+            public int SpriteDirection;
+        }
+
+        // List ini cosmetic doang (dipakai buat gambar trail), jadi cukup client-side —
+        // gak perlu di-sync manual lewat ModPacket kayak catatan MP di TwinsRework.cs.
+        private readonly List<TrailSnap> trail = new List<TrailSnap>();
+        private const int TrailLength = 10;
+
+        public override void SetStaticDefaults()
+        {
+            Main.npcFrameCount[NPC.type] = Main.npcFrameCount[NPCID.Retinazer];
+        }
+
+        public override void SetDefaults()
+        {
+            // Ambil base stats vanilla Retinazer dulu (width/height/value/dll), baru
+            // ditimpa yang perlu di bawah.
+            NPC.CloneDefaults(NPCID.Retinazer);
+
+            // AIType/AnimationType = kunci utama biar AI & animasi VANILLA ASLI yang jalan.
+            //
+            // DEBUG NOTE: SEBELUMNYA di sini ada baris "NPC.aiStyle = -1;" — ini KEMUNGKINAN
+            // BESAR penyebab NPC diem total kemarin. Banyak versi tModLoader nganggep
+            // aiStyle < 0 sebagai sinyal "NPC ini beneran gak punya AI apapun" dan SKIP total
+            // pemanggilan AI vanilla (termasuk logic hardcoded type-check Twins yang harusnya
+            // jalan lewat AIType). Sekarang aiStyle SENGAJA DIBIARIN ikut nilai bawaan hasil
+            // CloneDefaults(NPCID.Retinazer) di atas (yang notabene = aiStyle asli Retinazer
+            // sendiri), BUKAN dipaksa -1 lagi. Kalau ternyata NPC masih diem juga setelah ini,
+            // itu tanda AIType-nya sendiri yang gak ke-dukung buat Twins spesifik (lihat chat
+            // penjelasan) — bukan lagi soal aiStyle.
+            AIType = NPCID.Retinazer;
+            AnimationType = NPCID.Retinazer;
+
+            // Bukan boss: no boss bar, no boss music lock, bisa despawn kayak enemy biasa.
+            NPC.boss = false;
+
+            // ---- Stat "elite enemy", TUNABLE — bukan angka boss raid penuh ----
+            NPC.lifeMax = 3000;
+            // NPC.damage SENGAJA GAK di-override lagi - dibiarin pakai damage kontak DEFAULT
+            // VANILLA Retinazer dari CloneDefaults() di atas (per request: Clone/Spectre
+            // pakai damage vanilla apa adanya, gak dapet paket buff/nerf/debuff khusus kayak
+            // Twin original).
+            NPC.defense = 14;
+            NPC.knockBackResist = 0f;
+            NPC.value = 5000f;
+
+            // Sound hit di-RANDOM manual (lihat HitEffect di bawah), makanya HitSound
+            // bawaan di-null-in biar gak dobel triggernya.
+            NPC.HitSound = null;
+            NPC.DeathSound = SoundID.NPCDeath39;
+        }
+
+        public override void OnSpawn(IEntitySource source)
+        {
+            // Maksa Phase 2 dari tick pertama.
+            NPC.life = (int)(NPC.lifeMax * PhaseTwoLifeFraction);
+
+            // Mulai window invincibility "transisi phase 2".
+            emergeTimer = 0;
+            hasEmerged = false;
+            NPC.dontTakeDamage = true;
+
+            // DEBUG FIX: NPC.HitSound sempat balik ke suara "besi"/metal (SoundID.NPCHit4)
+            // walau SetDefaults() udah nge-null-in — penyebabnya CloneDefaults(NPCID.Retinazer)
+            // di SetDefaults narik HitSound dari CACHED TEMPLATE vanilla Retinazer, dan
+            // template itu sendiri sempat kena force SoundID.NPCHit4 lewat
+            // TwinsReworkOverride.SetDefaults(NPC) punya "The Twins" versi mod ini
+            // (TwinsRework.cs). Null-in ULANG di sini (OnSpawn) sebagai jaga-jaga tambahan.
+            NPC.HitSound = null;
+        }
+
+        // ==========================================
+        // Invincibility 2 detik pertama sejak spawn, lalu full heal balik ke max life
+        // begitu window-nya abis. Dijalankan SETELAH AI vanilla (via AIType) kelar --
+        // gak ganggu attack pattern Retinazer yang tetap jalan normal, cuma nge-lock
+        // dontTakeDamage & life-nya doang selama window ini.
+        // ==========================================
+        public override void AI()
+        {
+            // DEBUG FIX (lanjutan dari OnSpawn): null-in HitSound TIAP TICK, bukan cuma
+            // sekali di SetDefaults/OnSpawn — soalnya kontaminasi dari cached template
+            // CloneDefaults ternyata bisa nempel lagi belakangan (misal abis sinkronisasi
+            // state NPC). Ini satu baris murah, aman dipanggil tiap tick, dan mastiin
+            // suara hit yang KEDENGERAN SELALU cuma dari HitSounds[] random di HitEffect()
+            // di bawah, gak pernah balik ke suara metal/besi bawaan Twins asli lagi.
+            NPC.HitSound = null;
+
+            if (hasEmerged)
+                return;
+
+            emergeTimer++;
+            NPC.dontTakeDamage = true;
+
+            if (emergeTimer >= EmergeInvincibilityDuration)
+            {
+                hasEmerged = true;
+                NPC.dontTakeDamage = false;
+                NPC.life = NPC.lifeMax; // full heal balik ke max begitu window kelar
+            }
+        }
+
+        public override void UpdateLifeRegen(ref int damage)
+        {
+            // Life gak boleh naik lagi — biar Phase 2 permanen selama NPC ini hidup.
+            NPC.lifeRegen = 0;
+        }
+
+        // ---- SUARA HIT: random di antara 3 pilihan tiap kena hit ----
+        private static readonly SoundStyle[] HitSounds =
+        {
+            SoundID.NPCHit36,
+            SoundID.Zombie53,
+            SoundID.Zombie54,
+        };
+
+        public override void HitEffect(NPC.HitInfo hit)
+        {
+            SoundStyle chosen = HitSounds[Main.rand.Next(HitSounds.Length)];
+            SoundEngine.PlaySound(chosen, NPC.Center);
+        }
+
+        // ==========================================
+        // Rekam snapshot buat after-image trail — dipanggil OTOMATIS abis AI (vanilla,
+        // via AIType) kelar tiap tick, gak peduli AI-nya di-override manual atau nggak.
+        // ==========================================
+        public override void PostAI()
+        {
+            trail.Add(new TrailSnap
+            {
+                Center = NPC.Center,
+                Rotation = NPC.rotation,
+                Frame = NPC.frame,
+                SpriteDirection = NPC.spriteDirection
+            });
+
+            if (trail.Count > TrailLength)
+                trail.RemoveAt(0);
+        }
+
+        // ==========================================
+        // RENDER — 3 layer: trail merah tebal -> whole-body glow additive (TANPA layer
+        // glowmask mata terpisah) -> sprite utama transparan. Return false = batalin
+        // render vanilla default sepenuhnya.
+        // ==========================================
+        public override bool PreDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
+        {
+            Texture2D texture = TextureAssets.Npc[NPCID.Retinazer].Value;
+
+            if (solidTexture == null)
+                solidTexture = BuildSolidTexture(texture, FillColor);
+
+            Vector2 origin = new Vector2(NPC.frame.Width * 0.5f, NPC.frame.Height * 0.5f);
+            SpriteEffects effects = NPC.spriteDirection == -1 ? SpriteEffects.None : SpriteEffects.FlipHorizontally;
+            Vector2 drawPos = NPC.Center - screenPos;
+
+            // ---- 0. RANTAI (Chain12) KE PARTNER ----
+            // Digambar PALING DULUAN (sebelum trail/glow/sprite badan sendiri) biar
+            // keliatan "nyambung di belakang" badan Twin, bukan numpuk di atasnya.
+            // SpectreChainLink yang nentuin sendiri apakah giliran sisi Ret ini yang
+            // beneran gambar atau nggak (lihat komentar whoAmI di file itu) - biar gak
+            // ke-draw dobel bareng sisi Spazmatism.
+            SpectreChainLink.TryDraw(spriteBatch, screenPos, NPC);
+
+            // ---- 1. AFTER-IMAGE TRAIL MERAH TEBAL ----
+            // Satu draw per ghost pakai solidTexture (RGB udah rata FillColor, alpha ngikutin
+            // bentuk sprite asli) - tint di sini cuma Color.White * alpha, jadi CUMA ngatur
+            // opacity-nya, gak ngubah warna sama sekali. Hasilnya pekat & rata, bukan tint tipis.
+            for (int i = 0; i < trail.Count; i++)
+            {
+                TrailSnap snap = trail[i];
+                float ageT = (i + 1f) / trail.Count; // 0 = paling lama, 1 = paling baru
+                float alpha = MathHelper.Lerp(0.15f, 0.65f, ageT);
+                SpriteEffects trailEffects = snap.SpriteDirection == -1 ? SpriteEffects.None : SpriteEffects.FlipHorizontally;
+
+                spriteBatch.Draw(
+                    solidTexture,
+                    snap.Center - screenPos,
+                    snap.Frame,
+                    Color.White * alpha,
+                    snap.Rotation,
+                    origin,
+                    NPC.scale,
+                    trailEffects,
+                    0f
+                );
+            }
+
+            // ---- 2. WHOLE-BODY GLOW (additive, nutupin SELURUH badan) ----
+            // SENGAJA TIDAK ADA layer glowmask mata terpisah di sini (beda dari versi
+            // boss "The Twins" di TwinsRework.cs yang pakai RetinazerGlowTexture/
+            // "Eye_Laser") — seluruh glow Retinazer di sini cuma dari pass whole-body ini.
+            // Pakai solidTexture juga, biar glow-nya rata (bukan lebih terang di bagian
+            // yang aslinya highlight di sprite asli).
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+
+            Color glowColor = GlowColor * 0.25f; // jauh lebih tipis dari sebelumnya (0.8f)
+            spriteBatch.Draw(
+                solidTexture,
+                drawPos,
+                NPC.frame,
+                glowColor,
+                NPC.rotation,
+                origin,
+                NPC.scale * 1.02f,
+                effects,
+                0f
+            );
+
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+
+            // ---- 3. SPRITE UTAMA, TRANSPARAN, WARNA SOLID/POLOS ----
+            // Sama kayak trail: solidTexture + tint Color.White * alpha. Cuma alpha yang
+            // berubah (opacity), warnanya SELALU rata FillColor di semua pixel, gak ada
+            // gradasi/shading dari sprite asli maupun dari world lighting sama sekali.
+            spriteBatch.Draw(
+                solidTexture,
+                drawPos,
+                NPC.frame,
+                Color.White * MainSpriteAlpha,
+                NPC.rotation,
+                origin,
+                NPC.scale,
+                effects,
+                0f
+            );
+
+            return false;
+        }
+    }
+}

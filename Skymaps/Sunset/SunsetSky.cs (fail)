@@ -1,0 +1,352 @@
+using System;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using Terraria;
+using Terraria.GameContent;
+using Terraria.Graphics.Effects;
+
+namespace TheSanity.Content.Skies
+{
+    /// <summary>
+    /// Background LAUT TERBUKA saat sunset/sunrise (tanpa pasir/pantai): langit gradasi
+    /// ungu-oranye-kuning, matahari asli Terraria (asset vanilla, TIDAK DIUBAH dari versi
+    /// yang sudah oke) yang terlihat "tenggelam" separuh di balik laut, awan yang disorot
+    /// warna sunset, dan laut yang berkilau di banyak titik ACAK di seluruh permukaannya.
+    ///
+    /// Menimpa TOTAL background asli Terraria.
+    ///
+    /// CATATAN (v4): dihapus semua elemen pasir pantai (gradient pasir, grain, wet-sand band,
+    /// garis foam di batas pasir-air) -- sekarang laut memenuhi dari horizon sampai dasar
+    /// layar. Efek glow "foam" yang dulu jadi 1 garis di batas pasir-air sekarang disebar
+    /// ACAK ke seluruh permukaan laut (FoamGlow), bukan lagi di 1 baris tetap.
+    /// </summary>
+    public class SunsetSky : CustomSky
+    {
+        private bool _isActive;
+        private float _fade;
+        private float _time;
+
+        public static float CurrentFade { get; private set; }
+
+        private static Texture2D _skyGradient;
+        private static Texture2D _oceanGradient;
+        private static Texture2D _waterTexture;
+        private static Texture2D _softGlow;
+        private static Texture2D _solidPixel;
+        private static Texture2D _vignetteTex;
+
+        private const int CloudCount = 4;
+        private const int GlitterStreakCount = 12;
+        private const int FoamGlowCount = 70;
+
+        private struct SunsetCloud
+        {
+            public float NormalizedX;
+            public float NormalizedY;
+            public float Speed;
+            public float Scale;
+            public float Alpha;
+            public int CloudVariant;
+        }
+
+        /// <summary>
+        /// Titik glow "foam" tersebar ACAK di seluruh permukaan laut (dulu cuma 1 garis
+        /// tetap di batas pasir-air) -- gaya visualnya persis sama seperti foam yang kamu
+        /// suka (warna hangat keputihan, additive, bentuk pipih), cuma sekarang posisinya
+        /// menyebar bebas ke seluruh laut.
+        /// </summary>
+        private struct FoamGlow
+        {
+            public float NormalizedX;
+            public float NormalizedDepth; // 0 = dekat horizon, 1 = dasar layar
+            public float Scale;
+            public float TwinklePhase;
+            public float TwinkleSpeed;
+            public float RotationOffset;
+            public bool IsSparkle; // true = kilau silang tajam ("gemerlap"), false = glow lembut biasa
+        }
+
+        private SunsetCloud[] _clouds;
+        private FoamGlow[] _foamGlows;
+        private readonly Random _rand = new Random(54321);
+
+        private void EnsureInitialized()
+        {
+            if (_skyGradient == null)
+            {
+                SunsetTextureGenerator.Generate(Main.instance.GraphicsDevice,
+                    out _skyGradient, out _oceanGradient, out _waterTexture, out _softGlow, out _solidPixel, out _vignetteTex);
+            }
+
+            if (_clouds == null)
+            {
+                _clouds = new SunsetCloud[CloudCount];
+                for (int i = 0; i < CloudCount; i++)
+                {
+                    _clouds[i] = new SunsetCloud
+                    {
+                        NormalizedX = (float)_rand.NextDouble(),
+                        NormalizedY = 0.08f + (float)_rand.NextDouble() * 0.32f,
+                        Speed = 0.006f + (float)_rand.NextDouble() * 0.01f,
+                        Scale = 0.9f + (float)_rand.NextDouble() * 1.3f,
+                        Alpha = 0.35f + (float)_rand.NextDouble() * 0.35f,
+                        CloudVariant = _rand.Next(3)
+                    };
+                }
+            }
+
+            if (_foamGlows == null)
+            {
+                _foamGlows = new FoamGlow[FoamGlowCount];
+                for (int i = 0; i < FoamGlowCount; i++)
+                {
+                    _foamGlows[i] = new FoamGlow
+                    {
+                        NormalizedX = (float)_rand.NextDouble(),
+                        NormalizedDepth = (float)_rand.NextDouble(),
+                        Scale = 0.5f + (float)_rand.NextDouble() * 1.1f,
+                        TwinklePhase = (float)(_rand.NextDouble() * MathHelper.TwoPi),
+                        TwinkleSpeed = 0.7f + (float)_rand.NextDouble() * 1.7f,
+                        RotationOffset = (float)(_rand.NextDouble() * MathHelper.TwoPi),
+                        IsSparkle = _rand.NextDouble() < 0.15 // shader sekarang sudah nanganin glitter utama; sisanya cuma aksen tambahan
+                    };
+                }
+            }
+        }
+
+        public override void Update(GameTime gameTime)
+        {
+            EnsureInitialized();
+
+            float delta = (float)gameTime.ElapsedGameTime.TotalSeconds;
+            _time += delta;
+
+            if (_isActive && _fade < 1f)
+                _fade = Math.Min(1f, _fade + delta * 0.6f);
+            else if (!_isActive && _fade > 0f)
+                _fade = Math.Max(0f, _fade - delta * 0.6f);
+
+            CurrentFade = _fade;
+
+            for (int i = 0; i < _clouds.Length; i++)
+            {
+                SunsetCloud c = _clouds[i];
+                c.NormalizedX += c.Speed * delta;
+                if (c.NormalizedX > 1.25f) c.NormalizedX = -0.25f;
+                _clouds[i] = c;
+            }
+        }
+
+        public override Color OnTileColor(Color inColor) => inColor;
+
+        private static void DrawSoftBlob(SpriteBatch spriteBatch, Texture2D tex, Vector2 origin, Vector2 center, float pixelWidth, float pixelHeight, Color color, float rotation = 0f)
+        {
+            Vector2 scale = new Vector2(pixelWidth / tex.Width, pixelHeight / tex.Height);
+            spriteBatch.Draw(tex, center, null, color, rotation, origin, scale, SpriteEffects.None, 0f);
+        }
+
+        public override void Draw(SpriteBatch spriteBatch, float minDepth, float maxDepth)
+        {
+            if (_fade <= 0f)
+                return;
+
+            EnsureInitialized();
+
+            if (!(minDepth <= 0f && maxDepth >= 0f))
+                return;
+
+            float screenW = Main.screenWidth;
+            float screenH = Main.screenHeight;
+            Vector2 screenCenter = new Vector2(screenW, screenH) * 0.5f;
+            float baseScale = Math.Max(screenW, screenH) / 900f;
+
+            float horizonY = screenH * 0.60f;
+            Vector2 sunPos = new Vector2(screenW * 0.5f, horizonY);
+
+            float pulse = 0.9f + 0.1f * (float)Math.Sin(_time * 0.8f);
+
+            spriteBatch.End();
+
+            // ================= 0) LANGIT GRADASI (menimpa TOTAL background vanilla) =================
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, RasterizerState.CullNone);
+            spriteBatch.Draw(_skyGradient, new Vector2(0f, 0f), null, Color.White * _fade, 0f,
+                Vector2.Zero, new Vector2(screenW, horizonY + 4f), SpriteEffects.None, 0f);
+            spriteBatch.End();
+
+            // ================= Glow horizon + MATAHARI (additive) -- TIDAK DIUBAH =================
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, SamplerState.LinearClamp, DepthStencilState.None, RasterizerState.CullNone);
+
+            Vector2 glowOrigin = new Vector2(_softGlow.Width, _softGlow.Height) * 0.5f;
+            Color sunGlowColor = new Color(255, 200, 120);
+
+            spriteBatch.Draw(_softGlow, sunPos, null, sunGlowColor * (0.5f * _fade * pulse), 0f,
+                glowOrigin, new Vector2(baseScale * 9f, baseScale * 1.6f), SpriteEffects.None, 0f);
+
+            spriteBatch.Draw(_softGlow, sunPos, null, sunGlowColor * (0.45f * _fade * pulse), 0f,
+                glowOrigin, baseScale * 4.2f, SpriteEffects.None, 0f);
+            spriteBatch.Draw(_softGlow, sunPos, null, new Color(255, 225, 170) * (0.55f * _fade * pulse), 0f,
+                glowOrigin, baseScale * 2.6f, SpriteEffects.None, 0f);
+            spriteBatch.Draw(_softGlow, sunPos, null, Color.White * (0.4f * _fade * pulse), 0f,
+                glowOrigin, baseScale * 1.3f, SpriteEffects.None, 0f);
+
+            Texture2D sunTex = TextureAssets.Sun.Value;
+            Vector2 sunOrigin = new Vector2(sunTex.Width, sunTex.Height) * 0.5f;
+            float sunScale = baseScale * 2.6f * pulse;
+            spriteBatch.Draw(sunTex, sunPos, null, new Color(255, 235, 210) * _fade, 0f,
+                sunOrigin, sunScale, SpriteEffects.None, 0f);
+
+            spriteBatch.End();
+
+            // ================= AWAN =================
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, RasterizerState.CullNone);
+
+            for (int i = 0; i < _clouds.Length; i++)
+            {
+                SunsetCloud c = _clouds[i];
+                Texture2D cloudTex = TextureAssets.Cloud[c.CloudVariant].Value;
+                Vector2 cloudOrigin = new Vector2(cloudTex.Width, cloudTex.Height) * 0.5f;
+                Vector2 cloudPos = new Vector2(c.NormalizedX * screenW, c.NormalizedY * horizonY);
+
+                Color cloudTint = Color.Lerp(new Color(80, 45, 60), new Color(255, 170, 110),
+                    1f - MathHelper.Clamp(Vector2.Distance(cloudPos, sunPos) / (screenW * 0.6f), 0f, 1f));
+
+                spriteBatch.Draw(cloudTex, cloudPos, null, cloudTint * (c.Alpha * _fade), 0f,
+                    cloudOrigin, baseScale * c.Scale, SpriteEffects.None, 0f);
+            }
+
+            spriteBatch.End();
+
+            // ================= 2) LAUT PENUH: dari horizon sampai BENAR-BENAR dasar layar =================
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, RasterizerState.CullNone);
+
+            spriteBatch.Draw(_oceanGradient, new Vector2(0f, horizonY), null, Color.White * _fade, 0f,
+                Vector2.Zero, new Vector2(screenW, screenH - horizonY + 2f), SpriteEffects.None, 0f);
+
+            spriteBatch.End();
+
+            // Tekstur riak air di-TILE dan di-SCROLL (2 lapis, arah & kecepatan beda) di atas
+            // gradasi tadi -- gerakannya sendiri yang bikin air kerasa hidup, bukan statis.
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, SamplerState.LinearWrap, DepthStencilState.None, RasterizerState.CullNone);
+
+            float oceanAreaHeight = screenH - horizonY + 2f;
+            int texSize = _waterTexture.Width;
+
+            // Lapis 1: bergerak pelan ke kanan-bawah
+            float offX1 = (_time * 14f) % texSize;
+            float offY1 = (_time * 5f) % texSize;
+            var waterSource1 = new Rectangle(0, 0, (int)screenW + texSize, (int)oceanAreaHeight + texSize);
+            spriteBatch.Draw(_waterTexture, new Vector2(-offX1, horizonY - offY1), waterSource1,
+                new Color(180, 190, 255) * (0.30f * _fade), 0f, Vector2.Zero, 1f, SpriteEffects.None, 0f);
+
+            // Lapis 2: bergerak ke arah berbeda & lebih cepat -> parallax, kesan riak bertumpuk
+            float offX2 = (_time * -9f) % texSize;
+            float offY2 = (_time * 7.5f) % texSize;
+            var waterSource2 = new Rectangle(0, 0, (int)screenW + texSize, (int)oceanAreaHeight + texSize);
+            spriteBatch.Draw(_waterTexture, new Vector2(-offX2, horizonY - offY2), waterSource2,
+                new Color(255, 210, 170) * (0.18f * _fade), 0f, Vector2.Zero, 1f, SpriteEffects.None, 0f);
+
+            spriteBatch.End();
+
+            // ================= Kilau air: jalur pantulan matahari + FoamGlow TERSEBAR ACAK di seluruh laut =================
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, SamplerState.LinearClamp, DepthStencilState.None, RasterizerState.CullNone);
+
+            // Jalur pantulan matahari (narrow triangle menuju sunPos)
+            for (int i = 0; i < GlitterStreakCount; i++)
+            {
+                float t = i / (float)(GlitterStreakCount - 1);
+                float y = MathHelper.Lerp(horizonY + 6f, screenH - 10f, t);
+                float width = MathHelper.Lerp(baseScale * 40f, baseScale * 160f, t);
+                float flicker = 0.5f + 0.5f * (float)Math.Sin(_time * (3f + i * 0.7f) + i);
+                float alpha = MathHelper.Lerp(0.5f, 0.18f, t) * flicker;
+
+                DrawSoftBlob(spriteBatch, _softGlow, glowOrigin, new Vector2(screenW * 0.5f, y),
+                    width, baseScale * 5f, sunGlowColor * (alpha * _fade));
+            }
+
+            // FoamGlow: sebagian jadi glow lembut (seperti foam yang kamu suka), sebagian lagi
+            // jadi kilau SILANG tajam yang berkedip byar-pet ("gemerlap") -- disebar ACAK ke
+            // seluruh laut, bukan cuma 1 baris tetap.
+            for (int i = 0; i < _foamGlows.Length; i++)
+            {
+                FoamGlow g = _foamGlows[i];
+                float gx = g.NormalizedX * screenW;
+                float gy = MathHelper.Lerp(horizonY + 10f, screenH - 6f, g.NormalizedDepth);
+                float depthFade = MathHelper.Lerp(0.45f, 1f, g.NormalizedDepth);
+                Vector2 pos = new Vector2(gx, gy);
+
+                if (g.IsSparkle)
+                {
+                    // Kilau tajam: sebagian besar waktu nyaris tak terlihat, lalu byar sebentar
+                    // (pangkat tinggi pada sinus -> pulsa sempit, bukan gelombang halus biasa)
+                    float raw = MathHelper.Clamp((float)Math.Sin(_time * g.TwinkleSpeed + g.TwinklePhase), 0f, 1f);
+                    float sparkle = (float)Math.Pow(raw, 10.0);
+                    float sparkleAlpha = sparkle * depthFade * _fade;
+
+                    if (sparkleAlpha > 0.01f)
+                    {
+                        Color sparkleColor = new Color(255, 250, 235) * sparkleAlpha;
+                        float armLength = baseScale * 5.5f * g.Scale;
+                        float armThickness = baseScale * 0.55f * g.Scale;
+
+                        // Silang 4 arah (bentuk "+") -> kesan kilau/glitter klasik
+                        DrawSoftBlob(spriteBatch, _softGlow, glowOrigin, pos, armLength, armThickness, sparkleColor, g.RotationOffset);
+                        DrawSoftBlob(spriteBatch, _softGlow, glowOrigin, pos, armThickness, armLength, sparkleColor, g.RotationOffset);
+                        // Titik pusat kecil biar terasa "byar"
+                        DrawSoftBlob(spriteBatch, _softGlow, glowOrigin, pos, armThickness * 2.2f, armThickness * 2.2f, Color.White * sparkleAlpha);
+                    }
+                }
+                else
+                {
+                    float shimmer = 0.5f + 0.5f * (float)Math.Sin(_time * g.TwinkleSpeed + g.TwinklePhase);
+                    float glowAlpha = (0.3f + 0.35f * shimmer) * depthFade * _fade;
+                    float wobble = (float)Math.Sin(_time * 0.9f + g.RotationOffset) * 0.15f;
+
+                    DrawSoftBlob(spriteBatch, _softGlow, glowOrigin, pos,
+                        baseScale * 3.3f * g.Scale, baseScale * 1.05f * g.Scale,
+                        new Color(255, 245, 230) * glowAlpha, wobble);
+                }
+            }
+
+            spriteBatch.End();
+
+            // ================= 3) VIGNETTE sinematik penutup =================
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, RasterizerState.CullNone);
+            Vector2 vignetteOrigin = new Vector2(_vignetteTex.Width, _vignetteTex.Height) * 0.5f;
+            float vignetteScaleX = screenW / _vignetteTex.Width;
+            float vignetteScaleY = screenH / _vignetteTex.Height;
+            spriteBatch.Draw(_vignetteTex, screenCenter, null, Color.White * (0.45f * _fade), 0f,
+                vignetteOrigin, new Vector2(vignetteScaleX, vignetteScaleY), SpriteEffects.None, 0f);
+            spriteBatch.End();
+
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, SamplerState.LinearClamp, DepthStencilState.None, RasterizerState.CullNone);
+        }
+
+        public override float GetCloudAlpha() => 1f - _fade;
+
+        public override void Activate(Vector2 position, params object[] args) => _isActive = true;
+
+        public override void Deactivate(params object[] args) => _isActive = false;
+
+        public override void Reset()
+        {
+            _isActive = false;
+            _fade = 0f;
+        }
+
+        public override bool IsActive() => _isActive || _fade > 0f;
+
+        /// <summary>
+        /// Menggambar overlay gelap-hangat transparan di atas TILE/DUNIA GAME (bukan UI/cursor),
+        /// dipanggil dari SunsetLightingSystem lewat hook PostDrawTiles.
+        /// </summary>
+        public static void DrawDuskOverlay(SpriteBatch spriteBatch)
+        {
+            if (_solidPixel == null || CurrentFade <= 0f)
+                return;
+
+            Color overlay = new Color(28, 18, 42);
+            spriteBatch.Draw(_solidPixel, Vector2.Zero, null, overlay * (0.4f * CurrentFade), 0f,
+                Vector2.Zero, new Vector2(Main.screenWidth, Main.screenHeight), SpriteEffects.None, 0f);
+        }
+    }
+}

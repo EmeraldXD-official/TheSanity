@@ -120,7 +120,15 @@ namespace TheSanity.GlobalNPCs
             Point16 placePoint = new Point16(placementX, placementY);
             string structurePath = "Structure/LoveOfMutant";
 
-            Generator.GenerateStructure(structurePath, placePoint, Mod);
+            try
+            {
+                Generator.GenerateStructure(structurePath, placePoint, Mod);
+            }
+            catch (System.Exception ex)
+            {
+                Mod.Logger.Error($"[FargosEasterEgg] EXCEPTION saat generate '{structurePath}' di ({placementX},{placementY}): {ex}");
+                return;
+            }
 
             // =========================================================================
             // UPDATE FRAME (Mencegah Glitch Cat/Painting pada Blok dan Dinding)
