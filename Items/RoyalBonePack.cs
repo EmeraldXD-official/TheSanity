@@ -46,9 +46,17 @@ namespace TheSanity.Items
                 // Visual Bone Glove (Dipasang di slot kedua belah tangan / Hand On & Hand Off)
                 player.handon = ContentSamples.ItemsByType[ItemID.BoneGlove].handOnSlot;
                 player.handoff = ContentSamples.ItemsByType[ItemID.BoneGlove].handOffSlot;
-                
-                // PERBAIKAN UTAMA: Memaksa visual kepala player memakai topi kepala rusa dari Bone Helm
-                player.head = ContentSamples.ItemsByType[ItemID.BoneHelm].headSlot;
+
+                // FIX: baris "player.head = ...BoneHelm.headSlot" DIHAPUS - beda dari back/handon/
+                // handoff (yang emang slot VISUAL KHUSUS aksesoris, aman disentuh), player.head itu
+                // field ARMOR HEAD SLOT ASLI yang SAMA PERSIS dipakai UpdateArmorSets() buat ngecek
+                // kombinasi head/body/legs pas nentuin Set Bonus armor player aktif/enggak. Maksa
+                // field ini jadi ID Bone Helm tiap tick bikin game ngira player pakai Bone Helm di
+                // slot head (bukan armor asli-nya), jadi Set Bonus armor real player GAK PERNAH
+                // ke-detect match walau udah full set. Gak ada padanan slot visual aksesoris buat
+                // head kayak back/handon/handoff - kalau butuh visual "antlers nongol di kepala",
+                // itu WAJIB lewat custom PlayerDrawLayer (gambar manual di atas render kepala),
+                // bukan nyentuh player.head langsung.
             }
         }
 

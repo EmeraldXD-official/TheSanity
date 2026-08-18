@@ -37,8 +37,19 @@ namespace TheSanity.GlobalNPC.Bosses.TorchGods
 	///
 	/// Cara spawn ITEM belum ada dulu (nanti disiapkan terpisah) - untuk
 	/// sekarang NPC ini baru bisa dites lewat command /spawnnpc atau semacamnya.
+	///
+	/// === CATATAN CRASH "Failed to load asset: Images\NPC_664_Head_Boss" ===
+	/// Attribute [AutoloadBossHead] SEBELUMNYA ada di sini - itu bikin
+	/// tModLoader otomatis nyari file "TrueTorchGod_Head_Boss.png" di folder
+	/// yang sama kayak class ini. Karena file itu BELUM ADA (sprite custom
+	/// belum siap) DAN Texture di-override manual ke path vanilla, hasilnya
+	/// malah nyoba nge-load "NPC_664_Head_Boss" (664 = ID vanilla Torch God)
+	/// yang emang gak pernah ada sebagai file terpisah di vanilla -> crash.
+	/// Attribute-nya DIHAPUS dulu (boss tetap jalan normal, cuma gak ada ikon
+	/// portrait kecil pas fight). Begitu ada "TrueTorchGod_Head_Boss.png" di
+	/// folder yang sama kayak file ini, tinggal taruh lagi
+	/// [AutoloadBossHead] persis di atas "public class TrueTorchGod".
 	/// </summary>
-	[AutoloadBossHead]
 	public class TrueTorchGod : ModNPC
 	{
 		// SizeMultiplier sekarang CUMA ngaruh ke ukuran VISUAL (NPC.scale) -
@@ -64,6 +75,7 @@ namespace TheSanity.GlobalNPC.Bosses.TorchGods
 		private readonly TorchGodLifeRevealPattern lifeReveal = new();
 		private readonly TorchGodSpiralFireballPattern spiralFireball = new();
 		private readonly TorchGodLaserSweepPattern laserSweep = new();
+		private readonly TorchGodCultistRainPattern cultistRain = new();
 
 		// Sementara pakai sprite vanilla (lihat catatan MODE SPRITE di atas).
 		public override string Texture => "Terraria/Images/NPC_" + NPCID.TorchGod;
@@ -228,9 +240,14 @@ namespace TheSanity.GlobalNPC.Bosses.TorchGods
 				laserSweep.Activate(NPC);
 
 			// Begitu laser sweep BARU AJA kelar (telegraph + muter abis),
-			// balik lagi ke spiral fireball - jadinya kedua attack ini
-			// LOOPING bergantian terus selama fight berlangsung.
+			// lanjut ke Cultist Ritual rain.
 			if (laserSweep.Update())
+				cultistRain.Activate(NPC);
+
+			// Begitu Cultist Ritual rain BARU AJA kelar (ritual timbul ->
+			// hujan -> mengecil, semua abis), balik lagi ke spiral fireball -
+			// jadinya SEMUA attack ini LOOPING bergantian terus selama fight.
+			if (cultistRain.Update(NPC))
 				spiralFireball.Activate();
 
 			// Jaga-jaga: pastiin dontTakeDamage tetap false tiap tick abis

@@ -86,9 +86,13 @@ namespace TheSanity.GlobalItems
                         if (field.GetValue(rule) is IItemDropRule nestedRule && RulesContainHardmodeOres(nestedRule))
                             return true;
                     }
-                    else if (typeof(IItemDropRule[]).IsAssignableFrom(field.FieldType))
+                    // FIX: Dulu cuma cek IItemDropRule[], padahal LeadingConditionRule dkk
+                    // nyimpen nested rule-nya di List<IItemDropRule>, bukan array.
+                    // Pakai IEnumerable<IItemDropRule> biar array MAUPUN List (atau koleksi apapun) ke-cover.
+                    else if (typeof(System.Collections.Generic.IEnumerable<IItemDropRule>).IsAssignableFrom(field.FieldType))
                     {
-                        if (field.GetValue(rule) is IItemDropRule[] nestedRules && nestedRules.Any(r => RulesContainHardmodeOres(r)))
+                        if (field.GetValue(rule) is System.Collections.Generic.IEnumerable<IItemDropRule> nestedRules
+                            && nestedRules.Any(r => RulesContainHardmodeOres(r)))
                             return true;
                     }
                 }

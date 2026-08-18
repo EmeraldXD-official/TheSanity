@@ -16,6 +16,10 @@ namespace TheSanity.GlobalNPC.Bosses.TorchGods.Projectiles
 	///    beda dari lemparan vanilla Fireball asli yang kena gravitasi).
 	///  - Ninggalin afterimage trail yang MAKIN MENGECIL & MAKIN TRANSPARAN
 	///    makin jauh dari peluru utama, pakai Projectile.oldPos bawaan.
+	///  - Sprite UTAMA (yang tajam/normal) SENGAJA gak digambar - yang
+	///    keliatan cuma trail afterimage-nya (lihat PreDraw).
+	///  - Kalau nyentuh zona aman Cultist Ritual (TorchGodCultistRainPattern),
+	///    peluru ini langsung mati (lihat AI() & TorchGodCultistRitualState).
 	/// </summary>
 	public class TorchGodFireballProjectile : ModProjectile
 	{
@@ -63,6 +67,20 @@ namespace TheSanity.GlobalNPC.Bosses.TorchGods.Projectiles
 
 		public override void AI()
 		{
+			// Kalau lagi ada Cultist Ritual aktif (pattern TorchGodCultistRainPattern)
+			// DAN peluru ini masuk radius amannya - "padamin" diri sendiri.
+			// Ini yang bikin area di dalam ritual jadi zona aman buat player
+			// (asal mereka berdiri bareng TorchGod di dalam lingkaran itu).
+			if (TorchGodCultistRitualState.IsActive)
+			{
+				float distSq = Vector2.DistanceSquared(Projectile.Center, TorchGodCultistRitualState.Center);
+				if (distSq <= TorchGodCultistRitualState.Radius * TorchGodCultistRitualState.Radius)
+				{
+					Projectile.Kill();
+					return;
+				}
+			}
+
 			// Cuma nyesuain rotasi visual biar ngikutin arah gerak - posisi
 			// sebenernya udah otomatis lurus konstan dari velocity, gak
 			// disentuh di sini sama sekali.
@@ -98,9 +116,12 @@ namespace TheSanity.GlobalNPC.Bosses.TorchGods.Projectiles
 					Projectile.scale * scale, SpriteEffects.None, 0f);
 			}
 
-			// return true -> peluru utama (sprite asli, ukuran normal) tetap
-			// digambar normal di atas semua trail ini.
-			return true;
+			// return false -> sprite UTAMA (yang ukuran normal, gak buram)
+			// SENGAJA GAK digambar - yang keliatan cuma trail afterimage di
+			// atas ini (salinan paling deket/paling baru di trail otomatis
+			// nutupin posisi peluru saat ini, jadi tetep keliatan "ada
+			// pelurunya", cuma bukan sprite polos yang tajam).
+			return false;
 		}
 	}
 }

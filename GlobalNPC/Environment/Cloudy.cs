@@ -1,4 +1,5 @@
 using System;
+using CollisionLib;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Terraria;
@@ -25,8 +26,38 @@ namespace TheSanity.NPCs
         private bool isFreezingPostLightning = false; 
         private int postLightningFreezeTimer = 0;     
 
-        private int hookedLifetimeTimer = 0;
         private int landingWindowTimer = 0;
+
+        // ==========================================================================
+        // FISIK SOLID PLATFORM SEKARANG PAKAI COLLISIONLIB (Impact Library), SAMA
+        // KAYAK ArenaBorderColliderNPC - BUKAN LAGI Rectangle-check + set posisi/
+        // velocity player manual kayak sebelumnya.
+        //
+        // platformSurface cuma 1 garis lurus (bukan poligon kayak arena lingkaran)
+        // yang nempel di TEPI ATAS hitbox awan, dan di-REBUILD tiap tick (posisi awan
+        // gerak-gerak terus karena angin) lewat RebuildPlatformCollider() di bawah -
+        // pola sama persis kayak RebuildColliders() punya ArenaBorderColliderNPC.
+        //
+        // style array-nya [bawah, atas, kiri, kanan] (lihat komentar di
+        // ArenaBorderColliderNPC.RebuildColliders): di sana border pakai
+        // {1,1,1,1} (solid dari segala arah, gak ada yg bisa ditembus). Di sini
+        // sengaja CUMA "atas" yang di-set 1 ({0,1,0,0}) supaya sifatnya ONE-WAY
+        // PLATFORM kayak platform vanilla: bisa didaki/ditembus dari bawah waktu
+        // lompat, tapi solid (bisa dipijak) kalau didatangi dari atas pas jatuh.
+        // CATATAN: makna pasti tiap bit style ini ditentukan internal CollisionLib
+        // (source-nya gak ada di project ini buat di-cek), jadi kalau ternyata
+        // kebalik (awan malah nembus dari atas / nge-block dari bawah), tinggal
+        // tukar posisi 0 dan 1 di array platformStyle di bawah.
+        //
+        // grappleable di-set TRUE - sistem grapple manual yang lama (tracker
+        // hookedNpcIndex, narik player ke bawah awan pakai set position/velocity
+        // manual) UDAH DIHAPUS, soalnya gak support multiplayer dengan benar
+        // (cuma client pemilik hook yang bener, client lain desync) dan visual
+        // hook-nya nyeleneh (snap ke bawah awan, bukan nempel wajar). Sekarang
+        // full pakai grapple bawaan CollisionLib, sama kayak border arena.
+        // ==========================================================================
+        private static readonly int[] platformStyle = { 0, 1, 0, 0 };
+        private CollisionSurface platformSurface;
 
         public override string Texture => "Terraria/Images/Projectile_" + ProjectileID.RainCloudRaining;
 
@@ -52,6 +83,18 @@ namespace TheSanity.NPCs
         public override bool CheckActive()
         {
             return false;
+        }
+
+        // Rebuild garis collider (tepi atas hitbox) ke posisi awan TERKINI. Dipanggil
+        // tiap tick dari AI() - persis pola RebuildColliders() di ArenaBorderColliderNPC,
+        // cuma di sini cukup 1 garis aja (bukan poligon banyak sisi) karena bentuknya
+        // platform datar, bukan lingkaran/kotak penuh.
+        private void RebuildPlatformCollider()
+        {
+            Vector2 topLeft = NPC.position;
+            Vector2 topRight = NPC.position + new Vector2(NPC.width, 0f);
+
+            platformSurface = new CollisionSurface(topLeft, topRight, platformStyle, true);
         }
 
         public override float SpawnChance(NPCSpawnInfo spawnInfo)
@@ -230,77 +273,66 @@ namespace TheSanity.NPCs
                 }
             }
 
-            // --- GAYA FISIK BADAN UTAMA (SOLID PLATFORM / WSOLID STYLE) ---
+            // --- GAYA FISIK BADAN UTAMA (SOLID PLATFORM VIA CollisionLib) ---
+            // Rebuild garis collider ke posisi awan tick ini, lalu Update() - fisik
+            // "nempel/gak bisa tembus dari atas"-nya sekarang beneran ditangani
+            // CollisionLib (sama kayak border arena), BUKAN lagi kode manual di sini.
+            RebuildPlatformCollider();
+            platformSurface.Update();
+
+            // Loop di bawah ini SEKARANG cuma buat efek gameplay (blackout, kunci
+            // animasi, fallStart, "awan pecah kalau kejeblos kekencengan", dst) -
+            // TIDAK LAGI maksa posisi/velocity player (itu udah kerjaan
+            // platformSurface di atas). Deteksinya baca kondisi player yang
+            // (diasumsikan) udah diresolve CollisionLib: berdiri tepat di tepi atas
+            // awan dan velocity.Y-nya sudah 0.
             bool playerOnTop = false;
-            float offsetFromPreviousPosition = NPC.position.Y - NPC.oldPosition.Y;
 
             for (int i = 0; i < Main.maxPlayers; i++)
             {
                 Player player = Main.player[i];
                 if (player.active && !player.dead)
                 {
-                    // Cek apakah player sedang di-hook oleh awan ini (abaikan tabrakan jika ya)
-                    bool isThisPlayerHooked = false;
-                    for (int j = 0; j < Main.maxProjectiles; j++)
-                    {
-                        Projectile proj = Main.projectile[j];
-                        if (proj.active && Main.projHook[proj.type] && proj.owner == i)
-                        {
-                            CloudyProjectileTracker tracker = proj.GetGlobalProjectile<CloudyProjectileTracker>();
-                            if (tracker.hookedNpcIndex == NPC.whoAmI)
-                            {
-                                isThisPlayerHooked = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (isThisPlayerHooked) 
+                    if (player.GoingDownWithGrapple || player.controlDown)
                         continue;
 
-                    // Menggunakan batasan fisik WSolid Platform dari GolemArenaPlatform
-                    if (player.GoingDownWithGrapple || Collision.SolidCollision(player.position, player.width, player.height) || player.controlDown)
-                        continue;
+                    // Deteksi "lagi berdiri di atas awan": horizontal overlap sama
+                    // hitbox awan, kaki player nempel pas di tepi atasnya, dan
+                    // velocity.Y udah 0 (tanda CollisionLib udah nyetop jatuhnya
+                    // tick ini). Toleransi 6px buat jaga-jaga float rounding.
+                    bool horizontalOverlap = player.position.X + player.width > NPC.position.X
+                        && player.position.X < NPC.position.X + NPC.width;
+                    bool restingOnTop = Math.Abs((player.position.Y + player.height) - NPC.position.Y) <= 6f;
 
-                    Rectangle playerRect = new((int)player.position.X, (int)player.position.Y + player.height, player.width, 1);
-
-                    int effectiveNPCHitboxHeight = Math.Min((int)player.velocity.Y, 0) + (int)Math.Abs(offsetFromPreviousPosition) + 14;
-                    if (playerRect.Intersects(new Rectangle((int)NPC.position.X, (int)NPC.position.Y, NPC.width, effectiveNPCHitboxHeight)) && player.position.Y <= NPC.position.Y)
+                    if (horizontalOverlap && restingOnTop && player.velocity.Y == 0f)
                     {
-                        if (!player.justJumped && player.velocity.Y >= 0 && !Collision.SolidCollision(player.position + player.velocity, player.width, player.height))
+                        float kecepatanHantaman = player.oldVelocity.Y;
+                        playerOnTop = true;
+
+                        // Mempertahankan logika internal Cloudy awal
+                        player.fallStart = (int)(player.position.Y / 16f);
+                        player.GetModPlayer<CloudyPlayerBlackout>().standingOnCloud = true;
+
+                        if (player.mount.Active)
+                            player.mount.ResetFlightTime(player.velocity.X);
+
+                        if (landingWindowTimer == 0)
+                            landingWindowTimer = 30;
+
+                        float batasKecepatanHancur = player.mount.Active ? 7.0f : 11.0f;
+                        if (kecepatanHantaman >= batasKecepatanHancur && landingWindowTimer > 0)
+                            NPC.ai[3] = 1f;
+
+                        // Mengunci gerakan animasi player agar tidak glitching di udara saat berdiri
+                        if (Math.Abs(player.velocity.X) < 0.01f)
                         {
-                            float kecepatanHantaman = player.velocity.Y;
-                            playerOnTop = true;
-
-                            // Memosisikan player tetap stabil di atas platform awan
-                            player.velocity.Y = 0;
-                            player.position.Y = NPC.position.Y - player.height + 4;
-                            player.position += NPC.velocity;
-
-                            // Mempertahankan logika internal Cloudy awal
-                            player.fallStart = (int)(player.position.Y / 16f);
-                            player.GetModPlayer<CloudyPlayerBlackout>().standingOnCloud = true;
-
-                            if (player.mount.Active)
-                                player.mount.ResetFlightTime(player.velocity.X);
-
-                            if (landingWindowTimer == 0)
-                                landingWindowTimer = 30;
-
-                            float batasKecepatanHancur = player.mount.Active ? 7.0f : 11.0f;
-                            if (kecepatanHantaman >= batasKecepatanHancur && landingWindowTimer > 0)
-                                NPC.ai[3] = 1f;
-
-                            // Mengunci gerakan animasi player agar tidak glitching di udara saat berdiri
-                            if (Math.Abs(player.velocity.X) < 0.01f)
-                            {
-                                player.legFrame.Y = 0;
-                                player.legFrameCounter = 0;
-                            }
-                            player.wingFrame = 0;
-                            player.wingFrameCounter = 0;
-                            player.bodyFrame.Y = 0;
-                            player.bodyFrameCounter = 0;
+                            player.legFrame.Y = 0;
+                            player.legFrameCounter = 0;
                         }
+                        player.wingFrame = 0;
+                        player.wingFrameCounter = 0;
+                        player.bodyFrame.Y = 0;
+                        player.bodyFrameCounter = 0;
                     }
                 }
             }
@@ -308,71 +340,13 @@ namespace TheSanity.NPCs
             if (landingWindowTimer > 0)
                 landingWindowTimer--;
 
-            // =====================================================================
-            // --- MEKANIK GRAPPLING HOOK (DENGAN TRACKER & POSTAI UNTUK UPDATE POSISI) ---
-            // =====================================================================
-            bool adaHookMenempel = false;
-            for (int j = 0; j < Main.maxProjectiles; j++)
-            {
-                Projectile proj = Main.projectile[j];
-                if (proj.active && Main.projHook[proj.type])
-                {
-                    Player playerHook = Main.player[proj.owner];
-                    CloudyProjectileTracker tracker = proj.GetGlobalProjectile<CloudyProjectileTracker>();
-
-                    // Jika hook belum menempel dan mengenai awan, kunci
-                    if (tracker.hookedNpcIndex == -1 && proj.ai[0] == 0f && proj.Hitbox.Intersects(NPC.Hitbox))
-                    {
-                        tracker.hookedNpcIndex = NPC.whoAmI;
-                        proj.ai[0] = 2f;
-                        proj.Center = NPC.Center;
-                        proj.netUpdate = true;
-                    }
-
-                    // Jika hook menempel pada awan ini
-                    if (tracker.hookedNpcIndex == NPC.whoAmI)
-                    {
-                        adaHookMenempel = true;
-
-                        // PENTING: hanya client pemilik player ini yang boleh menimpa posisi/velocity-nya.
-                        // NPC.AI() dieksekusi di SEMUA client (bukan cuma server/pemilik hook), jadi kalau
-                        // tidak dibatasi, client lain yang cuma "nonton" ikut menghitung ulang posisi player
-                        // tersebut secara lokal dan bentrok dengan update posisi asli yang datang dari jaringan
-                        // -> hasilnya player kelihatan diam/teleport-teleport di layar orang lain.
-                        if (playerHook.active && !playerHook.dead && playerHook.whoAmI == Main.myPlayer)
-                        {
-                            float jarakKeAwan = Vector2.Distance(playerHook.Center, NPC.Center);
-                            if (jarakKeAwan < 54f)
-                            {
-                                // Kunci posisi di bawah awan
-                                playerHook.position.X = NPC.Center.X - playerHook.width / 2f;
-                                playerHook.position.Y = NPC.position.Y + NPC.height + 12f;
-                                playerHook.velocity = Vector2.Zero;
-                            }
-                            else
-                            {
-                                // Tarik ke arah awan
-                                Vector2 arahTarik = NPC.Center - playerHook.Center;
-                                arahTarik.Normalize();
-                                float kecepatanTarik = 14f;
-                                playerHook.velocity = arahTarik * kecepatanTarik;
-                                playerHook.fallStart = (int)(playerHook.position.Y / 16f);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (adaHookMenempel)
-            {
-                hookedLifetimeTimer++;
-                if (hookedLifetimeTimer >= 300)
-                    NPC.ai[3] = 1f;
-            }
-            else
-            {
-                hookedLifetimeTimer = 0;
-            }
+            // Mekanik grapple hook manual (tracker/hookedNpcIndex, narik player ke
+            // bawah awan, dst) UDAH DIHAPUS - grapple sekarang sepenuhnya ditangani
+            // CollisionLib lewat platformSurface (grappleable = true di
+            // RebuildPlatformCollider()), yang notabene emang lebih aman buat
+            // multiplayer (gak ada lagi manual set position/velocity player yang
+            // gampang desync) dan visualnya ngikutin standar CollisionLib, bukan
+            // patokan jarak 54f + snap posisi manual kayak sebelumnya.
 
             // --- LOGIKA GERAKAN DINAMIS + ANGIN ---
             if (NPC.ai[1] == 0f)
@@ -397,6 +371,14 @@ namespace TheSanity.NPCs
                 NPC.velocity = Vector2.Zero;
             else if (playerOnTop)
                 NPC.velocity = Vector2.Zero;
+        }
+
+        // Bagian kedua dari siklus CollisionLib tiap tick - sama kayak
+        // ArenaBorderColliderNPC.PostAI(), harus dipanggil biar collider-nya
+        // "kelar" diproses library sebelum tick berikutnya.
+        public override void PostAI()
+        {
+            platformSurface?.PostUpdate();
         }
 
         public override bool PreDraw(SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
@@ -443,9 +425,6 @@ namespace TheSanity.NPCs
         public bool isFromCustomCloud = false;
         public bool isCustomCloudSpark = false;
         private bool hasSpawnedSparks = false;
-
-        // Indeks NPC awan tempat hook menempel (-1 = tidak menempel)
-        public int hookedNpcIndex = -1;
 
         public override void OnSpawn(Projectile projectile, IEntitySource source)
         {
@@ -506,43 +485,9 @@ namespace TheSanity.NPCs
 
         public override void PostAI(Projectile projectile)
         {
-            // --- PEMBARUAN POSISI HOOK DAN KONDISI PELEPASAN ---
-            if (Main.projHook[projectile.type] && hookedNpcIndex != -1)
-            {
-                if (hookedNpcIndex >= 0 && hookedNpcIndex < Main.maxNPCs)
-                {
-                    NPC npc = Main.npc[hookedNpcIndex];
-                    if (npc.active && npc.type == ModContent.NPCType<SpaceRainCloudNPC>() && npc.ai[3] != 1f)
-                    {
-                        Player playerHook = Main.player[projectile.owner];
-                        // Lepas jika tombol lompat, mount, atau player mati/tidak aktif
-                        if (playerHook.controlJump || playerHook.mount.Active || !playerHook.active || playerHook.dead)
-                        {
-                            hookedNpcIndex = -1;
-                            projectile.ai[0] = 1f;
-                            projectile.netUpdate = true;
-                            return;
-                        }
-                        // Perbarui posisi hook ke tengah awan
-                        projectile.Center = npc.Center;
-                        projectile.ai[0] = 2f;
-                        projectile.netUpdate = true;
-                    }
-                    else
-                    {
-                        // Awan tidak aktif/mati, lepaskan
-                        hookedNpcIndex = -1;
-                        projectile.ai[0] = 1f;
-                        projectile.netUpdate = true;
-                    }
-                }
-                else
-                {
-                    hookedNpcIndex = -1;
-                    projectile.ai[0] = 1f;
-                    projectile.netUpdate = true;
-                }
-            }
+            // Update posisi hook manual (hookedNpcIndex) UDAH DIHAPUS - grapple ke
+            // awan sekarang murni ditangani CollisionLib (platformSurface di
+            // SpaceRainCloudNPC, grappleable = true), gak perlu campur tangan di sini.
 
             // --- TRIGGER SPARK SAAT PETIR MENYENTUH TANAH ---
             if (isFromCustomCloud && !hasSpawnedSparks && (projectile.velocity.Y == 0f || Collision.SolidCollision(projectile.position, projectile.width, projectile.height)))

@@ -18,6 +18,33 @@ namespace TheSanity.Systems
     /// punya delegate Tick yang dipanggil tiap frame (diisi dari luar, misal
     /// TwinsArenaGlobalNPC), jadi bisa dipakai buat bikin border ngikutin boss,
     /// narik player yang keluar, dsb, tanpa nge-hardcode logic Twins di sini.
+    ///
+    /// ==========================================
+    /// REVISI: awalnya "Outward Glow" (cincin cahaya memancar KELUAR ~45 block dari tepi
+    /// border), lalu jadi "Arena Fill Glow" (kabut ngisi bagian DALAM arena, dipotong tegas
+    /// di tepi donat). SEKARANG REVISI KEDUA: glow VISUAL ini di-scale nutupin SELURUH DUNIA
+    /// (dihitung dari diagonal ukuran map, lihat DrawSingleArenaGlowFill), TAPI border FISIK
+    /// (donat AuraOut + collision ArenaBorderColliderNPC) TETAP di radius aslinya (700 buat
+    /// Twins) - cuma layer glow ini doang yang membesar, gameplay-nya gak berubah. Di dalam
+    /// radius arena asli efeknya tetap "energi berkumpul ke tepi" kayak sebelumnya, lalu di
+    /// luar radius itu (sampai ke ujung dunia) kecerahannya dikunci penuh biar keliatan
+    /// ngerata ke seluruh map. Overlay-nya tetap pakai noise TurbulentNoise.png punya
+    /// Luminance (Assets/Noise/TurbulentNoise.png di repo Luminance), warnanya TETAP pakai
+    /// animasi pulse merah->hijau->merah yang SAMA (GetAnimatedColor), bukan warna baru.
+    ///
+    /// Efek ini butuh sample 2 tekstur sekaligus (mask radial + noise) makanya WAJIB lewat
+    /// custom shader - gak bisa cuma spriteBatch.Draw biasa kayak donat utama. Shader-nya
+    /// di-load lewat jalur NATIVE tModLoader (ModContent.Request&lt;Effect&gt;), BUKAN lewat
+    /// ShaderManager/ManagedShader punya Luminance - lihat catatan panjang di field
+    /// GlowEffectPath soal kenapa. Lihat DrawArenaGlowFills()/DrawSingleArenaGlowFill() di
+    /// bawah, dan file shader terpisah ArenaBorderGlow.fx.
+    ///
+    /// SENGAJA cuma nyala buat border DEFAULT (TexturePath == null, dipakai Twins) - border
+    /// custom (TorchGod, TexturePath diisi) TIDAK dapet efek ini otomatis, biar gak nubruk
+    /// visual custom spritesheet mereka sendiri. Bisa di-override manual per-Border lewat
+    /// field EnableOutwardGlow kalau nanti mau dipakai border custom juga (nama field
+    /// dipertahankan biar caller lama - TorchGod dkk - gak perlu diubah).
+    /// ==========================================
     /// </summary>
     public class ArenaBorderSystem : ModSystem
     {
@@ -90,6 +117,16 @@ namespace TheSanity.Systems
             // waktu kayak sebelumnya (dipakai Twins/AuraOut).
             public bool UseColorPulse = true;
 
+            // ==========================================
+            // Kabut glow yang ngisi bagian DALAM arena (dulunya cincin keluar, lihat komentar
+            // besar di atas kelas), di-overlay noise TurbulentNoise. Default true, tapi CUMA
+            // benar-benar digambar kalau TexturePath == null juga (lihat DrawArenaGlowFills)
+            // - jadi border custom style TorchGod otomatis gak kena walau field ini dibiarkan
+            // true. Nama field dipertahankan "EnableOutwardGlow" (bukan di-rename) biar caller
+            // lain yang udah pakai field ini gak perlu ikut diubah.
+            // ==========================================
+            public bool EnableOutwardGlow = true;
+
             // Asset tekstur custom punya Border ini sendiri, di-load lazy
             // begitu pertama kali digambar (lihat ArenaBorderSystem.PostDrawTiles).
             internal Asset<Texture2D> CustomTexture;
@@ -142,6 +179,9 @@ namespace TheSanity.Systems
 
         // Hitung warna animasi merah<->hijau berbasis waktu sejak Border dibikin.
         // Gak lagi nyambung ke health boss sama sekali - murni animasi visual.
+        // DIPAKAI BARENGAN oleh donat (DrawBorder) MAUPUN glow ring (DrawSingleOutwardGlow) -
+        // sengaja 1 sumber kebenaran yang sama biar 2 layer itu selalu senada warnanya di
+        // frame yang sama, gak ada drift/lag beda fase.
         private static Color GetAnimatedColor(Border b)
         {
             float elapsed = Main.GameUpdateCount - b.SpawnTick;
@@ -171,17 +211,57 @@ namespace TheSanity.Systems
         // update juga angka ini (atau baca dari auraTexture.Width/Height langsung).
         private const float AuraTextureSize = 500f;
 
+        // ==========================================
+        // uIntensity: pengali kecerahan keseluruhan efek.
+        // uInnerGlowMin: kecerahan minimum di TITIK TENGAH arena (0 = gelap polos di tengah,
+        // 1 = serata tepi/sisa dunia).
+        //
+        // Radius efektif glow ini sendiri (dulu Radius arena, lalu direvisi lagi jadi radius
+        // DUNIA - lihat komentar besar di atas kelas & DrawSingleArenaGlowFill) DIHITUNG
+        // DINAMIS tiap frame dari ukuran map (Main.maxTilesX/Y), bukan konstanta di sini,
+        // karena beda ukuran world (small/medium/large) beda juga radiusnya.
+        // ==========================================
+        private const float GlowIntensity = 1.6f;
+        private const float GlowInnerMin = 0.4f;
+
+        // Noise TurbulentNoise.png milik Luminance - path runtime-nya ngikutin struktur
+        // folder Luminance sendiri (Assets/Noise/TurbulentNoise), di-prefix nama mod
+        // "Luminance" karena ini request LINTAS MOD (bukan asset kepunyaan TheSanity).
+        // Sumber: https://github.com/LucilleKarma/Luminance/blob/main/Assets/Noise/TurbulentNoise.png
+        private const string TurbulentNoisePath = "Luminance/Assets/Noise/TurbulentNoise";
+        private static Asset<Texture2D> turbulentNoiseTexture;
+
+        // ==========================================
+        // Shader glow di-load lewat jalur NATIVE tModLoader (Asset<Effect> biasa) - BUKAN
+        // lewat ShaderManager/ManagedShader punya Luminance lagi. Alasannya: Luminance
+        // ShaderManager butuh shader-nya "terdaftar" lewat mekanisme auto-discovery internal
+        // mereka sendiri yang gak sepenuhnya jelas triggernya dari luar, dan bahkan
+        // FargosSoulsMod (yang JUGA dependency Luminance) ternyata load shader custom
+        // mereka SENDIRI lewat ModContent.Request<Effect> polos, bukan lewat ShaderManager -
+        // jadi ini ngikutin pola yang sama biar gak gantung ke sistem yang gak konsisten.
+        //
+        // Path-nya "TheSanity/Effects/ArenaBorderGlow" - SESUAIKAN kalau lokasi file
+        // ArenaBorderGlow.fx kamu beda (tinggal ganti string ini aja, gak ada logic lain
+        // yang perlu disentuh).
+        // ==========================================
+        private const string GlowEffectPath = "TheSanity/Effects/ArenaBorderGlow";
+        private static Asset<Effect> glowEffectAsset;
+
         public override void OnModLoad()
         {
             if (Main.dedServ)
                 return;
 
             auraTexture = ModContent.Request<Texture2D>(AuraTexturePath, AssetRequestMode.AsyncLoad);
+            turbulentNoiseTexture = ModContent.Request<Texture2D>(TurbulentNoisePath, AssetRequestMode.AsyncLoad);
+            glowEffectAsset = ModContent.Request<Effect>(GlowEffectPath, AssetRequestMode.AsyncLoad);
         }
 
         public override void OnModUnload()
         {
             auraTexture = null;
+            turbulentNoiseTexture = null;
+            glowEffectAsset = null;
         }
 
         public override void PostUpdateEverything()
@@ -231,6 +311,12 @@ namespace TheSanity.Systems
                 DrawBorder(b);
 
             Main.spriteBatch.End();
+
+            // === Pass KEDUA - kabut glow yang ngisi bagian dalam arena (lihat komentar besar
+            // di atas kelas ini). Sengaja DIPISAH dari batch donat di atas: shader custom butuh
+            // SpriteSortMode.Immediate sendiri (Deferred gak bisa dipakai bareng Effect custom
+            // per-draw-call), jadi gak bisa ditumpuk 1 Begin/End yang sama dengan donat. ===
+            DrawArenaGlowFills();
         }
 
         private void DrawBorder(Border b)
@@ -297,6 +383,98 @@ namespace TheSanity.Systems
 
             if (nextAlpha > 0f)
                 Main.spriteBatch.Draw(sheet, drawPos, nextSrc, baseTint * nextAlpha, 0f, frameOrigin, scale, SpriteEffects.None, 0f);
+        }
+
+        // ==========================================
+        // Loop semua border aktif dan gambar kabut glow interior-nya kalau eligible. Di-skip
+        // diam-diam (bukan error) kalau noise/shader belum siap - biasa kejadian sebentar di
+        // awal load dunia sebelum async asset request-nya kelar, glow-nya bakal nongol sendiri
+        // begitu asset-nya ready di frame-frame berikutnya.
+        // ==========================================
+        private void DrawArenaGlowFills()
+        {
+            if (turbulentNoiseTexture == null || !turbulentNoiseTexture.IsLoaded)
+                return;
+
+            if (glowEffectAsset == null || !glowEffectAsset.IsLoaded)
+                return;
+
+            Effect effect = glowEffectAsset.Value;
+            if (effect == null)
+                return;
+
+            foreach (Border b in ActiveBorders)
+            {
+                // TexturePath != null -> border custom (TorchGod dkk), SENGAJA gak dapet
+                // efek ini otomatis (lihat komentar EnableOutwardGlow di atas).
+                if (!b.EnableOutwardGlow || b.TexturePath != null)
+                    continue;
+
+                if (b.Radius <= 1f)
+                    continue;
+
+                DrawSingleArenaGlowFill(b, effect);
+            }
+        }
+
+        private void DrawSingleArenaGlowFill(Border b, Effect effect)
+        {
+            // SUMBER WARNA SAMA PERSIS dengan donat (GetAnimatedColor) - request eksplisit
+            // "shading warna ya tetep, dari MERAH KE HIJAU KE MERAH LAGI". Opacity border
+            // (b.Opacity) tetap dihormati di sini juga biar 2 layer konsisten seberapa
+            // "keliatan"-nya.
+            Color pulseColor = GetAnimatedColor(b) * b.Opacity;
+
+            // ==========================================
+            // REVISI: glow VISUAL ini sekarang di-scale nutupin SELURUH DUNIA, independen dari
+            // radius border fisik (b.Radius, TETAP dipakai apa adanya buat donat + collision -
+            // gak disentuh sama sekali di sini). worldRadius dihitung sebagai DIAGONAL penuh
+            // peta (bukan cuma setengah lebar/tinggi) supaya kepastian nutupin seluruh dunia
+            // terjamin BERAPAPUN posisi b.Center-nya (termasuk kalau kebetulan mepet pojok
+            // map) - titik terjauh mana pun di dunia dari titik mana pun lainnya gak akan
+            // pernah lebih jauh dari diagonal penuh ini.
+            // ==========================================
+            float worldWidthPx = Main.maxTilesX * 16f;
+            float worldHeightPx = Main.maxTilesY * 16f;
+            float worldRadius = MathF.Sqrt(worldWidthPx * worldWidthPx + worldHeightPx * worldHeightPx);
+
+            // Fraction (relatif worldRadius) tempat brightness ramp-nya nyampe penuh - persis
+            // di radius arena ASLI, biar bagian dalam arena kecil tetap kerasa "energi
+            // berkumpul ke tepi" kayak sebelumnya, sebelum glow-nya ngerata terang ke seluruh
+            // sisa dunia.
+            float glowRampFraction = MathHelper.Clamp(b.Radius / worldRadius, 0.0001f, 1f);
+
+            // Indexer EffectParameterCollection return null (bukan throw) kalau nama
+            // parameternya gak ketemu di shader - makanya aman dipakai null-conditional (?.)
+            // di sini, jaga-jaga kalau ada typo nama parameter antara .fx dan C# ini.
+            effect.Parameters["uTime"]?.SetValue(Main.GameUpdateCount * 0.016f);
+            effect.Parameters["uColor"]?.SetValue(pulseColor.ToVector4());
+            effect.Parameters["uNoiseTextureObj"]?.SetValue(turbulentNoiseTexture.Value);
+            effect.Parameters["uIntensity"]?.SetValue(GlowIntensity);
+            effect.Parameters["uInnerGlowMin"]?.SetValue(GlowInnerMin);
+            effect.Parameters["uGlowRampFraction"]?.SetValue(glowRampFraction);
+
+            // SpriteSortMode.Immediate WAJIB dipakai buat Effect custom per-draw-call kayak
+            // gini (Deferred nge-batch banyak sprite dan cuma nerapin shader di akhir batch,
+            // gak per-sprite) - makanya batch ini dipisah sendiri dari batch donat di atas.
+            Main.spriteBatch.Begin(SpriteSortMode.Immediate, BlendState.Additive, SamplerState.LinearClamp,
+                DepthStencilState.None, RasterizerState.CullNone, effect, Main.GameViewMatrix.TransformationMatrix);
+
+            Vector2 drawPos = b.Center - Main.screenPosition;
+
+            // TextureAssets.MagicPixel = tekstur 1x1 putih polos bawaan vanilla - cuma
+            // dipakai buat nyediain UV 0..1 penuh ke shader (isi visualnya 100% ditentukan
+            // shader lewat noise+mask, bukan dari tekstur ini). Origin di tengah + scale =
+            // diameter target - SEKARANG dipas-in ke diameter DUNIA (worldRadius * 2f),
+            // BUKAN diameter arena (b.Radius * 2f) lagi, sesuai request "nutupin seluruh
+            // World". Border fisik/donat/collision TETAP di b.Radius, gak ikut kebesaran.
+            Texture2D pixel = Terraria.GameContent.TextureAssets.MagicPixel.Value;
+            Vector2 origin = new Vector2(pixel.Width, pixel.Height) * 0.5f;
+            float scale = worldRadius * 2f;
+
+            Main.spriteBatch.Draw(pixel, drawPos, null, Color.White, 0f, origin, scale, SpriteEffects.None, 0f);
+
+            Main.spriteBatch.End();
         }
 
         public override void OnWorldUnload()

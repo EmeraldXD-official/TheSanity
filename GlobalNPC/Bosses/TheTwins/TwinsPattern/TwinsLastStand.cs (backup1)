@@ -1,0 +1,1547 @@
+using Microsoft.Xna.Framework;
+using Luminance.Core.Graphics;
+using System;
+using Terraria;
+using Terraria.Audio;
+using Terraria.Chat;
+using Terraria.DataStructures;
+using Terraria.ID;
+using Terraria.Localization;
+using Terraria.ModLoader;
+using TheSanity.Projectiles;
+using TheSanity.Systems;
+using TheSanity.GlobalNPCs;
+
+namespace YourModName.Content.NPCs
+{
+    // ==========================================
+    // LAST STAND — event SEKALI PAKAI di HP <= 1% (Spazmatism, sumber kebenaran HP), TERPISAH
+    // TOTAL dari rotasi pattern normal DAN dari Phase 2 (50% HP), TAPI awalannya SENGAJA
+    // NYONTEK PERSIS konsep Phase 2 Trigger(). Alur:
+    //
+    //   1. Trigger()      -> PERSIS kayak Phase 2: Twin original LANGSUNG diem & INVINCIBLE
+    //                         detik itu juga (motong pattern yang lagi jalan, TIDAK nunggu
+    //                         siklusnya kelar dulu - beda dari Phase 2 yang masih nunggu),
+    //                         snap ke tengah arena, arena MELEBAR 20% (animasi halus - beda
+    //                         dari Phase 2 yang 40%), spawn 2 Spectre clone
+    //                         (SpectreSpazmatism + SpectreRetinazer).
+    //
+    //   2. HoldForSpectres -> Twin diem total ngadap player (invincible, semi-transparent -
+    //                         lihat LastStandHoldingForSpectres di TwinsRework.cs), NUNGGU
+    //                         kedua Spectre clone ini tumbang.
+    //
+    //   3. RoarAndRefill   -> Begitu kedua Spectre tumbang: Twin diem dulu sebentar
+    //                         (RoarPauseDurationTicks), BARU meng-Roar (TwinsSounds.TwinRoar) +
+    //                         guncangan layar lumayan kuat (Luminance ScreenShakeSystem) +
+    //                         2 chat text dramatis bareng (merah "RETINAZER OVERRIDE..." &
+    //                         hijau "SPAZMATISM OVERRIDE...", tema "SYSTEM OVERLOAD") PERSIS
+    //                         di tick yang sama. HP-nya BELUM refill di titik ini - tahan
+    //                         sebentar lagi (RoarPostDurationTicks) buat kasih "beat" ke
+    //                         Roar/text-nya, BARU abis itu HP di-refill ke 100% & particle glow
+    //                         (TwinsAmbientFX) mulai nyala - dari titik REFILL INI (bukan dari
+    //                         Roar) timer master 60 detik (HealthDrainDurationTicks) MULAI
+    //                         jalan, sebelum lanjut nyerang.
+    //
+    //   4. Dash..LaserBarrage (attack loop) -> Twin ngejalanin 6 pattern attack normal (Dash,
+    //                         RetBeam, CursedRain, SpinningCurse, BorderShot, LaserBarrage,
+    //                         otomatis versi ENRAGED karena IsEnraged pasti udah true) SECARA
+    //                         LOOPING TERUS-MENERUS (abis LaserBarrage kelar, balik lagi ke
+    //                         Dash, dst) - BUKAN cuma 1x muter kayak versi sebelumnya. HP
+    //                         terus berkurang SEDIKIT DEMI SEDIKIT sepanjang loop ini
+    //                         (lihat UpdateHealthDrainAndExpiry). Looping ini berlangsung
+    //                         sampai AttackLoopDurationTicks dari total budget 60 detik
+    //                         kelar (dicek di titik "gantian pattern", biar gak motong
+    //                         pattern lagi di tengah jalan) - abis itu lanjut ke (5).
+    //
+    //   5. ReturnToCenter  -> abis attack loop kelar, Twin gerak cepat BALIK ke tengah arena
+    //                         buat mulai Deathray.
+    //
+    //   6. Deathray (Clockwise -> Transition -> CounterClockwise -> Transition -> Clockwise ->
+    //                         ...) -> beam merah panjang dari mukanya MUTER TERUS-MENERUS
+    //                         (gantian CW/CCW, smooth decelerate+accelerate tiap ganti arah),
+    //                         NGEDAMAGE TERUS, LOOPING TANPA HENTI - beneran cuma berhenti
+    //                         kalau timer master 60 detik abis (lihat poin 7), BUKAN abis
+    //                         sekian putaran kayak versi sebelumnya. Tiap 1 detik, muncul 1
+    //                         RedPhantasmalBolt random dari tepi border (nembak ke tengah,
+    //                         terus tembus) BARENGAN 8 RedPhantasmalBolt dari Twin sendiri
+    //                         nyebar ke segala arah.
+    //
+    //   7. Timer habis     -> begitu LastStandHealthTimer nyampe HealthDrainDurationTicks (60
+    //                         detik sejak Roar+refill) - DICEK TIAP TICK, gak peduli lagi di
+    //                         attack loop atau Deathray - LANGSUNG dipotong ke DeathAnimation.
+    //
+    //   8. DeathAnimation  -> Twin "jatuh" (gravity diaktifin, noGravity = false), MUTER
+    //                         PELAN selama masih di udara (bukan diam kaku di rotation 0) -
+    //                         border arena LANGSUNG DIHAPUS TOTAL (visual + hitbox) di titik
+    //                         ini juga, biar player bisa lihat semuanya tanpa terhalang.
+    //                         Ledakan visual (TwinsDeathExplosionFX, asset bloom Luminance)
+    //                         SUDAH mulai muncul random DARI SAAT INI JUGA (masih di udara),
+    //                         BUKAN nunggu landing dulu. Begitu Twin BENERAN landing (bukan
+    //                         dari saat gravity baru nyala), dia "tumbang" ke sudut miring
+    //                         lewat beberapa mantulan kecil (bukan snap instan ke rotation 0),
+    //                         DAN BARU DARI SITU timer 5 detik terakhir sebelum kill manual
+    //                         mulai jalan - ledakan tetap terus muncul random di sekitarnya
+    //                         sepanjang 5 detik itu.
+    //
+    //   9. Done            -> abis 5 detik ledakan, Twin di-"bunuh" resmi manual (npc.life = 0;
+    //                         npc.HitEffect(0,10); npc.checkDead();) - OnKill (TwinsRework.cs)
+    //                         otomatis masak-masakin Retinazer ikut mati bareng.
+    //
+    // INVINCIBLE: Twin BENERAN gak bisa diserang sama sekali dari Trigger() sampai
+    // DeathAnimation (npc.dontTakeDamage = true DIPAKSA tiap tick di awal Tick(), jaga-jaga
+    // penuh) - beda dari desain sebelumnya yang sempat vulnerable di awal.
+    //
+    // CATATAN INTEGRASI: ShouldTrigger()/Trigger() dicek dari PreAI TwinsReworkOverride (mirip
+    // pola TwinsPhaseTransition.ShouldArm/Arm), lalu selama LastStandActive true, dispatcher
+    // pattern NORMAL (termasuk Phase 2) di-skip TOTAL dan Tick() di sini yang megang kendali
+    // penuh tiap tick.
+    // ==========================================
+    public static class TwinsLastStand
+    {
+        private enum State
+        {
+            MovingToCenter, // FIX: terbang pelan-pelan ke tengah dulu, BUKAN teleport instan lagi
+            HoldForSpectres,
+            RoarAndRefill,
+            Dash,
+            RetBeam,
+            CursedRain,
+            SpinningCurse,
+            BorderShot,
+            LaserBarrage,
+            SplitCombo,
+            ReturnToCenter,
+            DeathrayClockwise,
+            DeathrayTransition,
+            DeathrayCounterClockwise,
+            DeathAnimation,
+            Done
+        }
+
+        private const float TriggerLifeFraction = 0.01f; // 1% HP
+
+        // ---- Arena expand (20%, beda dari Phase 2 yang 40%) ----
+        private const float ArenaExpandMultiplier = 1.2f;
+        private const int ArenaExpandDurationTicks = 45; // ~0.75 detik, sama kayak Phase 2
+
+        // ---- FIX: terbang pelan-pelan ke tengah dulu (BUKAN teleport instan lagi) ----
+        private const float MoveToCenterSpeed = 26f; // dipercepat dikit dari Phase 2 - "urgent"
+        private const float MoveToCenterArriveThreshold = 30f;
+        private const float MoveToCenterMaxDuration = 150f; // safety timeout ~2.5 detik
+
+        // ---- Roar + refill ----
+        private const float RoarPauseDurationTicks = 30f; // "diam dulu" sebelum Roar
+        private const float RoarPostDurationTicks = 30f;  // tahan sebentar lagi abis Roar
+
+        // ---- Roar chat text (2 baris dramatis, merah + hijau bareng, senada warna rim
+        // glow Retinazer/Spazmatism di TwinsRework.cs biar identitasnya nyambung) ----
+        private static readonly Color RetinazerTextColor = new Color(255, 70, 40);
+        private static readonly Color SpazmatismTextColor = new Color(90, 255, 100);
+
+        // ---- Timer master (invincible SAMPAI ini abis - HARD CAP durasi Last Stand) ----
+        private const float HealthDrainDurationTicks = 3600f;  // 60 detik penuh
+        private const float AttackLoopDurationTicks = 2100f;   // ~35 detik pertama buat looping attack, sisanya (~25 detik) Deathray
+
+        // ---- ReturnToCenter ----
+        private const float ReturnSpeed = 30f;
+        private const float ReturnArriveThreshold = 30f;
+        private const float ReturnMaxDuration = 120f; // safety timeout ~2 detik
+
+        // ---- Deathray ----
+        // Diturunin dikit dari sebelumnya (0.05f) - "muternya dibuat agak lambat" per request.
+        private const float DeathrayAngularSpeed = 0.035f;     // radian/tick pas kecepatan penuh (CW atau CCW)
+        private const int MinDeathrayReps = 3;
+        private const int MaxDeathrayRepsInclusive = 4;
+
+        // ==========================================
+        // FIX: dulu 1 konstanta (DeathrayTransitionDuration) dipakai buat kurva cosine
+        // simetris (decel separuh durasi, accel separuh durasi) - dan itu CUMA kepakai pas
+        // CW->CCW doang (CCW->CW malah restart INSTAN full speed tanpa transisi sama sekali,
+        // begitu juga start PERTAMA dari ReturnToCenter - dua-duanya lompat langsung ke
+        // kecepatan penuh, ga ada ramp).
+        //
+        // Sekarang SEMUA "mulai spin ke arah X" - baik start pertama (dari diam) MAUPUN tiap
+        // ganti arah (CW<->CCW) - lewat 1 mekanisme yang sama (lihat BeginDeathrayTransition/
+        // TickDeathrayTransition), dipecah 2 fase:
+        //   1. DECEL (durasi PENDEK) - REM cepat dari speed lama ke 0. Di-skip total kalau
+        //      ini start pertama (emang udah diam, gak ada speed lama buat di-rem).
+        //   2. RAMP-IN (durasi lebih PANJANG, kurva cubic ease-in t^3) - dari 0 ke speed
+        //      penuh arah baru. Ini yang bikin "diawali bener-bener lambat" (deket t=0 laju
+        //      naiknya pelan banget) TAPI "transisi dari lambatnya cepat" (mendekati t=1 laju
+        //      naik makin curam, jadi gak lama-lama di zona lambat / gak buang waktu).
+        // ==========================================
+        private const float DeathrayDecelDuration = 12f;   // ~0.2 detik, REM cepat ke 0 (di-skip kalau start dari diam)
+        private const float DeathrayRampInDuration = 45f;  // ~0.75 detik, ease-in lambat->cepat ke speed penuh arah baru
+
+        // ==========================================
+        // Suara loop "Beam" (TheSanity/Sounds/Beam.wav/.ogg) - nyala TERUS-MENERUS selama
+        // Deathray muter (dari transisi PERTAMA sampai beneran berhenti di
+        // StartDeathAnimation), IsLooped = true jadi otomatis ngulang sendiri tanpa perlu
+        // di-trigger ulang tiap tick. Lihat StartDeathrayLoopSound/StopDeathrayLoopSound/
+        // UpdateDeathrayLoopSoundPosition di bawah.
+        // ==========================================
+        private static readonly SoundStyle DeathrayLoopSound = new SoundStyle("TheSanity/Sounds/Beam")
+        {
+            IsLooped = true,
+        };
+
+        // FIX: damage diturunin ke 10 per-tick, tapi iframes DIABAIKAN TOTAL (immuneTime di-reset
+        // sebelum & sesudah Hurt) jadi tiap hit selalu landing tanpa tertahan immunity player.
+        //
+        // REQUEST: base damage-nya (Normal Mode) sekarang 100, BIARIN difficulty yang nge-scale
+        // (Expert x2, Master x3 - dihitung manual di GetScaledDeathrayDamage di bawah). PENTING:
+        // ini BEDA dari convention "engine auto-triples" yang dipakai proyektil/npc.damage biasa
+        // di file lain (lihat komentar TwinsDebuffGlobalProjectile.cs) - beam ini nembak lewat
+        // target.Hurt() MANUAL (bukan proyektil beneran, bukan npc.damage), jadi TIDAK PERNAH
+        // ke-scale otomatis sama sistem manapun kalau gak di-scale manual sendiri di sini.
+        private const int DeathrayBaseDamage = 100; // base (Normal Mode) - lihat GetScaledDeathrayDamage
+        private const float DeathrayLength = 2600f; // sama panjangnya kayak garis render (DrawDeathrayCone)
+
+        // Scaling manual Expert/Master - SATU-SATUNYA tempat angka final damage Deathray
+        // dihitung, biar gampang di-tune sekali doang.
+        private static int GetScaledDeathrayDamage()
+        {
+            if (Main.masterMode)
+                return DeathrayBaseDamage * 3;
+            if (Main.expertMode)
+                return DeathrayBaseDamage * 2;
+            return DeathrayBaseDamage;
+        }
+
+        // Ketebalan hit-detection bentuk "V" - KECIL di deket muka, MELEBAR seiring jauh -
+        // PERSIS ngikutin ketebalan core visual di DrawDeathrayCone (TwinsRework.cs) biar
+        // damage-nya konsisten sama apa yang keliatan di layar. Start dinaikin ke 32
+        // (2 block, nyusul perubahan visual), end tetep 120 (samain ke visual yang udah
+        // dinaikin duluan pas start-nya masih 24).
+        private const float DeathrayStartThickness = 32f;
+        private const float DeathrayEndThickness = 120f;
+
+        // Titik awal beam (muzzle) - GANTI dari npc.width*DeathrayMuzzleOffsetMultiplier ke
+        // TwinsReworkOverride.BeamMuzzleOffset, konstanta BERSAMA yang sekarang dipakai
+        // SEMUA jenis beam (Deathray, RetBeam, Telegraph, LaserBarrage) biar titik moncong
+        // hit-detection PERSIS sama titik moncong yang kegambar di layar - dulu dua-duanya
+        // pakai rumus beda (di sini npc.width*0.5f, di render TwinsRework.cs sempat beda
+        // lagi), jadi kalau salah satu diubah yang lain gampang kelewat ke-update.
+
+        private const float BoltBurstIntervalTicks = 60f; // 1 detik
+
+        // ==========================================
+        // REQUEST: screen shake Deathray sekarang 2 LAPIS:
+        //   1. "MENGGELEGAR" (booming/thunderous) - nyala SEKALI tiap kali BeginDeathrayTransition
+        //      dipanggil, yaitu PERSIS di momen Last Beam PERTAMA nyala (fromSign 0f, dari
+        //      ReturnToCenter) DAN tiap kali beam-nya muter balik arah (CW<->CCW) - momen-momen
+        //      ini emang udah SAMA (1 method dipanggil dari semua 3 titik itu), jadi cukup naikin
+        //      magnitude-nya di situ. Dinaikin dari 8f/0.4f (kerasa kayak shake "biasa") ke lebih
+        //      kuat dari shake Roar (25f/0.85f) - Last Beam emang lebih dramatis dari sekadar
+        //      Roar, tapi tetep di bawah FinalExplosionShake (50f/1.4f) biar klimaks paling akhir
+        //      fight tetep yang paling "WAH" di seluruh urutan.
+        //   2. RINGAN & TERUS-MENERUS - shake kecil yang di-retrigger periodik (bukan tiap tick,
+        //      biar gak berat/redundant) SELAMA Twin lagi ngeluarin Deathray (Transition +
+        //      Clockwise + CounterClockwise, dipanggil dari TickDeathrayDamageAndBolts yang
+        //      emang udah jalan di ketiga sub-state itu) - biar seluruh durasi Deathray tetap
+        //      "berasa" ada guncangan latar, bukan cuma di momen ganti arah doang.
+        // ==========================================
+        private const float DeathrayBigShakeMagnitude = 30f;
+        private const float DeathrayBigShakeDuration = 1f;
+
+        private const float DeathrayContinuousShakeMagnitude = 4f;
+        private const float DeathrayContinuousShakeDuration = 0.25f;
+        private const float DeathrayContinuousShakeIntervalTicks = 12f; // ~0.2 detik antar retrigger
+
+        // ---- Border bolt: 5-7 RedPhantasmalBolt, tersebar MERATA & SIMETRIS di tepi border ----
+        private const int MinBorderBoltCount = 5;
+        private const int MaxBorderBoltCountInclusive = 7;
+        private const int DeathrayBorderBoltDamage = 10; // RedBolt: target ~30 DMG Master / 3 - +20% otomatis kalau Last Stand (ScaleBoltDamage), yang mana ini SELALU true di sini
+
+        // ---- Twin body bolt: 6-8 GreenBolt, radial merata dari badan Twin ----
+        private const int MinTwinBoltCount = 6;
+        private const int MaxTwinBoltCountInclusive = 8;
+        private const int DeathrayTwinBoltDamage = 10; // GreenBolt: target ~30 DMG Master / 3 - +20% otomatis kalau Last Stand (ScaleBoltDamage), yang mana ini SELALU true di sini
+
+        // ---- Death animation ----
+        // Timer 5 detik "kill manual" BARU MULAI NGITUNG begitu Twin beneran landing (nyentuh
+        // block) - BUKAN dari saat gravity baru diaktifin (lihat LastStandHasLanded). Ledakan
+        // VISUAL-nya sendiri BEDA: sekarang udah nyala dari SAAT masuk DeathAnimation (masih
+        // jatuh), bukan nunggu landing dulu (lihat komentar TickDeathAnimation) - biar gak
+        // "hening" pas masih di udara.
+        // REQUEST: durasi total abis landing diperpanjang - dulu 5 detik penuh (300 tick)
+        // trus LANGSUNG huge explosion+kill di detik ke-5. SEKARANG jadi 6 detik (360 tick):
+        // ledakan-ledakan KECIL (spam, lihat ExplosionIntervalMinTicks/MaxTicks) tetap terus
+        // nyala sepanjang window ini, BARU di detik ke-6 (tick 360, ujung window) ledakan
+        // BESAR (SpawnFinalBigExplosion) + kill manual-nya kejadian - jadi "beat"-nya kerasa
+        // 5 detik letusan kecil dulu, baru 1 detik terakhir nutup dengan yang HUGE.
+        private const int DeathAnimationExplosionDurationTicks = 360; // 6 detik penuh SETELAH landing (5 detik letusan kecil + puncak di detik ke-6)
+        private const int LandingCheckMinTicks = 4;       // grace period dikit biar gravity sempat kerja dulu
+        private const float LandingVelocityThreshold = 0.4f; // velocity.Y di bawah ini dianggap "udah landing"
+        // REQUEST: ledakan pas DeathAnimation dibikin "semi spamik" - interval antar ledakan
+        // dipangkas jauh lebih rapet dari sebelumnya (dulu 10-22 tick / ~0.17-0.37 detik,
+        // sekarang 4-9 tick / ~0.07-0.15 detik), jadi kerasa numpuk/berondong terus-menerus
+        // ketimbang ledakan yang keluar satu-satu agak berjeda.
+        private const int ExplosionIntervalMinTicks = 4;
+        private const int ExplosionIntervalMaxTicks = 9;
+        private const float ExplosionSpawnRadius = 90f;
+        private const float FallExplosionIntensity = 0.55f; // ledakan pas MASIH JATUH dibikin lebih kecil/jarang dari yang di darat
+
+        // ==========================================
+        // LEDAKAN BESAR FINAL (request: "di akhir ada ledakan besar yang bikin layar geter").
+        // UPDATE (request lanjutan): ledakan besar & kill manual-nya DIPISAH sedikit - ledakan
+        // besar duluan PERSIS di detik ke-6 (DeathAnimationExplosionDurationTicks), BARU kill
+        // manual-nya nyusul FinalExplosionToKillDelayTicks kemudian - biar ledakan besarnya
+        // sempat "kelihatan" dulu sebelum Twin resmi ambruk/mati, bukan numpuk di frame yang
+        // sama kayak sebelumnya.
+        // REQUEST: jeda ini DIPERPENDEK dari 1 detik (60 tick) jadi 0.3 detik (18 tick) - kill
+        // manual-nya jadi kerasa lebih "nempel"/cepat nyusul ledakan besarnya, bukan ngambang
+        // lama dulu.
+        // ==========================================
+        private const float FinalExplosionIntensity = 3f;     // jauh lebih gede dari ledakan spam biasa (max 1f)
+        private const int FinalExplosionBurstCount = 4;        // beberapa titik ledakan sekaligus di tick yang sama biar kerasa "satu ledakan besar", bukan cuma 1 titik gede doang
+        private const float FinalExplosionSpawnRadius = 160f;  // radius sebar lebih lebar dari ledakan spam biasa (90f)
+        // Shake DINAIKIN LAGI (request: "lebih WAH BANGET") dari 35f/1.1f jadi 50f/1.4f -
+        // jauh lebih kuat dari shake Roar (25f/0.85f), ini KLIMAKS PALING GEDE di seluruh fight.
+        private const float FinalExplosionShakeMagnitude = 50f;
+        private const float FinalExplosionShakeDuration = 1.4f;
+        private const int FinalExplosionToKillDelayTicks = 18; // 0.3 detik jeda SEBELUM kill manual (dulu 1 detik/60 tick)
+
+        // REQUEST: TwinRoar yang dimainin BARENGAN ledakan besar final (bukan Roar awal Last
+        // Stand di RoarAndRefill - itu TETAP dibiarin pitch normal) di-pitch NAIK biar
+        // "cempreng banget" - dibikin SoundStyle terpisah (copy dari TwinsSounds.TwinRoar lewat
+        // `with`, BUKAN memodifikasi TwinsSounds.TwinRoar aslinya) biar shared SoundStyle yang
+        // dipakai di tempat lain (Roar awal, dash attack normal) TETAP kedengeran normal, cuma
+        // instance di titik INI doang yang cempreng. 1f = pitch paling tinggi yang SoundStyle
+        // izinin (range umumnya -1..1).
+        private const float FinalExplosionRoarPitch = 1f;
+
+        // ---- Fall tumble (request: "jangan kaku/goofy") ----
+        // Selama masih di udara Twin MUTER PELAN (bukan diam di rotation 0 total), lalu pas
+        // landing "tumbang" ke sudut miring dibantu beberapa mantulan kecil yang makin
+        // ngedown - lihat TickFallingTumble/HandleFallLandingImpact/TickSettledFlopSway.
+        private const float FallAngularVelocityMin = 0.035f; // radian/tick
+        private const float FallAngularVelocityMax = 0.085f;
+        private const float FallAngularDamping = 0.995f; // drag udara ringan, muternya gak pernah beneran 0 sampai landing
+        private const int InitialFallBounceCount = 2; // berapa kali mantul kecil sebelum settle total
+        private const float FallBounceVelocityFirst = -6f;  // mantulan pertama (paling kenceng)
+        private const float FallBounceVelocityDecay = 0.5f; // tiap mantulan berikutnya, kecepatannya dikali ini
+        private const float FallSettleRotationMin = 0.55f; // fraksi dari PiOver2 (~50°)
+        private const float FallSettleRotationMax = 0.9f;  // fraksi dari PiOver2 (~81°)
+        private const float FallSettleLerpSpeed = 0.06f;   // seberapa cepat rotation "narik" ke sudut tumbang final
+
+        // ==========================================
+        // TRIGGER (dicek dari PreAI Spazmatism, mirip pola TwinsPhaseTransition.ShouldArm)
+        // ==========================================
+        public static bool ShouldTrigger(NPC npc, TwinsReworkOverride self)
+        {
+            return self.IsEnraged && !self.LastStandTriggered
+                && npc.life > 0 && npc.life <= npc.lifeMax * TriggerLifeFraction;
+        }
+
+        public static void Trigger(NPC npc, TwinsReworkOverride self)
+        {
+            self.LastStandTriggered = true;
+            self.LastStandActive = true;
+            self.LastStandTimer = 0f;
+            self.LastStandHealthDrainStarted = false;
+            self.LastStandHealthTimer = 0f;
+            self.LastStandExpiryPending = false; // reset jaga-jaga (harusnya emang masih false di titik ini)
+            self.LastStandHoldingForSpectres = false; // belum holding - masih dalam perjalanan ke tengah
+
+            // FIX: beda dari Phase 2 (yang nunggu siklus pattern kelar dulu baru Trigger),
+            // Last Stand.Trigger() ini bisa motong pattern APAPUN di TENGAH JALAN (lihat
+            // ShouldTrigger() - dicek tiap tick tanpa nunggu apa-apa). Jadi WAJIB bersihin
+            // flag visual "kontinu" (aim line RetBeam, glow, dst) di sini - kalau enggak,
+            // garis/glow itu bisa nyangkut nyala terus SELAMANYA karena Tick() pattern yang
+            // punya flag itu gak akan pernah kepanggil lagi begitu Last Stand ambil alih.
+            self.ResetTransientPatternVisuals();
+
+            self.LastStandArenaCenter = GetArenaCenter(npc);
+
+            // BUGFIX (defensif, lapisan kedua): pastikan particle statics kosong pas Last
+            // Stand baru mulai. Jalur normal udah dibersihin dari OnKill (TwinsRework.cs) pas
+            // fight sebelumnya BENERAN kelar, tapi dipanggil lagi di sini jaga-jaga kalau ada
+            // sisa yang somehow belum ke-clear (mis. Twin di-despawn paksa via command/mod lain
+            // di tengah death animation, sebelum OnKill sempat jalan).
+            TwinsDeathExplosionFX.Clear();
+            TwinsAmbientFX.Clear();
+
+            // FIX: gak lagi teleport instan ke tengah - invincible LANGSUNG detik ini juga
+            // (motong pattern yang lagi jalan TANPA nunggu siklusnya kelar dulu, beda dari
+            // Phase 2 - Last Stand = urgent), TAPI posisinya terbang pelan-pelan dulu (lihat
+            // State.MovingToCenter di bawah), BARU expand arena + spawn clone begitu beneran
+            // nyampe.
+            npc.dontTakeDamage = true;
+            npc.netUpdate = true;
+
+            self.LastStandStateRaw = (float)State.MovingToCenter;
+        }
+
+        private static void ExpandArena()
+        {
+            if (ArenaBorderSystem.ActiveBorders.Count > 0)
+            {
+                ArenaBorderSystem.Border border = ArenaBorderSystem.ActiveBorders[0];
+                float newRadius = border.Radius * ArenaExpandMultiplier;
+                border.AnimateRadiusTo(newRadius, ArenaExpandDurationTicks);
+            }
+        }
+
+        // ==========================================
+        // Nampilin 1 baris text di chat, dipakai buat 2 teks dramatis "SYSTEM OVERLOAD" pas
+        // Roar (lihat State.RoarAndRefill). Main.NewText cuma nulis text ke chat LOKAL client
+        // yang manggilnya - aman dipanggil langsung di SinglePlayer & tiap MultiplayerClient
+        // (Tick() jalan di semua instance secara paralel/synced), TAPI di dedicated server
+        // (Main.dedServ true, gak punya "local chat" beneran) WAJIB lewat
+        // ChatHelper.BroadcastChatMessage biar nyampe ke semua client yang connect - sama
+        // pola gating (Main.dedServ) yang udah dipakai di TwinsAmbientFX/TwinsDeathExplosionFX
+        // buat hal-hal yang beda perlakuan client vs dedicated server.
+        // ==========================================
+        private static void BroadcastLastStandText(string text, Color color)
+        {
+            if (Main.dedServ)
+            {
+                ChatHelper.BroadcastChatMessage(NetworkText.FromLiteral(text), color);
+            }
+            else
+            {
+                Main.NewText(text, color);
+            }
+        }
+
+        private static void SpawnClones(NPC npc, TwinsReworkOverride self)
+        {
+            self.LastStandSpectreSpazIndex = -1;
+            self.LastStandSpectreRetIndex = -1;
+
+            if (Main.netMode == NetmodeID.MultiplayerClient)
+                return;
+
+            const float SpawnDistance = 260f;
+            Vector2 spazSpawnPos = self.LastStandArenaCenter + new Vector2(-SpawnDistance, 0f);
+            Vector2 retSpawnPos = self.LastStandArenaCenter + new Vector2(SpawnDistance, 0f);
+
+            self.LastStandSpectreSpazIndex = NPC.NewNPC(
+                npc.GetSource_FromAI(),
+                (int)spazSpawnPos.X,
+                (int)spazSpawnPos.Y,
+                ModContent.NPCType<SpectreSpazmatism>()
+            );
+
+            self.LastStandSpectreRetIndex = NPC.NewNPC(
+                npc.GetSource_FromAI(),
+                (int)retSpawnPos.X,
+                (int)retSpawnPos.Y,
+                ModContent.NPCType<SpectreRetinazer>()
+            );
+        }
+
+        // ==========================================
+        // Dipanggil TIAP TICK selama LastStandActive true (menggantikan dispatcher normal
+        // TOTAL).
+        // ==========================================
+        public static void Tick(NPC npc, TwinsReworkOverride self, Player target)
+        {
+            // Invincible BENERAN dipaksa tiap tick, sepanjang SELURUH Last Stand (dari
+            // Trigger() sampai DeathAnimation) - jaga-jaga penuh, gak ada celah sedikit pun.
+            npc.dontTakeDamage = true;
+
+            UpdateHealthDrainAndExpiry(npc, self);
+
+            State state = (State)self.LastStandStateRaw;
+
+            switch (state)
+            {
+                case State.MovingToCenter:
+                    {
+                        Vector2 toCenter = self.LastStandArenaCenter - npc.Center;
+                        float distance = toCenter.Length();
+
+                        self.LastStandTimer++;
+
+                        if (distance > MoveToCenterArriveThreshold && self.LastStandTimer < MoveToCenterMaxDuration)
+                        {
+                            Vector2 moveDirection = toCenter / distance;
+                            npc.velocity = Vector2.Lerp(npc.velocity, moveDirection * MoveToCenterSpeed, 0.12f);
+
+                            Vector2 aimVector = target.Center - npc.Center;
+                            npc.rotation = aimVector.ToRotation() - MathHelper.PiOver2;
+                            break;
+                        }
+
+                        // Udah sampai (atau timeout) -> posisi PAS di tengah, berhenti total,
+                        // BARU di titik INI expand arena + spawn clone beneran kejadian.
+                        npc.Center = self.LastStandArenaCenter;
+                        npc.velocity = Vector2.Zero;
+
+                        ExpandArena();
+                        SpawnClones(npc, self);
+
+                        // Bersihin trail SEKETIKA - jaga-jaga (walau sekarang gerakannya udah
+                        // gradual/gak ada lompatan besar lagi, masih ada kemungkinan sisa
+                        // ghost dari saat baru berhenti persis di titik ini).
+                        self.Trail.Clear();
+                        int retIndexForTrail = NPC.FindFirstNPC(NPCID.Retinazer);
+                        if (retIndexForTrail != -1 && Main.npc[retIndexForTrail].active)
+                        {
+                            Main.npc[retIndexForTrail].GetGlobalNPC<TwinsReworkOverride>().Trail.Clear();
+                        }
+
+                        self.LastStandHoldingForSpectres = true;
+                        self.LastStandTimer = 0f;
+                        self.LastStandStateRaw = (float)State.HoldForSpectres;
+                        npc.netUpdate = true;
+                        break;
+                    }
+
+                case State.HoldForSpectres:
+                    {
+                        // FIX: sebelumnya cuma di-snap SEKALI di Trigger() terus velocity
+                        // didamp pelan-pelan (*0.85) - kalau ada sisa momentum gede (misal
+                        // Twin lagi di tengah Dash super cepat pas ke-trigger) dia masih bisa
+                        // "meleset" jauh dari titik tengah sebelum keredam total. Sekarang
+                        // posisi DIPAKSA PERSIS ke tengah arena TIAP TICK selama fase ini,
+                        // jadi dijamin diem total di tempat dari tick pertama, gak ada celah
+                        // drift sama sekali.
+                        npc.Center = self.LastStandArenaCenter;
+                        npc.velocity = Vector2.Zero;
+
+                        Vector2 aimVector = target.Center - npc.Center;
+                        npc.rotation = aimVector.ToRotation() - MathHelper.PiOver2;
+
+                        bool spazAlive = self.LastStandSpectreSpazIndex != -1 && Main.npc[self.LastStandSpectreSpazIndex].active;
+                        bool retAlive = self.LastStandSpectreRetIndex != -1 && Main.npc[self.LastStandSpectreRetIndex].active;
+
+                        if (!spazAlive && !retAlive)
+                        {
+                            self.LastStandHoldingForSpectres = false;
+                            self.LastStandStateRaw = (float)State.RoarAndRefill;
+                            self.LastStandTimer = 0f;
+                        }
+                        break;
+                    }
+
+                case State.RoarAndRefill:
+                    {
+                        npc.Center = self.LastStandArenaCenter;
+                        npc.velocity = Vector2.Zero;
+                        self.LastStandTimer++;
+
+                        // Diam dulu sebentar (RoarPauseDurationTicks), BARU Roar PERSIS di tick
+                        // ini juga - DIBARENGIN 2 chat text dramatis (merah + hijau, senada tema
+                        // Retinazer/Spazmatism). REQUEST: HP-nya JANGAN refill di tick yang sama
+                        // lagi - refill (dan nyalain particle glow) sekarang DITUNDA sampai abis
+                        // "beat" Roar/text-nya kelar (lihat blok di bawah, RoarPostDurationTicks
+                        // abis), biar keliatan lebih dramatis: Twin diem dulu ke-Roar+teks
+                        // "SYSTEM OVERLOAD" SEBELUM HP-nya beneran balik 100%.
+                        if ((int)self.LastStandTimer == (int)RoarPauseDurationTicks)
+                        {
+                            SoundEngine.PlaySound(TwinsSounds.TwinRoar, npc.Center); // COSTUME (dulu SoundID.Roar)
+                            npc.netUpdate = true;
+
+                            // Guncangan layar KUAT buat kasih "beat" ke Roar - dinaikin lagi
+                            // (request: "lebih WAH") dari 15f/0.6f jadi 25f/0.85f, jauh lebih
+                            // kuat dari shake BeamShot biasa (8f/0.4f, lihat
+                            // BeginDeathrayTransition) karena ini momen krusial (awal Last
+                            // Stand beneran dimulai), tetap pakai sistem shake bawaan Luminance
+                            // (ScreenShakeSystem, sama dipakai di seluruh file ini) - bukan
+                            // implementasi custom sendiri.
+                            ScreenShakeSystem.StartShake(25f, 0.85f);
+
+                            BroadcastLastStandText("RETINAZER OVERRIDE: SYSTEM OVERLOAD IMMINENT", RetinazerTextColor);
+                            BroadcastLastStandText("SPAZMATISM OVERRIDE: FAILSAFE PROTOCOLS SEVERED", SpazmatismTextColor);
+                        }
+
+                        if (self.LastStandTimer >= RoarPauseDurationTicks + RoarPostDurationTicks)
+                        {
+                            // BARU DI SINI HP di-refill ke 100% - timer master 60 detik
+                            // (HealthDrainDurationTicks) mulai jalan dari titik ini juga. Karena
+                            // ini juga titik LastStandHealthDrainStarted jadi true, particle glow
+                            // (lihat IsActiveBeforeDeathAnimation) ikutan nyala PERSIS bareng
+                            // refill ini - bukan dari awal Trigger() lagi.
+                            npc.life = npc.lifeMax;
+                            npc.netUpdate = true;
+
+                            self.LastStandHealthDrainStarted = true;
+                            self.LastStandHealthTimer = 0f;
+
+                            self.LastStandStateRaw = (float)State.Dash;
+                            TwinDash.ResetToHover(npc);
+                        }
+                        break;
+                    }
+
+                case State.Dash:
+                    {
+                        bool cycleFinished = TwinDash.Pattern1(npc, self, target);
+                        if (cycleFinished)
+                        {
+                            self.LastStandStateRaw = (float)State.RetBeam;
+                            TwinsRetBeam.Start(npc, self);
+                        }
+                        break;
+                    }
+
+                case State.RetBeam:
+                    {
+                        TwinsRetBeam.Tick(npc, self, target);
+                        if (TwinsRetBeam.IsDone(self))
+                        {
+                            self.LastStandStateRaw = (float)State.CursedRain;
+                            TwinsCursedRain.Start(self);
+                        }
+                        break;
+                    }
+
+                case State.CursedRain:
+                    {
+                        TwinsCursedRain.Tick(npc, self, target);
+                        if (TwinsCursedRain.IsDone(self))
+                        {
+                            self.LastStandStateRaw = (float)State.SpinningCurse;
+                            TwinsSpinningCurse.Start(npc, self);
+                        }
+                        break;
+                    }
+
+                case State.SpinningCurse:
+                    {
+                        TwinsSpinningCurse.Tick(npc, self, target);
+                        if (TwinsSpinningCurse.IsDone(self))
+                        {
+                            self.LastStandStateRaw = (float)State.BorderShot;
+                            TwinsBorderShot.Start(npc, self);
+                        }
+                        break;
+                    }
+
+                case State.BorderShot:
+                    {
+                        TwinsBorderShot.Tick(npc, self, target);
+                        if (TwinsBorderShot.IsDone(self))
+                        {
+                            self.LastStandStateRaw = (float)State.LaserBarrage;
+                            TwinsLaserBarrage.Start(npc, self);
+                        }
+                        break;
+                    }
+
+                case State.LaserBarrage:
+                    {
+                        TwinsLaserBarrage.Tick(npc, self, target);
+                        if (TwinsLaserBarrage.IsDone(self))
+                        {
+                            self.LastStandStateRaw = (float)State.SplitCombo;
+                            TwinsSplitCombo.Start(npc, self);
+                        }
+                        break;
+                    }
+
+                case State.SplitCombo:
+                    {
+                        TwinsSplitCombo.Tick(npc, self, target);
+                        if (TwinsSplitCombo.IsDone(self))
+                        {
+                            // Budget attack-loop DICEK DI SINI - tepat begitu 1 PUTARAN PENUH
+                            // (Dash->RetBeam->CursedRain->SpinningCurse->BorderShot->
+                            // LaserBarrage->SplitCombo, SEMUA 7 pattern) kelar - dijamin SETIAP
+                            // putaran selalu nyertain LENGKAP semua 7 pattern, gak dipotong di
+                            // tengah (termasuk SplitCombo - kalau dipotong di tengah, Retinazer
+                            // bisa ke-tinggal jauh dari Spaz / nyangkut vulnerable, makanya
+                            // checkpoint aman WAJIB nunggu dia beneran regroup dulu, sama kayak
+                            // gimana ResetTransientPatternVisuals di TwinsRework.cs jadi jaring
+                            // pengaman kalau Last Stand/Phase 2 laen yang motong duluan).
+                            //
+                            // FIX: sekarang di-OR sama LastStandExpiryPending juga - kalau
+                            // budget waktu master (60 detik) udah abis TAPI attack loop-nya
+                            // baru aja kelar duluan (kondisi paling umum, soalnya 1 putaran
+                            // biasanya emang udah lebih lama dari budget-nya sendiri), lanjut
+                            // ke Deathray sekarang juga alih-alih nunggu AttackLoopDurationTicks
+                            // (yang notabene udah kelewat jauh) - biar Deathray tetep kebagian
+                            // jatah jalan.
+                            bool loopBudgetSpent = self.LastStandHealthTimer >= AttackLoopDurationTicks;
+                            if (self.LastStandExpiryPending || loopBudgetSpent)
+                            {
+                                self.LastStandStateRaw = (float)State.ReturnToCenter;
+                                self.LastStandTimer = 0f;
+                            }
+                            else
+                            {
+                                self.LastStandStateRaw = (float)State.Dash;
+                                TwinDash.ResetToHover(npc);
+                            }
+                        }
+                        break;
+                    }
+
+                case State.ReturnToCenter:
+                    {
+                        Vector2 toCenter = self.LastStandArenaCenter - npc.Center;
+                        float distance = toCenter.Length();
+
+                        self.LastStandTimer++;
+
+                        if (distance > ReturnArriveThreshold && self.LastStandTimer < ReturnMaxDuration)
+                        {
+                            Vector2 moveDirection = toCenter / distance;
+                            npc.velocity = Vector2.Lerp(npc.velocity, moveDirection * ReturnSpeed, 0.12f);
+
+                            Vector2 aimVector = target.Center - npc.Center;
+                            npc.rotation = aimVector.ToRotation() - MathHelper.PiOver2;
+                            break;
+                        }
+
+                        npc.Center = self.LastStandArenaCenter;
+                        npc.velocity = Vector2.Zero;
+
+                        // FIX: dulu langsung StartDeathray() - snap ke kecepatan penuh CW
+                        // instan dari diam. Sekarang lewat BeginDeathrayTransition dengan
+                        // fromSign 0f (nandain "mulai dari diam") - TickDeathrayTransition yang
+                        // urus ease-in-nya (lambat di awal, cepat ngeramp menjelang penuh).
+                        //
+                        // FIX (request): sudut awal Deathray DULU di-random total
+                        // (Main.rand.NextFloat), jadi begitu Deathray mulai nembak, arahnya bisa
+                        // "lompat" instan ke sudut yang gak nyambung sama sekali dari arah Twin
+                        // lagi ngadap barusan (misal abis ngadap kanan pas ReturnToCenter,
+                        // Deathray-nya malah tiba-tiba nembak ke kiri) - keliatan aneh/gak
+                        // natural. SEKARANG sudut awal diambil dari ARAH HADAP TWIN SENDIRI
+                        // PERSIS di tick ini (npc.rotation, yang barusan terus di-update ngadap
+                        // target sepanjang ReturnToCenter) - dikonversi balik dari rotation ke
+                        // "arah muka" pakai +PiOver2, PERSIS rumus facingDir yang sama dipakai di
+                        // render (TwinsRework.cs, dekat EyeGlowMuzzleOffset). Jadi Deathray mulai
+                        // nembak dari arah yang emang lagi dia hadapi detik itu juga, transisi
+                        // ease-in-nya kerasa mulus nyambung dari posisi visual terakhir, bukan
+                        // snap acak. Restart-restart berikutnya (ganti arah CW<->CCW) TETAP
+                        // TIDAK di-random ulang lagi, biar nyambung mulus dari sudut terakhir
+                        // (lihat StartDeathray).
+                        self.LastStandDeathrayAngle = npc.rotation + MathHelper.PiOver2;
+                        BeginDeathrayTransition(npc, self, fromSign: 0f, toClockwise: true);
+                        break;
+                    }
+
+                case State.DeathrayClockwise:
+                    TickDeathraySpin(npc, self, target, spinSign: 1f);
+                    break;
+
+                case State.DeathrayTransition:
+                    TickDeathrayTransition(npc, self, target);
+                    break;
+
+                case State.DeathrayCounterClockwise:
+                    TickDeathraySpin(npc, self, target, spinSign: -1f);
+                    break;
+
+                case State.DeathAnimation:
+                    TickDeathAnimation(npc, self);
+                    break;
+
+                case State.Done:
+                    break;
+            }
+        }
+
+        public static bool IsDone(TwinsReworkOverride self)
+        {
+            return (State)self.LastStandStateRaw == State.Done;
+        }
+
+        // ==========================================
+        // Dipakai dari TwinsRework.cs buat nentuin contact damage dinamis (20 normal / 120
+        // pas Dash & BorderShot) - private enum State di file ini gak bisa diakses langsung
+        // dari luar, jadi expose lewat method public ini.
+        // ==========================================
+        public static bool IsCurrentlyDashOrBorderShot(TwinsReworkOverride self)
+        {
+            State state = (State)self.LastStandStateRaw;
+            return state == State.Dash || state == State.BorderShot;
+        }
+
+        // ==========================================
+        // Dipakai dari TwinsRework.cs buat rule contact damage baru: "invincible = no contact
+        // damage, KECUALI di semua pattern Last Stand" - jadi perlu tau apa Last Stand LAGI
+        // BENERAN di salah satu dari 7 pattern attack loop-nya (Dash..SplitCombo), BUKAN pas
+        // MovingToCenter/HoldForSpectres/RoarAndRefill/ReturnToCenter/Deathray*/DeathAnimation
+        // (state-state itu bukan "pattern serangan" biasa, jadi TETAP ikut rule umum invincible
+        // = no contact damage).
+        // ==========================================
+        public static bool IsCurrentlyAnyAttackPattern(TwinsReworkOverride self)
+        {
+            State state = (State)self.LastStandStateRaw;
+            return state == State.Dash
+                || state == State.RetBeam
+                || state == State.CursedRain
+                || state == State.SpinningCurse
+                || state == State.BorderShot
+                || state == State.LaserBarrage
+                || state == State.SplitCombo;
+        }
+
+        // ==========================================
+        // Dipakai dari TwinsAmbientFX.cs buat nge-scope ambient energy spark: SEKARANG cuma
+        // nyala dari SAAT HP-nya BENERAN di-refill ke 100% (LastStandHealthDrainStarted true -
+        // lihat State.RoarAndRefill, ini persis titik Roar + 2 chat text "SYSTEM OVERLOAD"
+        // udah kelar "beat"-nya) sampai SEBELUM DeathAnimation (jatuh+ledakan) mulai - BUKAN
+        // dari Trigger() lagi kayak sebelumnya. Request eksplisit: sebelum Spectre clone
+        // tumbang (MovingToCenter/HoldForSpectres) DAN selama jeda Roar (RoarAndRefill, sebelum
+        // refill kejadian), glow ini WAJIB padam dulu - biar nyalanya "PERSIS" bareng momen HP
+        // balik 100%, bukan nongol duluan pas Twin masih diem nunggu Spectre. Begitu masuk
+        // DeathAnimation/Done, spark ambient dimatiin lagi biar fokus visual pindah ke ledakan
+        // (TwinsDeathExplosionFX). private enum State di file ini gak bisa diakses langsung
+        // dari luar, jadi expose lewat method public ini (sama pola kayak
+        // IsCurrentlyDashOrBorderShot / IsCurrentlyAnyAttackPattern di atas).
+        // ==========================================
+        public static bool IsActiveBeforeDeathAnimation(TwinsReworkOverride self)
+        {
+            if (!self.LastStandActive || !self.LastStandHealthDrainStarted)
+                return false;
+
+            State state = (State)self.LastStandStateRaw;
+            return state != State.DeathAnimation && state != State.Done;
+        }
+
+        // ==========================================
+        // Timer master - dicek TIAP TICK begitu drain-nya udah mulai (sejak Roar+refill),
+        // gak peduli lagi di attack-loop atau Deathray.
+        //
+        // FIX: dulu begitu nyampe HealthDrainDurationTicks (60 detik) LANGSUNG dipotong ke
+        // StartDeathAnimation() detik itu juga, gak peduli lagi di tengah pattern/putaran
+        // apa. Masalahnya, 1 putaran PENUH attack loop (Dash->RetBeam->CursedRain->
+        // SpinningCurse->BorderShot->LaserBarrage, apalagi versi ENRAGED) gampang makan
+        // waktu jauh lebih dari 60 detik tergantung RNG repeats masing-masing pattern -
+        // jadi timer ini abis DUAN sebelum 1 putaran attack loop aja sempet kelar, apalagi
+        // sampe ke Deathray. Makanya Deathray-nya gak pernah nongol sama sekali.
+        //
+        // Sekarang timer ini CUMA nandain "pending" (LastStandExpiryPending) - keputusan
+        // beneran berhenti dipindah ke checkpoint AMAN di masing-masing state (lihat
+        // "case State.LaserBarrage" - akhir 1 putaran attack loop penuh, dan
+        // TickDeathraySpin - akhir 1 pasang Deathray CW+CCW penuh). Jadi walau timer udah
+        // lewat cap, Twin TETAP nyelesein dulu attack yang lagi jalan (plus minimal 1x
+        // Deathray penuh) sebelum beneran masuk DeathAnimation.
+        // ==========================================
+        private static void UpdateHealthDrainAndExpiry(NPC npc, TwinsReworkOverride self)
+        {
+            if (!self.LastStandHealthDrainStarted)
+                return;
+
+            State currentState = (State)self.LastStandStateRaw;
+            if (currentState == State.DeathAnimation || currentState == State.Done)
+                return;
+
+            self.LastStandHealthTimer++;
+
+            float drainPerTick = MathHelper.Max(1f, npc.lifeMax / HealthDrainDurationTicks);
+            npc.life = Math.Max(1, npc.life - (int)drainPerTick);
+
+            if (self.LastStandHealthTimer >= HealthDrainDurationTicks)
+            {
+                self.LastStandExpiryPending = true;
+            }
+        }
+
+        // ==========================================
+        // DEATHRAY
+        // ==========================================
+
+        // Dipanggil dari ReturnToCenter (start pertama, fromSign 0f) dan dari TickDeathraySpin
+        // (tiap kali 1 arah kelar reps-nya, mau ganti arah) - MULAI fase transisi/ramp, BUKAN
+        // langsung nge-spin di speed penuh. Lihat TickDeathrayTransition buat kurvanya.
+        private static void BeginDeathrayTransition(NPC npc, TwinsReworkOverride self, float fromSign, bool toClockwise)
+        {
+            self.LastStandDeathrayTransitionFromSign = fromSign;
+            self.LastStandDeathrayTransitionToClockwise = toClockwise;
+            self.LastStandDeathrayActive = true;
+            self.LastStandStateRaw = (float)State.DeathrayTransition;
+            self.LastStandTimer = 0f;
+
+            SoundEngine.PlaySound(TwinsSounds.BeamShot, npc.Center); // COSTUME (dulu Zombie104)
+
+            // "MENGGELEGAR" - dipanggil di titik yang sama baik start pertama (fromSign 0f)
+            // MAUPUN tiap ganti arah (CW<->CCW), lihat komentar DeathrayBigShakeMagnitude.
+            ScreenShakeSystem.StartShake(DeathrayBigShakeMagnitude, DeathrayBigShakeDuration);
+
+            // Reset counter shake RINGAN berkelanjutan - biar ritmenya mulai fresh dari titik
+            // "menggelegar" ini juga (bukan nyambung dari sisa counter arah sebelumnya).
+            self.LastStandDeathrayContinuousShakeTimer = 0f;
+
+            // Loop "Beam" cuma dinyalain SEKALI, pas transisi PERTAMA (fromSign == 0f, dari
+            // ReturnToCenter) - BUKAN tiap kali ganti arah (CW<->CCW), biar suaranya beneran
+            // "menerus" satu instance sepanjang seluruh Deathray, gak keputus-nyambung/
+            // restart tiap ganti arah.
+            if (fromSign == 0f)
+            {
+                StartDeathrayLoopSound(npc, self);
+            }
+        }
+
+        // Dipanggil PERSIS begitu ramp-in (TickDeathrayTransition) kelar - lanjut ke fase spin
+        // beneran di kecepatan PENUH, siap ngitung reps target baru buat arah ini.
+        //
+        // FIX: dulu di sini juga yang nge-random LastStandDeathrayAngle ULANG tiap kali
+        // dipanggil (termasuk tiap restart dari transisi) - bikin beam "snap" ngelompat ke
+        // sudut baru yang gak nyambung PAS TEPAT selesai transisi mulus, ngerusak seluruh
+        // efek easing yang barusan kejadian. Sekarang angle CUMA di-random SEKALI, di titik
+        // paling awal (ReturnToCenter, sebelum BeginDeathrayTransition pertama) - di sini
+        // sudut TERKINI dibiarin lanjut apa adanya.
+        private static void StartDeathray(NPC npc, TwinsReworkOverride self, bool clockwise)
+        {
+            self.LastStandDeathrayAccumAngle = 0f;
+
+            // FIX (request "Last Stand pakai jumlah repeat paling maks"): method ini CUMA
+            // dipanggil dari dalam Last Stand (gak ada jalur lain), jadi langsung pakai
+            // MaxDeathrayRepsInclusive - gak perlu random lagi sama sekali (beda dari
+            // pattern normal lain kayak TwinDash/TwinsBorderShot/TwinsCursedRain/
+            // TwinsSplitCombo yang masih dipakai DI LUAR Last Stand juga, makanya di sana
+            // masih perlu cek self.LastStandActive dulu).
+            self.LastStandDeathrayRepsTarget = MaxDeathrayRepsInclusive;
+            self.LastStandDeathrayActive = true;
+            self.LastStandBoltTimer = 0f;
+            self.LastStandTimer = 0f;
+
+            self.LastStandStateRaw = clockwise ? (float)State.DeathrayClockwise : (float)State.DeathrayCounterClockwise;
+        }
+
+        private static void TickDeathraySpin(NPC npc, TwinsReworkOverride self, Player target, float spinSign)
+        {
+            npc.velocity = Vector2.Zero;
+            npc.Center = self.LastStandArenaCenter;
+
+            float angularSpeed = DeathrayAngularSpeed * spinSign;
+            self.LastStandDeathrayAngle += angularSpeed;
+            self.LastStandDeathrayAccumAngle += DeathrayAngularSpeed; // magnitude doang, arah gak ngaruh ke progress
+
+            npc.rotation = self.LastStandDeathrayAngle - MathHelper.PiOver2;
+
+            self.LastStandTimer++;
+            TickDeathrayDamageAndBolts(npc, self, target);
+
+            float targetAngle = self.LastStandDeathrayRepsTarget * MathHelper.TwoPi;
+            if (self.LastStandDeathrayAccumAngle >= targetAngle)
+            {
+                if (spinSign > 0f)
+                {
+                    // CW kelar -> SELALU lanjut ke CCW dulu (expiry BELUM dicek di sini) -
+                    // ini yang jamin 1 PASANG CW+CCW penuh selalu selesai utuh, gak dipotong
+                    // pas baru separuh (cuma CW doang) walau budget waktu udah abis.
+                    BeginDeathrayTransition(npc, self, fromSign: 1f, toClockwise: false);
+                }
+                else
+                {
+                    // CCW kelar -> 1 PASANG CW+CCW barusan baru aja kelar UTUH - ini titik
+                    // AMAN buat cek expiry (checkpoint, sama filosofinya kayak checkpoint di
+                    // akhir attack loop / LaserBarrage.IsDone). Kalau budget waktu master
+                    // udah abis (LastStandExpiryPending) -> beneran berhenti sekarang, masuk
+                    // DeathAnimation. Kalau belum -> looping lagi ke CW (Deathray emang
+                    // dirancang looping terus-menerus sampai waktunya abis).
+                    if (self.LastStandExpiryPending)
+                    {
+                        StartDeathAnimation(npc, self);
+                    }
+                    else
+                    {
+                        BeginDeathrayTransition(npc, self, fromSign: -1f, toClockwise: true);
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // FIX: dulu 1 kurva cosine simetris (decel separuh durasi, accel separuh durasi) yang
+        // CUMA kepakai pas CW->CCW - CCW->CW malah restart instan tanpa transisi apa pun.
+        // Sekarang dipecah 2 fase & berlaku UNIVERSAL buat semua kasus "mulai spin ke arah
+        // baru" (start pertama dari diam MAUPUN tiap ganti arah):
+        //   - fromSign == 0f (start pertama, dari diam) -> LANGSUNG fase ramp-in, gak ada
+        //     fase decel sama sekali (emang belum ada speed lama buat di-rem).
+        //   - fromSign != 0f (abis nge-spin arah itu, mau ganti arah) -> fase DECEL dulu
+        //     (durasi pendek, DeathrayDecelDuration) dari speed penuh arah lama ke 0, BARU
+        //     fase ramp-in (durasi lebih panjang, DeathrayRampInDuration) dari 0 ke speed
+        //     penuh arah baru.
+        // Kurva ramp-in-nya cubic ease-in (t^3) - laju naik PELAN BANGET deket t=0 ("diawali
+        // bener-bener lambat"), tapi naik MAKIN CURAM mendekati t=1 ("transisi dari lambatnya
+        // cepat", gak lama-lama nongkrong di zona lambat / gak buang waktu).
+        // ==========================================
+        private static void TickDeathrayTransition(NPC npc, TwinsReworkOverride self, Player target)
+        {
+            npc.velocity = Vector2.Zero;
+            npc.Center = self.LastStandArenaCenter;
+
+            self.LastStandTimer++;
+
+            float fromSign = self.LastStandDeathrayTransitionFromSign;
+            bool toClockwise = self.LastStandDeathrayTransitionToClockwise;
+            float toSign = toClockwise ? 1f : -1f;
+            float speedFactor;
+
+            if (fromSign == 0f)
+            {
+                // Start pertama (dari diam) - gak ada fase decel, langsung ramp-in.
+                float rampT = MathHelper.Clamp(self.LastStandTimer / DeathrayRampInDuration, 0f, 1f);
+                float eased = rampT * rampT * rampT; // cubic ease-in
+                speedFactor = toSign * eased;
+
+                if (self.LastStandTimer >= DeathrayRampInDuration)
+                {
+                    StartDeathray(npc, self, toClockwise);
+                    return;
+                }
+            }
+            else if (self.LastStandTimer <= DeathrayDecelDuration)
+            {
+                // Fase 1: REM cepat dari speed penuh arah lama ke 0.
+                float decelT = self.LastStandTimer / DeathrayDecelDuration;
+                speedFactor = fromSign * (1f - decelT);
+            }
+            else
+            {
+                // Fase 2: ramp-in dari 0 ke speed penuh arah baru (cubic ease-in, dihitung
+                // relatif dari akhir fase decel, BUKAN dari awal TickDeathrayTransition).
+                float rampTicks = self.LastStandTimer - DeathrayDecelDuration;
+                float rampT = MathHelper.Clamp(rampTicks / DeathrayRampInDuration, 0f, 1f);
+                float eased = rampT * rampT * rampT;
+                speedFactor = toSign * eased;
+
+                if (rampTicks >= DeathrayRampInDuration)
+                {
+                    StartDeathray(npc, self, toClockwise);
+                    return;
+                }
+            }
+
+            self.LastStandDeathrayAngle += DeathrayAngularSpeed * speedFactor;
+            npc.rotation = self.LastStandDeathrayAngle - MathHelper.PiOver2;
+
+            TickDeathrayDamageAndBolts(npc, self, target);
+        }
+
+        // Slot immunity KHUSUS Deathray - bukan numpang slot General/-1 yang dipakai
+        // hampir semua damage source lain by default (biar reset i-frame manual di
+        // ApplyDeathrayDamage() di bawah CUMA nyentuh immunity Deathray doang, gak ikut
+        // nge-reset i-frame player dari damage source Twins LAIN yang kebetulan landed
+        // di tick yang sama - GreenBolt, RedPhantasmalBolt, contact damage, dll tetap
+        // pakai slot General standar, gak diganggu sama sekali).
+        //
+        // CATATAN/KOREKSI: ImmunityCooldownID di tModLoader itu enum TETAP (General=-1,
+        // TileContactDamage=0, Bosses=1, DD2OgreKnockback=2, WrongBugNet=3, Lava=4) - GAK
+        // ADA method buat reserve slot custom baru sendiri. Jadi kita PINJAM slot Bosses
+        // (1) yang emang didesain resmi buat "repeated damage dari boss, biar gak
+        // ke-cheese ambil damage rendah berulang dari source lain" - persis kasus kita,
+        // dan gak dipakai di manapun lagi di codebase Twins ini (dicek: gak ada
+        // hurtCooldowns lain sama sekali).
+        private const int DeathrayCooldownSlot = ImmunityCooldownID.Bosses;
+
+        // Damage garis (segment check, sama filosofi kayak RetBeam.DamageBeam) + spawn bolt
+        // per detik (border + 8 dari Twin) - dipanggil dari SEMUA sub-state Deathray (CW,
+        // transition, CCW), jadi selalu aktif/konsisten sepanjang seluruh fase Deathray.
+        // Beam ini nembak lewat target.Hurt() manual (bukan lewat proyektil beneran). Dipecah
+        // jadi method sendiri (dulu inline di TickDeathrayDamageAndBolts) biar format
+        // pemanggilannya di tick loop sama kayak TwinsDebuffGlobalProjectile.ApplyDebuffs() -
+        // satu baris, jelas namanya, gampang dibaca urutannya (damage dulu, baru debuff kalau
+        // damage-nya landed). Return true kalau damage-nya beneran masuk (dipakai buat gating
+        // ApplyDebuffs, lihat FIX di TickDeathrayDamageAndBolts).
+        //
+        // REQUEST: Deathray SEKARANG ignore i-frame TOTAL - teknik sama persis kayak
+        // "Fake Heart" (Fargo's Souls Mod, Deviantt/CanHitPlayer): reset slot cooldown
+        // dedicated-nya (DeathrayCooldownSlot di atas) ke 0 TEPAT SEBELUM manggil Hurt(),
+        // jadi Hurt() SELALU landed selama collision-nya kena di tick itu (cek collision-nya
+        // sendiri udah per-tick dari fix sebelumnya, lihat TickDeathrayDamageAndBolts) -
+        // bukan cuma kena sekali terus di-block iframe buat beberapa tick berikutnya kayak
+        // damage biasa. cooldownCounter: DeathrayCooldownSlot dipassing ke Hurt() juga, biar
+        // Hurt() nyatet/ngecek immunity-nya di slot yang sama yang barusan di-reset (bukan
+        // slot General default).
+        //
+        // Efeknya DISENGAJA: berdiri kena beam ini tiap tick = full damage tiap tick, burst
+        // sangat cepat (300 dmg Master x60/detik kalau nyangkut penuh 1 detik) - Deathray
+        // emang didesain "wajib dihindari total", bukan "kena dikit gapapa". dodgeable:
+        // false (accessory dodge kayak Master Ninja Gear/Brain of Confusion gak bisa negasiin)
+        // dan armorPenetration: 999f (tembus defense total) tetap dipertahankan dari versi lama.
+        private static bool ApplyDeathrayDamage(NPC npc, Player target)
+        {
+            target.hurtCooldowns[DeathrayCooldownSlot] = 0;
+
+            double damageDealt = target.Hurt(
+                PlayerDeathReason.ByNPC(npc.whoAmI),
+                GetScaledDeathrayDamage(),
+                0,
+                armorPenetration: 999f,
+                dodgeable: false,
+                cooldownCounter: DeathrayCooldownSlot
+            );
+            return damageDealt > 0;
+        }
+
+        private static void TickDeathrayDamageAndBolts(NPC npc, TwinsReworkOverride self, Player target)
+        {
+            // Suara loop "Beam" ikut posisi Twin LIVE tiap tick - dipanggil di sini karena
+            // method ini jalan dari SEMUA sub-state Deathray (Transition, Clockwise,
+            // CounterClockwise), jadi posisinya selalu ke-update konsisten sepanjang seluruh
+            // durasi Deathray tanpa perlu taruh panggilan terpisah di 3 tempat.
+            UpdateDeathrayLoopSoundPosition(npc, self);
+
+            // Shake RINGAN berkelanjutan - retrigger tiap DeathrayContinuousShakeIntervalTicks
+            // (bukan tiap tick, biar gak numpuk/berat) SELAMA method ini jalan, yaitu SELAMA
+            // ketiga sub-state Deathray (Transition, Clockwise, CounterClockwise) - jadi
+            // otomatis nutup seluruh durasi Deathray tanpa perlu taruh panggilan terpisah di
+            // 3 tempat, sama filosofi kayak UpdateDeathrayLoopSoundPosition di atas.
+            self.LastStandDeathrayContinuousShakeTimer++;
+            if (self.LastStandDeathrayContinuousShakeTimer >= DeathrayContinuousShakeIntervalTicks)
+            {
+                self.LastStandDeathrayContinuousShakeTimer = 0f;
+                ScreenShakeSystem.StartShake(DeathrayContinuousShakeMagnitude, DeathrayContinuousShakeDuration);
+            }
+
+            Vector2 direction = self.LastStandDeathrayAngle.ToRotationVector2();
+
+            // Muzzle: titik awal beam digeser MAJU dari Center ke titik moncong bersama
+            // (BeamMuzzleOffset) - konsisten sama titik awal yang dipakai di render
+            // (TwinsRework.cs) DAN sama titik yang dipakai beam-beam lain (RetBeam,
+            // Telegraph, LaserBarrage), bukan rumus sendiri berbasis npc.width lagi.
+            Vector2 muzzlePos = npc.Center + direction * TwinsReworkOverride.BeamMuzzleOffset;
+
+            // FIX (bug: "beberapa part beam gak damage padahal player gak i-frame"): DULU
+            // collision cuma dites 1 dari tiap 8 tick (gated (int)self.LastStandTimer %
+            // DeathrayDamageIntervalTicks == 0), padahal LastStandDeathrayAngle sendiri
+            // di-update TIAP TICK (beam-nya beneran muter terus-menerus secara visual).
+            // Akibatnya beam bisa "lompat" dari sudut A ke sudut B tiap 8 tick tanpa PERNAH
+            // dites nabrak player di sudut-sudut di antaranya - padahal secara visual beam
+            // jelas sempat lewat situ. Makin jauh dari muzzle (t makin besar), makin lebar
+            // celah jarak dunia yang ke-skip per 8 tick itu, jadi makin gampang "bolong".
+            // Sekarang collision dites SETIAP tick. CATATAN: sejak ApplyDeathrayDamage()
+            // di-update buat ignore i-frame (lihat DeathrayCooldownSlot di atasnya), gak
+            // ada lagi rate-limiter alami sama sekali di sini - selama dist <= threshold di
+            // tick itu, Hurt() SELALU landed. Ini DISENGAJA (lihat komentar di
+            // ApplyDeathrayDamage), bukan sisa bug.
+            if (target.active && !target.dead)
+            {
+                Vector2 segStart = muzzlePos;
+                Vector2 segEnd = segStart + direction * DeathrayLength;
+
+                float dist = DistancePointToSegment(target.Center, segStart, segEnd, out float t);
+
+                // Ketebalan hit-nya ngikutin bentuk "V" - kecil di deket muka (t=0), lebar di
+                // ujung jauh (t=1) - PERSIS ngikutin lebar visual core di DrawDeathrayCone.
+                // Dicek sepanjang SELURUH segment (dari pangkal/muzzle sampai ujung terjauh
+                // DeathrayLength), jadi player kena di mana aja sepanjang beam, bukan cuma di
+                // titik tertentu.
+                float hitThicknessAtT = MathHelper.Lerp(DeathrayStartThickness, DeathrayEndThickness, t) * 0.5f;
+
+                if (dist <= hitThicknessAtT)
+                {
+                    // ApplyDeathrayDamage() return apakah damage-nya beneran landed (Hurt()
+                    // bisa "gagal" kalau target lagi immune/iframe dari hit sebelumnya) -
+                    // ApplyDebuffs() cuma jalan kalau damage-nya beneran landed, biar debuff
+                    // gak nempel tanpa damage yang nyertain.
+                    bool damageLanded = ApplyDeathrayDamage(npc, target);
+                    if (damageLanded)
+                    {
+                        TwinsDebuffGlobalProjectile.ApplyDebuffs(target);
+                    }
+                }
+            }
+
+            self.LastStandBoltTimer++;
+            if (self.LastStandBoltTimer >= BoltBurstIntervalTicks)
+            {
+                self.LastStandBoltTimer = 0f;
+                FireBorderBolt(npc, self);
+                FireTwinRadialBolts(npc);
+            }
+        }
+
+        private static float DistancePointToSegment(Vector2 point, Vector2 segStart, Vector2 segEnd, out float t)
+        {
+            Vector2 seg = segEnd - segStart;
+            float lengthSquared = seg.LengthSquared();
+            if (lengthSquared <= 0.0001f)
+            {
+                t = 0f;
+                return Vector2.Distance(point, segStart);
+            }
+
+            t = MathHelper.Clamp(Vector2.Dot(point - segStart, seg) / lengthSquared, 0f, 1f);
+            Vector2 closest = segStart + seg * t;
+            return Vector2.Distance(point, closest);
+        }
+
+        // 5-7 RedPhantasmalBolt dari tepi border, tersebar MERATA & SIMETRIS (360/N derajat
+        // per biji, offset awal random tiap burst biar gak monoton) - semua mengarah ke
+        // pusat arena. Ganti dari "1 titik random" ke "N titik equally-spaced" biar player
+        // gak bisa dengerin pola → pola tetap unpredictable (offset random) tapi FORMASI
+        // tiap burst simetris (gak ada "sisi kosong" di set yang sama).
+        private static void FireBorderBolt(NPC npc, TwinsReworkOverride self)
+        {
+            if (Main.netMode == NetmodeID.MultiplayerClient)
+                return;
+
+            float arenaRadius = GetArenaRadius();
+            int count = Main.rand.Next(MinBorderBoltCount, MaxBorderBoltCountInclusive + 1);
+            float startAngle = Main.rand.NextFloat(MathHelper.TwoPi); // rotasi awal random tiap burst
+            int boltType = ModContent.ProjectileType<RedPhantasmalBolt>();
+
+            for (int i = 0; i < count; i++)
+            {
+                float angle = startAngle + i * (MathHelper.TwoPi / count);
+                Vector2 spawnPoint = self.LastStandArenaCenter + angle.ToRotationVector2() * arenaRadius;
+                Vector2 direction = (self.LastStandArenaCenter - spawnPoint).SafeNormalize(Vector2.UnitY);
+
+                Projectile.NewProjectile(
+                    npc.GetSource_FromAI(),
+                    spawnPoint,
+                    direction * RedPhantasmalBolt.StartSpeed,
+                    boltType,
+                    TwinsReworkOverride.ScaleBoltDamage(DeathrayBorderBoltDamage),
+                    1.5f,
+                    Main.myPlayer,
+                    direction.ToRotation(), // ai0: sudut arah terkunci
+                    0f                       // ai1: counter tick exponential
+                );
+            }
+        }
+
+        // 6-8 GreenBolt dari badan Twin, nyebar MERATA ke segala penjuru (360/N derajat per
+        // biji, offset awal random tiap burst). Ganti dari RedPhantasmalBolt tetap 8 ke
+        // GreenBolt acak 6-8 per request - jumlah acak tiap burst biar pola gak monoton.
+        // CATATAN: TIDAK ada .GetGlobalProjectile<TwinsDebuffGlobalProjectile>().IsFromTwins
+        // — GreenBolt custom ModProjectile, tidak terdaftar di AppliesToEntity, manggil
+        // GetGlobalProjectile → KeyNotFoundException. GreenBolt handle debuffnya sendiri
+        // di OnHitPlayer() (Cursed Inferno).
+        private static void FireTwinRadialBolts(NPC npc)
+        {
+            if (Main.netMode == NetmodeID.MultiplayerClient)
+                return;
+
+            int count = Main.rand.Next(MinTwinBoltCount, MaxTwinBoltCountInclusive + 1);
+            float baseAngle = Main.rand.NextFloat(MathHelper.TwoPi);
+            int boltType = ModContent.ProjectileType<GreenBolt>();
+
+            for (int i = 0; i < count; i++)
+            {
+                float angle = baseAngle + i * (MathHelper.TwoPi / count);
+                Vector2 dir = angle.ToRotationVector2();
+
+                Projectile.NewProjectile(
+                    npc.GetSource_FromAI(),
+                    npc.Center,
+                    dir * GreenBolt.StartSpeed,
+                    boltType,
+                    TwinsReworkOverride.ScaleBoltDamage(DeathrayTwinBoltDamage),
+                    1.5f,
+                    Main.myPlayer,
+                    angle, // ai0: sudut arah terkunci (dibaca AI() GreenBolt)
+                    0f     // ai1: counter tick exponential, mulai dari 0
+                );
+            }
+        }
+
+        // ==========================================
+        // Helper loop suara "Beam" - dipisah 3 method kecil biar titik panggilnya
+        // (BeginDeathrayTransition / TickDeathrayDamageAndBolts / StartDeathAnimation) tetap
+        // ringkas & jelas maksudnya masing-masing.
+        // ==========================================
+
+        // Mulai instance suara loop-nya SEKALI (IsLooped = true di SoundStyle-nya sendiri
+        // yang bikin dia otomatis ngulang terus tanpa perlu PlaySound lagi tiap tick).
+        // Slot instance-nya disimpen di self.LastStandDeathraySoundSlot biar bisa
+        // diupdate posisinya / dihentikan belakangan.
+        private static void StartDeathrayLoopSound(NPC npc, TwinsReworkOverride self)
+        {
+            self.LastStandDeathraySoundSlot = SoundEngine.PlaySound(DeathrayLoopSound, npc.Center);
+        }
+
+        // Ngikutin posisi Twin LIVE tiap tick selama Deathray jalan - kalau slot-nya udah
+        // gak valid (misal suara gagal dimuat / udah keburu berhenti sendiri), TryGetActiveSound
+        // bakal return false dan ini cukup di-skip aja, gak perlu di-restart paksa di sini.
+        private static void UpdateDeathrayLoopSoundPosition(NPC npc, TwinsReworkOverride self)
+        {
+            if (SoundEngine.TryGetActiveSound(self.LastStandDeathraySoundSlot, out ActiveSound activeSound))
+            {
+                activeSound.Position = npc.Center;
+            }
+        }
+
+        // Hentikan instance loop-nya PERSIS begitu Deathray beneran kelar (masuk
+        // DeathAnimation) - dipanggil sekali di StartDeathAnimation, BUKAN di tiap transisi
+        // ganti arah (CW<->CCW), soalnya loop ini emang dirancang nyambung terus sepanjang
+        // seluruh fase Deathray (Transition + Clockwise + CounterClockwise berulang-ulang).
+        private static void StopDeathrayLoopSound(TwinsReworkOverride self)
+        {
+            if (SoundEngine.TryGetActiveSound(self.LastStandDeathraySoundSlot, out ActiveSound activeSound))
+            {
+                activeSound.Stop();
+            }
+        }
+
+        private static float GetArenaRadius()
+        {
+            if (ArenaBorderSystem.ActiveBorders.Count > 0)
+                return ArenaBorderSystem.ActiveBorders[0].Radius;
+
+            return 700f;
+        }
+
+        private static Vector2 GetArenaCenter(NPC npc)
+        {
+            if (ArenaBorderSystem.ActiveBorders.Count > 0)
+                return ArenaBorderSystem.ActiveBorders[0].Center;
+
+            return npc.Center;
+        }
+
+        // ==========================================
+        // DEATH ANIMATION
+        // ==========================================
+        private static void StartDeathAnimation(NPC npc, TwinsReworkOverride self)
+        {
+            self.LastStandDeathrayActive = false;
+            StopDeathrayLoopSound(self);
+            self.LastStandStateRaw = (float)State.DeathAnimation;
+            self.LastStandTimer = 0f;
+            self.LastStandHasLanded = false;
+            self.LastStandNextExplosionCountdown = Main.rand.Next(ExplosionIntervalMinTicks, ExplosionIntervalMaxTicks + 1);
+            self.LastStandFinalExplosionSpawned = false;
+
+            // Border arena (visual + hitbox collider-nya) LANGSUNG DIHAPUS TOTAL detik ini
+            // juga - biar player bisa lihat seluruh death animation (jatuh + ledakan) tanpa
+            // border ngalangin pandangan/gerakan sama sekali.
+            RemoveArenaBorderImmediately();
+
+            // Aktifin gravity DAN tile collision sesaat biar Twin "jatuh" ke lantai/block
+            // terdekat lalu BENERAN BERHENTI di situ (Twins vanilla defaultnya terbang bebas
+            // - noGravity DAN noTileCollide biasanya true biar dia bisa nembus terrain pas
+            // dash/reposisi di fight normal). Kalau cuma noGravity yang dimatiin tapi
+            // noTileCollide masih true, dia tetap jatuh TEMBUS block tanpa pernah berhenti -
+            // makanya keduanya WAJIB dimatiin bareng di sini.
+            npc.noGravity = false;
+            npc.noTileCollide = false;
+            npc.velocity = Vector2.Zero;
+            npc.dontTakeDamage = true;
+
+            // FIX "kaku/goofy": dulu npc.rotation di-paksa 0f di sini dan gak pernah disentuh
+            // lagi sampai kill manual - jadi Twin jatuh kayak papan kayu, lurus sempurna dari
+            // awal sampai nyentuh tanah. Sekarang kasih dia muteran pelan random (arah &
+            // kecepatan acak) yang berjalan selama masih di udara (lihat TickFallingTumble) -
+            // rotation AWAL sengaja DIBIARKAN dari posisi terakhirnya (biasanya masih muter
+            // dari Deathray), bukan di-snap ke 0, biar transisinya mulus bukan "patah".
+            float spinSign = Main.rand.NextBool() ? 1f : -1f;
+            self.LastStandFallAngularVelocity = spinSign * Main.rand.NextFloat(FallAngularVelocityMin, FallAngularVelocityMax);
+            self.LastStandFallSettleRotation = 0f; // ditentuin beneran pas HandleFallLandingImpact
+            self.LastStandFallBounceCount = InitialFallBounceCount;
+        }
+
+        // Hapus border arena aktif (kalau ada) TOTAL & INSTAN - beda dari shrink-animasi
+        // normal (AnimateRadiusTo) yang dipakai di tempat lain, di sini SENGAJA gak dianimasikan
+        // sama sekali karena diminta "langsung hilang". Radius di-nolin manual, border-nya
+        // dicabut langsung dari ActiveBorders (bukan nunggu RemovalCondition-nya sendiri jalan
+        // - kondisi itu baru true begitu Twin beneran gak aktif lagi, padahal di titik ini
+        // Twin masih hidup, cuma lagi death animation), dan callback OnFullyRemoved tetap
+        // dipanggil manual biar state internal (mis. TwinsArenaGlobalNPC.arenaBorder) ikut
+        // ke-reset bersih. Collider fisiknya (ArenaBorderColliderNPC) juga langsung
+        // dinonaktifin paksa, biar hitbox-nya ikut hilang di tick yang sama.
+        private static void RemoveArenaBorderImmediately()
+        {
+            if (ArenaBorderSystem.ActiveBorders.Count > 0)
+            {
+                ArenaBorderSystem.Border border = ArenaBorderSystem.ActiveBorders[0];
+                border.Radius = 0f;
+                ArenaBorderSystem.ActiveBorders.Remove(border);
+                border.OnFullyRemoved?.Invoke();
+            }
+
+            int colliderIndex = NPC.FindFirstNPC(ModContent.NPCType<ArenaBorderColliderNPC>());
+            if (colliderIndex != -1)
+            {
+                Main.npc[colliderIndex].active = false;
+                Main.npc[colliderIndex].netUpdate = true;
+            }
+        }
+
+        private static void TickDeathAnimation(NPC npc, TwinsReworkOverride self)
+        {
+            // Diem total (redam sisa laju horizontal kalau ada dari momentum jatuh) - gravity
+            // vanilla yang urus jatuhnya, kita cukup redam gerak horizontal biar gak "geser".
+            npc.velocity.X *= 0.9f;
+
+            // Particle explosion (TwinsDeathExplosionFX) di-update SEKALI per tick di sini -
+            // AMAN, TickDeathAnimation cuma jalan sekali per tick (lewat instance Spazmatism
+            // doang, lihat komentar di TwinsDeathExplosionFX.cs).
+            TwinsDeathExplosionFX.Update();
+
+            // ==========================================
+            // LEDAKAN VISUAL - SEKARANG nyala dari SAAT INI JUGA (begitu masuk state jatuh),
+            // BUKAN nunggu landing dulu kayak sebelumnya (request eksplisit: "ledakan-ledakan
+            // muncul pas twins dah masuk state dia jatuh"). Selama MASIH DI UDARA dipakein
+            // intensity lebih kecil (FallExplosionIntensity) biar keliatan lebih "letusan
+            // energi kecil-kecil" ketimbang ledakan penuh yang baru pantas muncul begitu
+            // beneran nabrak tanah.
+            // ==========================================
+            self.LastStandNextExplosionCountdown--;
+            if (self.LastStandNextExplosionCountdown <= 0f)
+            {
+                SpawnDeathExplosion(npc, self.LastStandHasLanded ? 1f : FallExplosionIntensity);
+                self.LastStandNextExplosionCountdown = Main.rand.Next(ExplosionIntervalMinTicks, ExplosionIntervalMaxTicks + 1);
+            }
+
+            if (!self.LastStandHasLanded)
+            {
+                // Selama masih jatuh: muter pelan (lihat TickFallingTumble), DAN
+                // self.LastStandTimer dipakai CUMA buat grace period (nunggu gravity sempat
+                // kerja dulu) sebelum ngecek "udah landing apa belum" - BUKAN timer 5 detik
+                // terakhir sebelum kill manual (itu baru mulai ngitung abis BENERAN settle,
+                // di bawah).
+                TickFallingTumble(npc, self);
+
+                self.LastStandTimer++;
+
+                bool longEnoughToCheck = self.LastStandTimer >= LandingCheckMinTicks;
+                bool velocitySettled = Math.Abs(npc.velocity.Y) < LandingVelocityThreshold;
+
+                if (longEnoughToCheck && velocitySettled)
+                {
+                    HandleFallLandingImpact(npc, self);
+                }
+
+                return; // masih di udara -> timer 5 detik terakhir BELUM mulai ngitung
+            }
+
+            // Udah settle (abis kelar mantul-mantul kecil) -> rotation "narik" pelan-pelan ke
+            // sudut tumbang final, BUKAN nyangkut aneh di rotation mentah sisa tumbling -
+            // lihat TickSettledFlopSway.
+            TickSettledFlopSway(npc, self);
+
+            self.LastStandTimer++;
+            if (self.LastStandTimer >= DeathAnimationExplosionDurationTicks && !self.LastStandFinalExplosionSpawned)
+            {
+                // LEDAKAN BESAR FINAL - persis di detik ke-6 (abis 5 detik letusan kecil spam
+                // duluan). Ditandain LastStandFinalExplosionSpawned biar CUMA sekali nyala,
+                // gak ke-trigger ulang tiap tick selama nunggu 1 detik jeda sebelum kill.
+                SpawnFinalBigExplosion(npc);
+                self.LastStandFinalExplosionSpawned = true;
+            }
+
+            if (self.LastStandTimer >= DeathAnimationExplosionDurationTicks + FinalExplosionToKillDelayTicks)
+            {
+                // Kelar 6 detik (5 detik ledakan kecil + ledakan besar di detik ke-6) + 1
+                // detik jeda tambahan biar ledakan besarnya sempat kelihatan -> BARU "bunuh"
+                // Twin resmi secara manual, persis di detik ke-7. OnKill (TwinsRework.cs)
+                // otomatis masak-masakin Retinazer ikut mati bareng di tick yang sama.
+                npc.life = 0;
+                npc.HitEffect(0, 10);
+                npc.checkDead();
+
+                self.LastStandActive = false;
+                self.LastStandStateRaw = (float)State.Done;
+            }
+        }
+
+        // ==========================================
+        // FALL TUMBLE (request: "jangan kaku/goofy")
+        // ==========================================
+
+        // Selama masih di udara: rotation MUTER PELAN terus-menerus (bukan diam), kecepatan
+        // muternya diredam dikit tiap tick (drag udara ringan) tapi gak pernah beneran nyampe
+        // 0 - biar kalau jatuhnya kebetulan lama, dia tetap keliatan "hidup" muter pelan,
+        // bukan freeze di tengah jalan.
+        private static void TickFallingTumble(NPC npc, TwinsReworkOverride self)
+        {
+            npc.rotation += self.LastStandFallAngularVelocity;
+            self.LastStandFallAngularVelocity *= FallAngularDamping;
+        }
+
+        // Dipanggil PERSIS di tick Twin kedeteksi landing. Alih-alih langsung snap diam
+        // total (yang bikin kesannya kaku/goofy), kasih 1-2 mantulan kecil dulu (velocity.Y
+        // negatif kecil yang makin ngedown tiap mantul, ditambah sedikit "kick" acak ke
+        // angular velocity biar mantulnya kerasa gak simetris/robotic) SEBELUM beneran
+        // ditandain LastStandHasLanded = true & sudut tumbang final ditentuin.
+        private static void HandleFallLandingImpact(NPC npc, TwinsReworkOverride self)
+        {
+            self.LastStandTimer = 0f; // reset grace-period counter buat deteksi landing berikutnya (kalau masih mantul)
+
+            if (self.LastStandFallBounceCount > 0)
+            {
+                int bounceIndex = InitialFallBounceCount - self.LastStandFallBounceCount;
+                float bounceVelocity = FallBounceVelocityFirst * (float)Math.Pow(FallBounceVelocityDecay, bounceIndex);
+
+                npc.velocity.Y = bounceVelocity;
+                self.LastStandFallAngularVelocity += Main.rand.NextFloat(-0.03f, 0.03f); // "kick" kecil biar tiap mantul gak identik
+                self.LastStandFallBounceCount--;
+                return; // masih mantul -> BELUM settle, BELUM mulai timer 5 detik terakhir
+            }
+
+            // Mantulan abis -> beneran settle. Tentuin sudut "tumbang" final: miring ke arah
+            // sisi dia lagi muter pas landing (BUKAN balik ke 0 sempurna kayak sebelumnya -
+            // itu yang bikin keliatan kaku pas landing), lalu redam sisa muternya (bukan
+            // di-nol-in instan) biar transisi ke diam kerasa mulus.
+            float tiltSign = Math.Sign(self.LastStandFallAngularVelocity);
+            if (tiltSign == 0)
+                tiltSign = Main.rand.NextBool() ? 1 : -1;
+
+            self.LastStandFallSettleRotation = npc.rotation + tiltSign * MathHelper.PiOver2 * Main.rand.NextFloat(FallSettleRotationMin, FallSettleRotationMax);
+            self.LastStandFallAngularVelocity = 0f;
+
+            self.LastStandHasLanded = true;
+            self.LastStandTimer = 0f; // timer 5 detik terakhir sebelum kill manual MULAI dari sini
+        }
+
+        // Setelah beneran settle: rotation "narik" pelan (lerp) ke sudut tumbang final -
+        // bukan snap instan - jadi kesannya "flop" natural, bukan patah/teleport rotation.
+        private static void TickSettledFlopSway(NPC npc, TwinsReworkOverride self)
+        {
+            npc.rotation = MathHelper.Lerp(npc.rotation, self.LastStandFallSettleRotation, FallSettleLerpSpeed);
+        }
+
+        // Ledakan VISUAL DOANG - particle custom (TwinsDeathExplosionFX, asset bloom
+        // Luminance) GANTI dari proyektil vanilla DD2ExplosiveTrapT1/T2/T3Explosion yang
+        // dipakai sebelumnya. Sound-nya SEKARANG COSTUME (TwinsSounds.TwinsExplosion, dulu
+        // SoundID.Item14 bom/granat vanilla), dimainkan DI SEMUA client (bukan cuma server)
+        // biar semua orang di sesi MP kedengeran, walau particle visualnya sendiri
+        // fully client-side (lihat guard Main.dedServ di TwinsDeathExplosionFX.Spawn).
+        private static void SpawnDeathExplosion(NPC npc, float intensity)
+        {
+            Vector2 offset = new Vector2(
+                Main.rand.NextFloat(-ExplosionSpawnRadius, ExplosionSpawnRadius),
+                Main.rand.NextFloat(-ExplosionSpawnRadius, ExplosionSpawnRadius)
+            );
+            Vector2 spawnPos = npc.Center + offset;
+
+            SoundEngine.PlaySound(TwinsSounds.TwinsExplosion, spawnPos);
+
+            TwinsDeathExplosionFX.Spawn(spawnPos, intensity);
+        }
+
+        // ==========================================
+        // LEDAKAN BESAR FINAL - klimaks death animation, dipanggil SEKALI PERSIS di detik
+        // ke-6 (lihat TickDeathAnimation, kill manual-nya BARU nyusul FinalExplosionToKillDelayTicks
+        // kemudian - SEKARANG 0.3 detik, dulu 1 detik). Beda dari ledakan spam biasa
+        // (SpawnDeathExplosion) di 4 hal:
+        //   1. Intensity jauh lebih gede (FinalExplosionIntensity = 3f vs max 1f biasa) ->
+        //      tiap "letusan" TwinsDeathExplosionFX sendiri jadi lebih gede/lebih banyak ember.
+        //   2. Beberapa BURST sekaligus (FinalExplosionBurstCount) di titik-titik berbeda
+        //      tapi tick yang SAMA, biar keliatan kayak "satu ledakan besar" yang nutupin
+        //      badan Twin, bukan cuma 1 titik doang.
+        //   3. Screen shake JAUH LEBIH KUAT (FinalExplosionShakeMagnitude/Duration) - lebih
+        //      kuat dari shake Roar (25f/0.85f), ini puncak paling dramatis di seluruh fight.
+        //   4. COSTUME: TwinRoar (TwinsSounds.TwinRoar - sound yang sama dipakai di SEMUA
+        //      dash attack & Roar awal Last Stand, TAPI INSTANCE DI SINI DI-PITCH NAIK ke
+        //      FinalExplosionRoarPitch biar "cempreng banget" - beda dari roar-roar lain yang
+        //      TETAP pitch normal, lihat komentar FinalExplosionRoarPitch) ikut dimainkan
+        //      bareng ledakannya, biar kesannya Twin "menjerit" terakhir kali pas meledak,
+        //      bukan cuma sound ledakan doang.
+        // ==========================================
+        private static void SpawnFinalBigExplosion(NPC npc)
+        {
+            ScreenShakeSystem.StartShake(FinalExplosionShakeMagnitude, FinalExplosionShakeDuration);
+
+            // `with` expression - bikin SALINAN TwinsSounds.TwinRoar dengan Pitch di-override,
+            // BUKAN memodifikasi SoundStyle aslinya (yang masih dipakai apa adanya di dash
+            // attack normal & Roar awal RoarAndRefill, harus tetep pitch normal di sana).
+            SoundStyle cempengRoar = TwinsSounds.TwinRoar with { Pitch = FinalExplosionRoarPitch };
+            SoundEngine.PlaySound(cempengRoar, npc.Center);
+
+            for (int i = 0; i < FinalExplosionBurstCount; i++)
+            {
+                Vector2 offset = new Vector2(
+                    Main.rand.NextFloat(-FinalExplosionSpawnRadius, FinalExplosionSpawnRadius),
+                    Main.rand.NextFloat(-FinalExplosionSpawnRadius, FinalExplosionSpawnRadius)
+                );
+                Vector2 spawnPos = npc.Center + offset;
+
+                SoundEngine.PlaySound(TwinsSounds.TwinsExplosion, spawnPos);
+                TwinsDeathExplosionFX.Spawn(spawnPos, FinalExplosionIntensity);
+            }
+        }
+    }
+}

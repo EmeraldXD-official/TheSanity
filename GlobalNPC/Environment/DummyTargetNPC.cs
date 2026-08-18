@@ -37,6 +37,8 @@ namespace TheSanity.NPCs
 
                 // Eksekusi ini CUMA BERJALAN 1 KALI untuk seluruh Dummy yang aktif
                 if (dummyCount > 0) {
+                    DpsTracker.Reset(); // Dummy-nya lenyap semua, meter DPS balik ke 0 juga
+
                     if (Main.netMode != NetmodeID.Server) {
                         var uiInstance = ModContent.GetInstance<DebuffUISystem>()?.DebuffUI;
                         if (uiInstance != null) {
@@ -85,6 +87,11 @@ namespace TheSanity.NPCs
 
             NPC.velocity = Vector2.Zero; 
 
+            // ==================== FRIENDLY / HOSTILE MODE ====================
+            // Saat ON: NPC.friendly = true, jadi projectile hostile (punya musuh) ikut
+            // bisa mendamage Dummy ini, persis seperti NPC ramah lain di vanilla.
+            NPC.friendly = DebuffUISystem.FriendlyModeEnabled;
+
             // ==================== DYNAMIC STAT MIMIC SYSTEM ====================
             if (uiInstance != null && uiInstance.SelectedNPCID > 0) {
                 NPC sampleNPC = new NPC();
@@ -132,6 +139,14 @@ namespace TheSanity.NPCs
             }
         }
 
+        public override void OnHitByItem(Player player, Item item, NPC.HitInfo hit, int damageDone) {
+            DpsTracker.RegisterDamage(NPC.whoAmI, damageDone);
+        }
+
+        public override void OnHitByProjectile(Projectile projectile, NPC.HitInfo hit, int damageDone) {
+            DpsTracker.RegisterDamage(NPC.whoAmI, damageDone);
+        }
+
         public override void OnHitPlayer(Player target, Player.HurtInfo hurtInfo) {
             var uiInstance = ModContent.GetInstance<DebuffUISystem>()?.DebuffUI;
             if (uiInstance != null) {
@@ -171,7 +186,11 @@ namespace TheSanity.NPCs
                 }
             }
 
-            // ==================== VISUAL ENCHANT 2: DISPLAY DEBUFF AKTIF DI ATAS KEPALA ====================
+            // ==================== VISUAL ENCHANT 2: DISPLAY DEBUFF AKTIF DI BAWAH KAKI ====================
+            // 🔧 FIX: dipindah dari atas kepala ke bawah kaki karena kalau di atas, growing ke atas-nya
+            // suka ketiban/nutupin tulisan angka damage yang muncul pas NPC kena hit.
+            // Tetap grid 2 icon per baris (bukan 1 baris lurus panjang), cuma sekarang barisnya
+            // tumbuh ke BAWAH (bukan ke atas) tiap nambah baris.
             List<int> activeDebuffs = new List<int>();
             for (int i = 0; i < NPC.maxBuffs; i++) {
                 if (NPC.buffType[i] > 0) {
@@ -180,37 +199,48 @@ namespace TheSanity.NPCs
             }
 
             if (activeDebuffs.Count > 0) {
-                int maxIconsPerRow = 2;       
-                float iconScale = 0.7f;       
+                // 🔧 Layout baru: FIXED 2 baris ke bawah ("2 shaft"). Begitu kedua baris
+                // penuh, debuff selanjutnya nambah KOLOM ke samping, bukan baris ke-3.
+                const int maxRows = 2;
+                float iconScale = 0.7f;
                 int iconSize = (int)(32 * iconScale);
-                int gapX = 3;                 
-                int gapY = 4;                 
+                int gapX = 3;
+                int gapY = 4;
 
-                float startY = NPC.Top.Y - 18f - screenPos.Y;
-                int totalRows = (int)Math.Ceiling((double)activeDebuffs.Count / maxIconsPerRow);
+                int totalCols = (int)Math.Ceiling((double)activeDebuffs.Count / maxRows);
+                float totalWidth = (totalCols * iconSize) + ((totalCols - 1) * gapX);
 
-                for (int row = 0; row < totalRows; row++) {
-                    int startIndex = row * maxIconsPerRow;
-                    int countInRow = Math.Min(maxIconsPerRow, activeDebuffs.Count - startIndex);
+                float startX = NPC.Center.X - (totalWidth / 2f) - screenPos.X;
+                float startY = NPC.Bottom.Y + 14f - screenPos.Y; // anchor di bawah kaki
 
-                    float rowWidth = (countInRow * iconSize) + ((countInRow - 1) * gapX);
-                    float startX = NPC.Center.X - (rowWidth / 2f) - screenPos.X;
-                    float currentRowY = startY - (row * (iconSize + gapY));
+                for (int i = 0; i < activeDebuffs.Count; i++) {
+                    int col = i / maxRows;
+                    int row = i % maxRows;
 
-                    for (int j = 0; j < countInRow; j++) {
-                        int buffID = activeDebuffs[startIndex + j];
-                        if (buffID >= TextureAssets.Buff.Length || TextureAssets.Buff[buffID] == null || !TextureAssets.Buff[buffID].IsLoaded)
-                            continue;
+                    int buffID = activeDebuffs[i];
+                    if (buffID >= TextureAssets.Buff.Length || TextureAssets.Buff[buffID] == null || !TextureAssets.Buff[buffID].IsLoaded)
+                        continue;
 
-                        Texture2D buffTexture = TextureAssets.Buff[buffID].Value;
-                        Vector2 iconDrawPos = new Vector2(startX + j * (iconSize + gapX), currentRowY);
+                    Texture2D buffTexture = TextureAssets.Buff[buffID].Value;
+                    Vector2 iconDrawPos = new Vector2(startX + col * (iconSize + gapX), startY + row * (iconSize + gapY));
 
-                        Rectangle bgRect = new Rectangle((int)iconDrawPos.X, (int)iconDrawPos.Y, iconSize, iconSize);
-                        spriteBatch.Draw(TextureAssets.MagicPixel.Value, bgRect, Color.Black * 0.45f);
+                    Rectangle bgRect = new Rectangle((int)iconDrawPos.X, (int)iconDrawPos.Y, iconSize, iconSize);
+                    spriteBatch.Draw(TextureAssets.MagicPixel.Value, bgRect, Color.Black * 0.45f);
 
-                        spriteBatch.Draw(buffTexture, iconDrawPos, null, Color.White * 0.9f, 0f, Vector2.Zero, iconScale, SpriteEffects.None, 0f);
-                    }
+                    spriteBatch.Draw(buffTexture, iconDrawPos, null, Color.White * 0.9f, 0f, Vector2.Zero, iconScale, SpriteEffects.None, 0f);
                 }
+            }
+
+            // ==================== PER-DUMMY DPS READOUT (DUNIA, TOGGLE-ABLE) ====================
+            // Cuma nampilin angka ini kalau toggle "Show DPS (World)" di menu lagi ON.
+            // Ini DPS milik Dummy ini doang (bukan gabungan) - kalau ada banyak Dummy,
+            // masing-masing nampilin angkanya sendiri-sendiri. Global DPS gabungan semua
+            // Dummy tetap kehitung terus di belakang layar dan selalu kelihatan di menu.
+            if (DpsTracker.ShowWorldDps) {
+                string dpsText = $"DPS: {DpsTracker.GetDpsForNpc(NPC.whoAmI)}";
+                float rightEdge = NPC.position.X + NPC.width;
+                Vector2 dpsDrawPos = new Vector2(rightEdge + 8f, NPC.Center.Y - 8f) - screenPos;
+                Utils.DrawBorderString(spriteBatch, dpsText, dpsDrawPos, Color.Yellow, 0.85f);
             }
 
             return false; 

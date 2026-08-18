@@ -50,8 +50,18 @@ namespace TheSanity.Items
                 Projectile.NewProjectile(source, position, spreadVelocity, finalShootType, damage, knockback, player.whoAmI);
             }
 
+            // --- FIX: Recoil ga lagi numpuk ke momentum player ---
+            // Sebelumnya "player.velocity += recoilDirection * 7.5f" itu NAMBAH terus tiap kali nembak,
+            // dan karena senjata ini autoReuse (nembak cepet beruntun), speed player bisa numpuk jadi
+            // makin gila tiap detik. Sekarang recoil cuma "nge-cap" kecepatan player ke arah dorongan,
+            // bukan nambah tanpa batas - jadi kalau player udah sekencang/lebih kenceng dari recoil-nya,
+            // recoil ga nambahin apa-apa lagi (ga numpuk).
             Vector2 recoilDirection = -Vector2.Normalize(velocity);
-            player.velocity += recoilDirection * 7.5f; 
+            float recoilStrength = 7.5f;
+            float currentSpeedTowardRecoil = Vector2.Dot(player.velocity, recoilDirection);
+            if (currentSpeedTowardRecoil < recoilStrength) {
+                player.velocity += recoilDirection * (recoilStrength - currentSpeedTowardRecoil);
+            }
 
             return false; 
         }
@@ -61,6 +71,8 @@ namespace TheSanity.Items
                 .AddIngredient(ItemID.BambooBlock, 50)
                 .AddIngredient(ItemID.Boomstick, 1)
                 .AddIngredient(ItemID.BambooLeaf, 1)
+                .AddIngredient(ItemID.JungleSpores, 15)
+                .AddIngredient(ItemID.Vine, 10)
                 .AddTile(TileID.Anvils)
                 .Register();
         }

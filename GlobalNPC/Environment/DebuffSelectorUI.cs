@@ -2,6 +2,7 @@ using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
+using System.Collections.Generic;
 using Terraria;
 using Terraria.ID;
 using Terraria.GameContent;
@@ -14,21 +15,84 @@ namespace TheSanity.Buff
 {
     public class DebuffSelectorUI : UIState
     {
+        // ================== PALET WARNA (biar konsisten & gampang di-tweak sekali tempat) ==================
+        private static readonly Color ColPanelBG     = new Color(21, 24, 36, 248);
+        private static readonly Color ColAccent      = new Color(150, 120, 235);   // ungu, aksen utama
+        private static readonly Color ColTabActive   = new Color(150, 120, 235) * 0.85f;
+        private static readonly Color ColTabInactive = new Color(38, 42, 58) * 0.95f;
+        private static readonly Color ColTabHover    = new Color(58, 62, 84) * 0.95f;
+        private static readonly Color ColListBG      = new Color(13, 15, 22) * 0.9f;
+        private static readonly Color ColItemBG      = new Color(45, 49, 68) * 0.55f;
+        private static readonly Color ColItemHover   = new Color(84, 68, 140) * 0.7f;
+        private static readonly Color ColItemSelected = new Color(76, 209, 145) * 0.5f;
+        private static readonly Color ColSearchIdle   = new Color(30, 33, 46) * 0.9f;
+        private static readonly Color ColSearchActive = new Color(60, 55, 92) * 0.95f;
+        private static readonly Color ColOn  = new Color(76, 209, 145);  // hijau mint
+        private static readonly Color ColOff = new Color(214, 82, 82);   // merah
+
+        // 🔧 FIX: UIPanel SELALU nggambar tekstur border 9-slice bawaan vanilla, walau BorderColor
+        // di-set Transparent. Di elemen setipis 2-3px, tekstur itu ke-stretch jadi kotak gembung
+        // aneh (bukan garis tipis). Makanya buat garis aksen tipis, kita gambar warna solid manual
+        // lewat MagicPixel (tekstur 1x1 putih polos), gak lewat UIPanel sama sekali.
+        private class UISolidColor : UIElement
+        {
+            private readonly Color color;
+            public UISolidColor(Color color) { this.color = color; }
+            protected override void DrawSelf(SpriteBatch spriteBatch) {
+                CalculatedStyle dims = GetDimensions();
+                spriteBatch.Draw(TextureAssets.MagicPixel.Value, dims.ToRectangle(), color);
+            }
+        }
+
+        // ✨ Toggle switch "chip" generik (dipakai untuk Contact Damage / Friendly Mode / Show DPS)
+        // supaya nggak perlu copy-paste blok UI toggle 3x sendiri-sendiri.
+        private class ToggleSwitch
+        {
+            public UIPanel Row;
+            public UIText SubLabel;
+            public UIPanel Track;
+            public UIPanel Knob;
+            public Func<bool> GetState;
+            public string OnText;
+            public string OffText;
+
+            public void Refresh() {
+                bool on = GetState();
+                Color stateColor = on ? ColOn : ColOff;
+
+                Row.BackgroundColor = stateColor * 0.35f;
+                Row.BorderColor = stateColor * 0.7f;
+                SubLabel.SetText(on ? OnText : OffText);
+                SubLabel.TextColor = stateColor;
+
+                Track.BackgroundColor = stateColor * 0.6f;
+                Knob.Left.Set(on ? 30f : 2f, 0f);
+            }
+        }
+
         private UIPanel panel;
         private UIList debuffList;
         private UIScrollbar scrollbar;
         private UITextPanel<string> searchButton;
-        
-        // ✨ TOMBOL BARU
-        private UITextPanel<string> contactDamageButton;
 
         private UIPanel tabDebuffButton;
         private UIPanel tabEnemyButton;
         private UIPanel tabBossButton;
-        
+        private UISolidColor tabIndicator; // garis aksen kecil yang geser ke tab yang lagi aktif
+
+        // ✨ Readout "Global DPS" - SELALU kelihatan di dalam menu, apapun status toggle
+        // "Show DPS (World)". Yang di-toggle cuma tampilan angka di samping Dummy di dunia.
+        private UIText dpsReadoutText;
+
+        private readonly List<ToggleSwitch> toggleSwitches = new List<ToggleSwitch>();
+
+        // ✨ Drag state: seret dari area header (title) buat mindahin panel ke mana aja.
+        private bool isDragging;
+        private Vector2 dragOffset;
+
         public string searchFilter = "";
         public bool isTyping = false;
-        
+
         public int SelectedBuffID = 0; 
         public int SelectedNPCID = 0; 
         public int currentTab = 0; 
@@ -37,146 +101,277 @@ namespace TheSanity.Buff
 
         public override void OnInitialize() {
             panel = new UIPanel();
-            panel.SetPadding(10);
+            panel.SetPadding(12);
             panel.Left.Set(Main.screenWidth / 2f - 200f, 0f);
-            panel.Top.Set(Main.screenHeight / 2f - 295f, 0f);
+            panel.Top.Set(Main.screenHeight / 2f - 350f, 0f);
             panel.Width.Set(400f, 0f);
-            panel.Height.Set(590f, 0f); // ✨ Ditinggikan menjadi 590 agar muat tombol baru
-            panel.BackgroundColor = new Color(33, 43, 73, 240); 
+            panel.Height.Set(700f, 0f);
+            panel.BackgroundColor = ColPanelBG;
+            panel.BorderColor = ColAccent * 0.45f;
             Append(panel);
 
-            UIText title = new UIText(" Dummy Control ", 1f, true);
-            title.Left.Set(10f, 0f);
-            title.Top.Set(10f, 0f);
+            // ─── DRAG HANDLE (invisible, sits over the ENTIRE title bar) ───
+            // Nutupin seluruh lebar header dari kiri sampai sebelum tombol close, jadi
+            // panel bisa diseret dari MANA AJA di title bar itu (bukan cuma spot tertentu),
+            // tanpa nge-block klik ke close button.
+            UIElement dragHandle = new UIElement();
+            dragHandle.Left.Set(0f, 0f);
+            dragHandle.Top.Set(0f, 0f);
+            dragHandle.Width.Set(354f, 0f); // stop tepat sebelum closeButton (Left 358f)
+            dragHandle.Height.Set(36f, 0f);
+            dragHandle.OnLeftMouseDown += (evt, el) => {
+                isDragging = true;
+                dragOffset = Main.MouseScreen - new Vector2(panel.Left.Pixels, panel.Top.Pixels);
+            };
+            dragHandle.OnLeftMouseUp += (evt, el) => isDragging = false;
+            panel.Append(dragHandle);
+
+            // ─── HEADER ───
+            // 🔧 FIX: font "large" ternyata jauh lebih tinggi dari perkiraan dan nabrak tombol close.
+            // Diganti ke scale normal yang lebih gedean dikit (1.15f) biar tetep nonjol tapi muat rapi.
+            UIText title = new UIText("Dummy Control Panel", 1.15f, false);
+            title.Left.Set(2f, 0f);
+            title.Top.Set(6f, 0f);
+            // 🔧 FIX DRAG: tanpa ini, teks judul "menyerap" klik mouse duluan (karena
+            // digambar di atas dragHandle), jadi drag cuma nyala kalau nge-klik di
+            // celah kosong di sekitar teksnya. Dengan IgnoresMouseInteraction = true,
+            // klik "tembus" ke dragHandle di bawahnya, jadi bisa diseret dari mana aja.
+            title.IgnoresMouseInteraction = true;
             panel.Append(title);
 
             UITextPanel<string> closeButton = new UITextPanel<string>("X");
-            closeButton.SetPadding(5);
-            closeButton.Left.Set(350f, 0f);
-            closeButton.Top.Set(5f, 0f);
-            closeButton.Width.Set(30f, 0f);
-            closeButton.Height.Set(30f, 0f);
-            closeButton.BackgroundColor = Color.Red * 0.7f;
+            closeButton.SetPadding(0);
+            closeButton.Left.Set(358f, 0f);
+            closeButton.Top.Set(2f, 0f);
+            closeButton.Width.Set(26f, 0f);
+            closeButton.Height.Set(26f, 0f);
+            closeButton.BackgroundColor = ColOff * 0.55f;
+            closeButton.BorderColor = ColOff * 0.9f;
             closeButton.OnLeftClick += (evt, element) => ModContent.GetInstance<DebuffUISystem>().CloseUI();
+            closeButton.OnMouseOver += (evt, element) => closeButton.BackgroundColor = ColOff * 0.9f;
+            closeButton.OnMouseOut += (evt, element) => closeButton.BackgroundColor = ColOff * 0.55f;
             panel.Append(closeButton);
 
-            // TABS SYSTEM
-            tabDebuffButton = new UIPanel();
-            tabDebuffButton.Left.Set(15f, 0f);
-            tabDebuffButton.Top.Set(45f, 0f);
-            tabDebuffButton.Width.Set(115f, 0f);
-            tabDebuffButton.Height.Set(40f, 0f);
-            tabDebuffButton.SetPadding(0);
-            tabDebuffButton.OnLeftClick += (evt, element) => { currentTab = 0; searchFilter = ""; PopulateList(); };
-            panel.Append(tabDebuffButton);
+            UISolidColor headerLine = new UISolidColor(ColAccent * 0.55f);
+            headerLine.Left.Set(2f, 0f);
+            headerLine.Top.Set(36f, 0f);
+            headerLine.Width.Set(340f, 0f);
+            headerLine.Height.Set(2f, 0f);
+            headerLine.IgnoresMouseInteraction = true; // biar konsisten, ini pun cuma garis visual
+            panel.Append(headerLine);
 
-            UIImage debuffTabIcon = new UIImage(ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Environment/BuffyIco"));
-            debuffTabIcon.Left.Set(41f, 0f);
-            debuffTabIcon.Top.Set(4f, 0f);
-            tabDebuffButton.Append(debuffTabIcon);
+            // ─── GLOBAL DPS READOUT (selalu tampil, terlepas dari toggle Show DPS di dunia) ───
+            UIPanel dpsReadoutPanel = new UIPanel();
+            dpsReadoutPanel.SetPadding(0);
+            dpsReadoutPanel.Left.Set(15f, 0f);
+            dpsReadoutPanel.Top.Set(44f, 0f);
+            dpsReadoutPanel.Width.Set(365f, 0f);
+            dpsReadoutPanel.Height.Set(22f, 0f);
+            dpsReadoutPanel.BackgroundColor = ColAccent * 0.18f;
+            dpsReadoutPanel.BorderColor = ColAccent * 0.4f;
+            panel.Append(dpsReadoutPanel);
 
-            tabEnemyButton = new UIPanel();
-            tabEnemyButton.Left.Set(140f, 0f);
-            tabEnemyButton.Top.Set(45f, 0f);
-            tabEnemyButton.Width.Set(115f, 0f);
-            tabEnemyButton.Height.Set(40f, 0f);
-            tabEnemyButton.SetPadding(0);
-            tabEnemyButton.OnLeftClick += (evt, element) => { currentTab = 1; searchFilter = ""; PopulateList(); };
-            panel.Append(tabEnemyButton);
+            dpsReadoutText = new UIText("Global DPS: 0", 0.8f);
+            dpsReadoutText.Left.Set(8f, 0f);
+            dpsReadoutText.Top.Set(1f, 0f);
+            dpsReadoutText.TextColor = ColAccent;
+            dpsReadoutPanel.Append(dpsReadoutText);
 
-            UIImage enemyTabIcon = new UIImage(ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Environment/EnemyIco"));
-            enemyTabIcon.Left.Set(41f, 0f);
-            enemyTabIcon.Top.Set(4f, 0f);
-            tabEnemyButton.Append(enemyTabIcon);
+            // ─── TABS ───
+            tabDebuffButton = CreateTabButton(15f, "TheSanity/GlobalNPC/Environment/BuffyIco", 0);
+            tabEnemyButton  = CreateTabButton(140f, "TheSanity/GlobalNPC/Environment/EnemyIco", 1);
+            tabBossButton   = CreateTabButton(265f, "TheSanity/GlobalNPC/Environment/BossyIco", 2);
 
-            tabBossButton = new UIPanel();
-            tabBossButton.Left.Set(265f, 0f);
-            tabBossButton.Top.Set(45f, 0f);
-            tabBossButton.Width.Set(115f, 0f);
-            tabBossButton.Height.Set(40f, 0f);
-            tabBossButton.SetPadding(0);
-            tabBossButton.OnLeftClick += (evt, element) => { currentTab = 2; searchFilter = ""; PopulateList(); };
-            panel.Append(tabBossButton);
+            tabIndicator = new UISolidColor(ColAccent);
+            tabIndicator.Left.Set(15f, 0f);
+            tabIndicator.Top.Set(113f, 0f);
+            tabIndicator.Width.Set(115f, 0f);
+            tabIndicator.Height.Set(3f, 0f);
+            panel.Append(tabIndicator);
 
-            UIImage bossTabIcon = new UIImage(ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Environment/BossyIco"));
-            bossTabIcon.Left.Set(41f, 0f);
-            bossTabIcon.Top.Set(4f, 0f);
-            tabBossButton.Append(bossTabIcon);
-
-            // Search Bar
-            searchButton = new UITextPanel<string>("Search: [Click here to type...]");
+            // ─── SEARCH BAR ───
+            searchButton = new UITextPanel<string>("Search: [click to type...]");
             searchButton.Left.Set(15f, 0f);
-            searchButton.Top.Set(95f, 0f);
+            searchButton.Top.Set(124f, 0f);
             searchButton.Width.Set(365f, 0f);
             searchButton.Height.Set(35f, 0f);
-            searchButton.BackgroundColor = Color.DarkSlateGray * 0.8f;
+            searchButton.BackgroundColor = ColSearchIdle;
+            searchButton.BorderColor = ColAccent * 0.3f;
             searchButton.OnLeftClick += (evt, element) => {
                 isTyping = !isTyping;
                 if (isTyping) {
-                    searchButton.BackgroundColor = Color.SlateGray;
+                    searchButton.BackgroundColor = ColSearchActive;
+                    searchButton.BorderColor = ColAccent;
                     Main.clrInput();
                 } else {
-                    searchButton.BackgroundColor = Color.DarkSlateGray * 0.8f;
+                    searchButton.BackgroundColor = ColSearchIdle;
+                    searchButton.BorderColor = ColAccent * 0.3f;
                 }
             };
             panel.Append(searchButton);
 
-            // Container Panel
+            // ─── LIST CONTAINER ───
             UIPanel listPanel = new UIPanel();
+            listPanel.SetPadding(6);
             listPanel.Left.Set(15f, 0f);
-            listPanel.Top.Set(140f, 0f);
+            listPanel.Top.Set(169f, 0f);
             listPanel.Width.Set(345f, 0f);
-            listPanel.Height.Set(380f, 0f);
-            listPanel.BackgroundColor = Color.Black * 0.4f;
+            listPanel.Height.Set(360f, 0f);
+            listPanel.BackgroundColor = ColListBG;
+            listPanel.BorderColor = ColAccent * 0.25f;
             panel.Append(listPanel);
 
             debuffList = new UIList();
             debuffList.Width.Set(325f, 0f);
-            debuffList.Height.Set(370f, 0f);
-            debuffList.ListPadding = 5f;
+            debuffList.Height.Set(348f, 0f);
+            debuffList.ListPadding = 6f;
             listPanel.Append(debuffList);
 
             scrollbar = new UIScrollbar();
             scrollbar.Left.Set(365f, 0f);
-            scrollbar.Top.Set(140f, 0f);
+            scrollbar.Top.Set(169f, 0f);
             scrollbar.Width.Set(15f, 0f);
-            scrollbar.Height.Set(380f, 0f);
+            scrollbar.Height.Set(360f, 0f);
             panel.Append(scrollbar);
             debuffList.SetScrollbar(scrollbar);
 
-            // ✨ INISIALISASI TOMBOL TOGGLE CONTACT DAMAGE (DI AREA BAWAH)
-            contactDamageButton = new UITextPanel<string>("Contact Damage: OFF");
-            contactDamageButton.Left.Set(15f, 0f);
-            contactDamageButton.Top.Set(535f, 0f); // Diletakkan di bawah kontainer list
-            contactDamageButton.Width.Set(365f, 0f);
-            contactDamageButton.Height.Set(35f, 0f);
-            contactDamageButton.OnLeftClick += (evt, element) => {
-                // Balikkan nilai true/false status deteksi damage global
-                DebuffUISystem.ContactDamageEnabled = !DebuffUISystem.ContactDamageEnabled;
-                Terraria.Audio.SoundEngine.PlaySound(SoundID.MenuTick);
+            // ─── STATUS TOGGLES (toggle switch model, bukan cuma tombol teks) ───
+            CreateToggleSwitch(
+                549f, "Contact Damage", "ON - Hurts Player", "OFF - Safe Mode",
+                () => DebuffUISystem.ContactDamageEnabled,
+                () => DebuffUISystem.ContactDamageEnabled = !DebuffUISystem.ContactDamageEnabled);
+
+            CreateToggleSwitch(
+                597f, "Friendly Mode", "ON - Takes Hostile Dmg", "OFF - Hostile Enemy",
+                () => DebuffUISystem.FriendlyModeEnabled,
+                () => DebuffUISystem.FriendlyModeEnabled = !DebuffUISystem.FriendlyModeEnabled);
+
+            CreateToggleSwitch(
+                645f, "Show DPS (World)", "ON - Visible by Dummy", "OFF - Menu Only",
+                () => DpsTracker.ShowWorldDps,
+                () => DpsTracker.ShowWorldDps = !DpsTracker.ShowWorldDps);
+        }
+
+        private UIPanel CreateTabButton(float left, string iconPath, int tabIndex) {
+            UIPanel tab = new UIPanel();
+            tab.Left.Set(left, 0f);
+            tab.Top.Set(70f, 0f);
+            tab.Width.Set(115f, 0f);
+            tab.Height.Set(40f, 0f);
+            tab.SetPadding(0);
+            tab.BorderColor = Color.Transparent;
+            tab.OnLeftClick += (evt, element) => { currentTab = tabIndex; searchFilter = ""; PopulateList(); };
+            tab.OnMouseOver += (evt, element) => { if (currentTab != tabIndex) tab.BackgroundColor = ColTabHover; };
+            tab.OnMouseOut += (evt, element) => { if (currentTab != tabIndex) tab.BackgroundColor = ColTabInactive; };
+
+            UIImage icon = new UIImage(ModContent.Request<Texture2D>(iconPath));
+            icon.Left.Set(41f, 0f);
+            icon.Top.Set(4f, 0f);
+            tab.Append(icon);
+
+            panel.Append(tab);
+            return tab;
+        }
+
+        /// <summary>
+        /// Builds one full toggle-switch row (label + sub-label + track + knob),
+        /// wires up the click handler, and registers it so <see cref="Update"/>
+        /// keeps its visuals in sync every frame automatically.
+        /// </summary>
+        private ToggleSwitch CreateToggleSwitch(float top, string title, string onText, string offText, Func<bool> getState, Action toggleAction) {
+            var row = new UIPanel();
+            row.SetPadding(0);
+            row.Left.Set(15f, 0f);
+            row.Top.Set(top, 0f);
+            row.Width.Set(365f, 0f);
+            row.Height.Set(40f, 0f);
+            row.BackgroundColor = ColOff * 0.35f;
+            row.BorderColor = ColOff * 0.7f;
+            panel.Append(row);
+
+            UIText label = new UIText(title);
+            label.Left.Set(12f, 0f);
+            label.Top.Set(4f, 0f);
+            row.Append(label);
+
+            UIText subLabel = new UIText(offText, 0.75f);
+            subLabel.Left.Set(12f, 0f);
+            subLabel.Top.Set(22f, 0f);
+            row.Append(subLabel);
+
+            UIPanel track = new UIPanel();
+            track.SetPadding(0);
+            track.Left.Set(305f, 0f);
+            track.Top.Set(10f, 0f);
+            track.Width.Set(48f, 0f);
+            track.Height.Set(20f, 0f);
+            track.BackgroundColor = Color.Black * 0.5f;
+            track.BorderColor = Color.White * 0.3f;
+            row.Append(track);
+
+            UIPanel knob = new UIPanel();
+            knob.SetPadding(0);
+            knob.Left.Set(2f, 0f);
+            knob.Top.Set(2f, 0f);
+            knob.Width.Set(16f, 0f);
+            knob.Height.Set(16f, 0f);
+            knob.BackgroundColor = Color.White;
+            knob.BorderColor = Color.Transparent;
+            track.Append(knob);
+
+            var toggle = new ToggleSwitch {
+                Row = row,
+                SubLabel = subLabel,
+                Track = track,
+                Knob = knob,
+                GetState = getState,
+                OnText = onText,
+                OffText = offText,
             };
-            panel.Append(contactDamageButton);
+
+            row.OnLeftClick += (evt, element) => {
+                toggleAction();
+                Terraria.Audio.SoundEngine.PlaySound(SoundID.MenuTick);
+                toggle.Refresh();
+            };
+            row.OnMouseOver += (evt, element) => row.BorderColor = Color.White * 0.6f;
+            row.OnMouseOut += (evt, element) => toggle.Refresh();
+
+            toggle.Refresh();
+            toggleSwitches.Add(toggle);
+            return toggle;
         }
 
         public override void Update(GameTime gameTime) {
             base.Update(gameTime);
 
-            panel.Left.Set(Main.screenWidth / 2f - 200f, 0f);
-            panel.Top.Set(Main.screenHeight / 2f - 295f, 0f);
+            // Lock world mouse interaction while hovering the panel so clicks
+            // don't leak through to the game world.
+            if (panel.ContainsPoint(Main.MouseScreen)) {
+                Main.LocalPlayer.mouseInterface = true;
+            }
 
-            tabDebuffButton.BackgroundColor = (currentTab == 0) ? Color.Goldenrod * 0.8f : Color.DarkSlateGray * 0.5f;
-            tabEnemyButton.BackgroundColor = (currentTab == 1) ? Color.Goldenrod * 0.8f : Color.DarkSlateGray * 0.5f;
-            tabBossButton.BackgroundColor = (currentTab == 2) ? Color.Goldenrod * 0.8f : Color.DarkSlateGray * 0.5f;
+            if (isDragging) {
+                panel.Left.Set(Main.MouseScreen.X - dragOffset.X, 0f);
+                panel.Top.Set(Main.MouseScreen.Y - dragOffset.Y, 0f);
+                panel.Recalculate();
+            }
 
-            // ✨ LOGIKA WARNA & TEKS DINAMIS UNTUK TOMBOL BARU
-            if (contactDamageButton != null) {
-                if (DebuffUISystem.ContactDamageEnabled) {
-                    contactDamageButton.SetText("Contact Damage: ON (Hurts Player)");
-                    contactDamageButton.BackgroundColor = Color.LimeGreen * 0.7f;
-                } else {
-                    contactDamageButton.SetText("Contact Damage: OFF (Safe Mode)");
-                    contactDamageButton.BackgroundColor = Color.Red * 0.7f;
-                }
+            if (!Main.mouseLeft) {
+                isDragging = false;
+            }
+
+            tabDebuffButton.BackgroundColor = (currentTab == 0) ? ColTabActive : ColTabInactive;
+            tabEnemyButton.BackgroundColor  = (currentTab == 1) ? ColTabActive : ColTabInactive;
+            tabBossButton.BackgroundColor   = (currentTab == 2) ? ColTabActive : ColTabInactive;
+
+            tabIndicator.Left.Set(15f + (currentTab * 125f), 0f);
+
+            // Global DPS readout: selalu update, terlepas dari toggle "Show DPS (World)".
+            dpsReadoutText.SetText($"Global DPS: {DpsTracker.CurrentDps}");
+
+            foreach (ToggleSwitch toggle in toggleSwitches) {
+                toggle.Refresh();
             }
 
             if (isTyping) {
@@ -221,13 +416,14 @@ namespace TheSanity.Buff
                 string blinkingCursor = (cursorTimer % 40 < 20) ? "|" : "";
                 searchButton.SetText("Search: " + searchFilter + blinkingCursor);
             } else {
-                searchButton.SetText(searchFilter == "" ? "Search: [Click here to type...]" : "Search: " + searchFilter);
+                searchButton.SetText(searchFilter == "" ? "Search: [click to type...]" : "Search: " + searchFilter);
             }
         }
 
         public void ResetTypingState() {
             isTyping = false;
-            searchButton.BackgroundColor = Color.DarkSlateGray * 0.8f;
+            searchButton.BackgroundColor = ColSearchIdle;
+            searchButton.BorderColor = ColAccent * 0.3f;
         }
 
         public void PopulateList() {
@@ -280,13 +476,15 @@ namespace TheSanity.Buff
         private void AddListItem(int id, string name, bool isDebuffType) {
             UIPanel itemPanel = new UIPanel();
             itemPanel.Width.Set(315f, 0f);
-            itemPanel.Height.Set(40f, 0f);
+            itemPanel.Height.Set(42f, 0f);
             itemPanel.SetPadding(0);
+            itemPanel.BorderColor = Color.Transparent;
 
             bool isSelected = isDebuffType ? (SelectedBuffID == id) : (SelectedNPCID == id);
-            itemPanel.BackgroundColor = isSelected ? Color.LimeGreen * 0.6f : Color.Indigo * 0.4f;
+            itemPanel.BackgroundColor = isSelected ? ColItemSelected : ColItemBG;
+            if (isSelected) itemPanel.BorderColor = ColOn * 0.7f;
 
-            float textLeftOffset = 10f; 
+            float textLeftOffset = 12f; 
 
             if (id > 0) {
                 Asset<Texture2D> textureAsset = null;
@@ -303,19 +501,29 @@ namespace TheSanity.Buff
                 }
 
                 if (textureAsset != null) {
+                    UIPanel iconBackdrop = new UIPanel();
+                    iconBackdrop.SetPadding(0);
+                    iconBackdrop.Left.Set(6f, 0f);
+                    iconBackdrop.Top.Set(5f, 0f);
+                    iconBackdrop.Width.Set(32f, 0f);
+                    iconBackdrop.Height.Set(32f, 0f);
+                    iconBackdrop.BackgroundColor = Color.Black * 0.35f;
+                    iconBackdrop.BorderColor = Color.Transparent;
+                    itemPanel.Append(iconBackdrop);
+
                     UIImage icon = new UIImage(textureAsset);
-                    icon.Left.Set(5f, 0f);
-                    icon.Top.Set(4f, 0f);
+                    icon.Left.Set(6f, 0f);
+                    icon.Top.Set(5f, 0f);
                     icon.Width.Set(32f, 0f);
                     icon.Height.Set(32f, 0f);
                     itemPanel.Append(icon);
-                    textLeftOffset = 45f;
+                    textLeftOffset = 48f;
                 }
             }
 
             UIText text = new UIText(name);
             text.Left.Set(textLeftOffset, 0f); 
-            text.Top.Set(10f, 0f);
+            text.Top.Set(11f, 0f);
             itemPanel.Append(text);
 
             itemPanel.OnLeftClick += (evt, element) => {
@@ -329,8 +537,8 @@ namespace TheSanity.Buff
                 PopulateList();
             };
 
-            itemPanel.OnMouseOver += (evt, element) => { if (!isSelected) itemPanel.BackgroundColor = Color.Indigo * 0.8f; };
-            itemPanel.OnMouseOut += (evt, element) => { if (!isSelected) itemPanel.BackgroundColor = Color.Indigo * 0.4f; };
+            itemPanel.OnMouseOver += (evt, element) => { if (!isSelected) itemPanel.BackgroundColor = ColItemHover; };
+            itemPanel.OnMouseOut += (evt, element) => { if (!isSelected) itemPanel.BackgroundColor = ColItemBG; };
 
             debuffList.Add(itemPanel);
         }

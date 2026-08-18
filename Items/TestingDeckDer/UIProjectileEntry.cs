@@ -14,8 +14,8 @@ namespace TheSanity.Items.TestingDeckDer
         public UIProjectileEntry(int type, string name)
         {
             projType = type;
-            
-            // Deteksi asal mod untuk mempermudah mencari projectile kustomisasi kita
+
+            // Detect the source mod to make it easier to find our own custom projectiles
             ModProjectile modProj = ModContent.GetModProjectile(type);
             string modOrigin = modProj != null ? $"[{modProj.Mod.Name}]" : "[Vanilla]";
 
@@ -31,11 +31,11 @@ namespace TheSanity.Items.TestingDeckDer
             Rectangle rect = dims.ToRectangle();
             bool hover = rect.Contains(Main.mouseX, Main.mouseY);
 
-            // Cek apakah data log entitas ini yang sedang dipilih oleh developer
+            // Check whether this entry is the currently selected/active projectile
             bool isCurrentActive = TestingDeckSystem.SelectedProjectileType == projType;
 
             Color bg;
-            if (isCurrentActive) bg = new Color(100, 90, 40); // Warna kecokelatan emas jika dipilih aktif
+            if (isCurrentActive) bg = new Color(100, 90, 40); // Golden-brown tint when actively selected
             else bg = hover ? new Color(70, 70, 110) : new Color(40, 40, 60);
 
             Utils.DrawInvBG(spriteBatch, rect, bg);
@@ -49,7 +49,7 @@ namespace TheSanity.Items.TestingDeckDer
 
                 if (Main.mouseLeft && Main.mouseLeftRelease)
                 {
-                    // Pilih projectile ini untuk ditembakkan dengan LMB nanti
+                    // Select this projectile to be fired with LMB
                     TestingDeckSystem.SelectedProjectileType = projType;
                     Terraria.Audio.SoundEngine.PlaySound(Terraria.ID.SoundID.MenuTick);
                 }

@@ -48,7 +48,7 @@ namespace TheSanity.Items.TestingDeckDer
         {
             base.Update(gameTime);
 
-            // Jika klik kiri terdeteksi di luar area Search Bar, matikan fokus mengetik[cite: 18]
+            // If a left click is detected outside the search bar area, unfocus it
             if (isFocused && Main.mouseLeft && !ContainsPoint(Main.MouseScreen))
             {
                 isFocused = false;
@@ -57,15 +57,15 @@ namespace TheSanity.Items.TestingDeckDer
 
             if (isFocused)
             {
-                Main.LocalPlayer.mouseInterface = true; // Kunci mouse game[cite: 19]
-                PlayerInput.WritingText = true;         // Kunci input teks dasar game[cite: 18]
+                Main.LocalPlayer.mouseInterface = true; // Lock game mouse interaction
+                PlayerInput.WritingText = true;         // Lock the game's default text input
 
-                // Mengadopsi sistem scanning tombol keyboard manual dari DebuffSelectorUI[cite: 18]
+                // Manual keyboard key scanning, adapted from the DebuffSelectorUI approach
                 foreach (Keys key in Enum.GetValues(typeof(Keys)))
                 {
                     if (Main.keyState.IsKeyDown(key) && Main.oldKeyState.IsKeyUp(key))
                     {
-                        // Hapus Karakter (Backspace)[cite: 18]
+                        // Delete character (Backspace)
                         if (key == Keys.Back)
                         {
                             if (currentString.Length > 0)
@@ -74,25 +74,25 @@ namespace TheSanity.Items.TestingDeckDer
                                 OnContentsChanged?.Invoke(currentString);
                             }
                         }
-                        // Selesai Mengetik[cite: 18]
+                        // Finish typing
                         else if (key == Keys.Escape || key == Keys.Enter)
                         {
                             isFocused = false;
                             BackgroundColor = new Color(35, 35, 55);
                             break;
                         }
-                        // Karakter Spasi[cite: 18]
+                        // Space character
                         else if (key == Keys.Space)
                         {
                             currentString += " ";
                             OnContentsChanged?.Invoke(currentString);
                         }
-                        // Karakter Huruf & Angka[cite: 18]
+                        // Letter & number characters
                         else
                         {
                             string keyStr = key.ToString();
-                            
-                            // Deteksi Karakter Alfabet Tunggal (A-Z)[cite: 18]
+
+                            // Single alphabet character (A-Z)
                             if (keyStr.Length == 1 && char.IsLetter(keyStr[0]))
                             {
                                 bool shift = Main.keyState.IsKeyDown(Keys.LeftShift) || Main.keyState.IsKeyDown(Keys.RightShift);
@@ -101,13 +101,13 @@ namespace TheSanity.Items.TestingDeckDer
                                 currentString += c;
                                 OnContentsChanged?.Invoke(currentString);
                             }
-                            // Deteksi Angka Atas Keyboard (D0 - D9)[cite: 18]
+                            // Top-row number keys (D0 - D9)
                             else if (keyStr.Length == 2 && keyStr.StartsWith("D") && char.IsDigit(keyStr[1]))
                             {
                                 currentString += keyStr[1];
                                 OnContentsChanged?.Invoke(currentString);
                             }
-                            // Deteksi Angka Numpad Kanan (NumPad0 - NumPad9)[cite: 18]
+                            // Numpad number keys (NumPad0 - NumPad9)
                             else if (keyStr.StartsWith("NumPad") && keyStr.Length == 7 && char.IsDigit(keyStr[6]))
                             {
                                 currentString += keyStr[6];
@@ -137,9 +137,9 @@ namespace TheSanity.Items.TestingDeckDer
             CalculatedStyle dims = GetInnerDimensions();
             Vector2 textPos = new Vector2(dims.X + 4f, dims.Y + dims.Height * 0.5f - 8f);
 
-            // Logika kursor berkedip statis visual[cite: 18]
+            // Static blinking cursor visual
             string blinkingCursor = (isFocused && cursorBlinkTimer % 40 < 20) ? "|" : "";
-            
+
             string display = string.IsNullOrEmpty(currentString) && !isFocused ? hintText : currentString + blinkingCursor;
             Color color = string.IsNullOrEmpty(currentString) && !isFocused ? Color.Gray : Color.White;
 

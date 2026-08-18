@@ -13,14 +13,20 @@ namespace TheSanity.Items.TestingDeckDer
         private static TestingDeckUIState uiState;
         private static bool isVisible;
 
-        public static int SelectedProjectileType = 0; 
+        public static int SelectedProjectileType = 0;
+
+        // This mod's own internal name (e.g. "TheSanity"), used so its
+        // category tab can always be pinned right after "Vanilla".
+        public static string OwnModName { get; private set; }
 
         public override void Load()
         {
             if (Main.dedServ) return;
 
-            // Hotkey khusus untuk buka/tutup menu (Default: Tombol [ )
-            ToggleKeybind = KeybindLoader.RegisterKeybind(Mod, "Buka Testing Deck", "OemOpenBrackets");
+            OwnModName = Mod.Name;
+
+            // Dedicated hotkey to open/close the menu (Default: [ key)
+            ToggleKeybind = KeybindLoader.RegisterKeybind(Mod, "Open Testing Deck", "OemOpenBrackets");
 
             uiState = new TestingDeckUIState();
             uiState.Activate();
@@ -32,12 +38,13 @@ namespace TheSanity.Items.TestingDeckDer
             ToggleKeybind = null;
             uiState = null;
             testingDeckInterface = null;
+            OwnModName = null;
         }
 
         public static void ToggleUI()
         {
-            // VALIDASI PEMANGGILAN: Hanya ijinkan BUKA menu jika sedang memegang TestingDeck[cite: 17]
-            // Namun jika menu sedang TERBUKA, boleh langsung ditutup tanpa syarat memegang item[cite: 17]
+            // VALIDATION: Only allow OPENING the menu while holding the TestingDeck item.
+            // If the menu is already OPEN, it can be closed directly without needing to hold the item.
             if (!isVisible && Main.LocalPlayer.HeldItem.type != ModContent.ItemType<TestingDeck>())
             {
                 return;
@@ -45,14 +52,14 @@ namespace TheSanity.Items.TestingDeckDer
 
             isVisible = !isVisible;
             testingDeckInterface.SetState(isVisible ? uiState : null);
-            
+
             if (isVisible && uiState != null)
             {
                 uiState.RefreshList();
             }
             else
             {
-                // Pengaman tambahan agar input keyboard game langsung normal saat UI ditutup
+                // Extra safety so game keyboard input goes back to normal immediately when the UI closes
                 Main.blockInput = false;
             }
         }
@@ -63,7 +70,7 @@ namespace TheSanity.Items.TestingDeckDer
 
             if (ToggleKeybind.JustPressed)
             {
-                // Jika UI sedang terbuka, ijinkan hotkey untuk langsung menutupnya walau tidak memegang item[cite: 17]
+                // If the UI is already open, allow the hotkey to close it even without holding the item
                 if (isVisible || Main.LocalPlayer.HeldItem.type == ModContent.ItemType<TestingDeck>())
                 {
                     ToggleUI();
@@ -75,8 +82,8 @@ namespace TheSanity.Items.TestingDeckDer
         {
             if (isVisible)
             {
-                // FIX: Proteksi pengecekan HeldItem terus-menerus di sini DIHAPUS[cite: 17]
-                // Sehingga UI akan tetap menetap di layar meskipun kamu mengganti senjata/buku[cite: 17]
+                // NOTE: The continuous "holding the item" check was intentionally removed here,
+                // so the UI stays on screen even if you switch weapons/items.
                 testingDeckInterface?.Update(gameTime);
             }
         }

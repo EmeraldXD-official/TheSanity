@@ -39,7 +39,11 @@ namespace TheSanity.Projectiles
             Projectile.usesLocalNPCImmunity = true;
             Projectile.localNPCHitCooldown = 12; 
 
-            Projectile.hide = true; 
+            // 🔧 FIX POSISI: hide dimatikan supaya proyektil digambar lewat jalur normal
+            // (Main.DrawProjectiles -> PreDraw), bukan lewat PlayerDrawLayer custom yang
+            // gampang ketiban layer body/arm lain dan bikin sabit keliatan di belakang player
+            // pas lagi swing.
+            Projectile.hide = false; 
         }
 
         public override void AI() {
@@ -101,14 +105,19 @@ namespace TheSanity.Projectiles
                     Projectile.rotation = MathHelper.Lerp(start, end, smoothProgress);
                 }
 
-                float curveThrust = (float)Math.Sin(subProgress * MathHelper.Pi) * 22f; 
-                Projectile.Center = player.MountedCenter + Projectile.rotation.ToRotationVector2() * curveThrust;
+                // 🔧 FIX POSISI: pas swing, anchor sekarang ke tangan (GetFrontHandPosition)
+                // bukan player.MountedCenter, biar sabit keliatan digenggam beneran pas ditebas.
+                player.SetCompositeArmFront(true, Player.CompositeArmStretchAmount.Full, Projectile.rotation - MathHelper.PiOver2);
+                Vector2 handPosition = player.GetFrontHandPosition(Player.CompositeArmStretchAmount.Full, Projectile.rotation - MathHelper.PiOver2);
+
+                // curveThrust dikecilin dari 22f -> 14f supaya tetep nempel di sekitar tangan
+                float curveThrust = (float)Math.Sin(subProgress * MathHelper.Pi) * 14f; 
+                Projectile.Center = handPosition + Projectile.rotation.ToRotationVector2() * curveThrust;
 
                 player.itemRotation = Projectile.rotation;
                 if (player.direction == -1) {
                     player.itemRotation += MathHelper.Pi;
                 }
-                player.SetCompositeArmFront(true, Player.CompositeArmStretchAmount.Full, Projectile.rotation - MathHelper.PiOver2);
 
                 timer++;
                 if (timer >= maxTime) {
@@ -116,6 +125,7 @@ namespace TheSanity.Projectiles
                 }
             }
             else {
+                // ─── POSE IDLE: DIBIARIN SAMA PERSIS, INI UDAH BAGUS ───
                 Projectile.Center = player.MountedCenter + new Vector2(-6f * player.direction, -12f);
                 Projectile.rotation = -MathHelper.PiOver2 - 0.25f * player.direction;
 
@@ -126,6 +136,9 @@ namespace TheSanity.Projectiles
                 
                 player.SetCompositeArmFront(true, Player.CompositeArmStretchAmount.ThreeQuarters, Projectile.rotation - MathHelper.PiOver2);
             }
+
+            // 🔧 FIX: tandain proyektil ini sebagai held item si player (baik lagi idle maupun swing)
+            player.heldProj = Projectile.whoAmI;
         }
 
         public override bool? CanDamage() => isSwinging; 
@@ -155,7 +168,7 @@ namespace TheSanity.Projectiles
             }
         }
 
-        public void DrawFromPlayerLayer(ref PlayerDrawSet drawInfo) {
+        public override bool PreDraw(ref Color lightColor) {
             Texture2D texture = ModContent.Request<Texture2D>(Texture).Value;
             Player player = Main.player[Projectile.owner];
             
@@ -217,32 +230,12 @@ namespace TheSanity.Projectiles
                 }
             }
 
-            Color lightColor = Lighting.GetColor((int)(Projectile.Center.X / 16f), (int)(Projectile.Center.Y / 16f));
+            Color drawLightColor = Lighting.GetColor((int)(Projectile.Center.X / 16f), (int)(Projectile.Center.Y / 16f));
             Vector2 mainDrawPos = Projectile.Center + Projectile.rotation.ToRotationVector2() * handleOffset - Main.screenPosition;
             
-            Main.EntitySpriteDraw(texture, mainDrawPos, null, lightColor, Projectile.rotation + mainDrawRotationOffset, origin, Projectile.scale, mainEffects, 0);
-        }
-    }
+            Main.EntitySpriteDraw(texture, mainDrawPos, null, drawLightColor, Projectile.rotation + mainDrawRotationOffset, origin, Projectile.scale, mainEffects, 0);
 
-    public class FatherScythePlayerLayer : PlayerDrawLayer
-    {
-        public override Position GetDefaultPosition() => new AfterParent(PlayerDrawLayers.HeldItem);
-
-        protected override void Draw(ref PlayerDrawSet drawInfo) {
-            if (drawInfo.shadow != 0f) return; 
-
-            Player player = drawInfo.drawPlayer;
-            FatherScytheHeldProj modProj = null;
-            for (int i = 0; i < Main.maxProjectiles; i++) {
-                Projectile p = Main.projectile[i];
-                if (p.active && p.type == ModContent.ProjectileType<FatherScytheHeldProj>() && p.owner == player.whoAmI) {
-                    modProj = p.ModProjectile as FatherScytheHeldProj;
-                    break;
-                }
-            }
-
-            if (modProj == null) return;
-            modProj.DrawFromPlayerLayer(ref drawInfo);
+            return false;
         }
     }
 }

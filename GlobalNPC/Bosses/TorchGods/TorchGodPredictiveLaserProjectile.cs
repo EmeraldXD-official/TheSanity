@@ -31,8 +31,8 @@ namespace TheSanity.GlobalNPC.Bosses.TorchGods.Projectiles
 	public class TorchGodPredictiveLaserProjectile : ModProjectile
 	{
 		private const int PredictTicks = 60;   // 1 detik telegraph, GAK damage
-		private const int SweepTicks = 60;     // durasi muter 180 derajat pas jadi beam beneran
-		private const float SweepAngleRadians = MathHelper.Pi; // setengah lingkaran = 180 derajat
+		private const int SweepTicks = 180;    // 3 detik buat muter (DINAIKIN dari 60 - sebelumnya kecepetan banget)
+		private const float SweepAngleRadians = MathHelper.TwoPi; // SATU LINGKARAN PENUH = 360 derajat (sebelumnya cuma setengah)
 
 		// -1 = muter berlawanan arah jarum jam, 1 = searah jarum jam (dari
 		// sudut prediksi awal). Ganti tanda ini kalau mau arah muternya kebalik.

@@ -426,6 +426,93 @@ Items: {
 		DisplayName: Boom Bod Lith
 		Tooltip: ""
 	}
+
+	BetsyLeggings: {
+		DisplayName: Betsy Leggings
+		Tooltip:
+			'''
+			13% increased melee attack speed
+			13% increased movement speed
+			'''
+	}
+
+	BetsyChestplate: {
+		Tooltip:
+			'''
+			9% increased melee damage
+			6% increased melee critical strike chance
+			'''
+		DisplayName: Betsy Chestplate
+	}
+
+	BetsyMask: {
+		DisplayName: Betsy Mask
+		Tooltip:
+			'''
+			6% increased melee damage
+			6% increased melee critical strike chance
+			'''
+	}
+
+	CultistLegs: {
+		DisplayName: Cultist Legs
+		Tooltip: ""
+	}
+
+	CultistMask: {
+		DisplayName: Cultist Mask
+		Tooltip: ""
+	}
+
+	CultistRobe: {
+		DisplayName: Cultist Robe
+		Tooltip: ""
+	}
+
+	EmpressChestplate: {
+		DisplayName: Empress Chestplate
+		Tooltip: ""
+	}
+
+	EmpressHooves: {
+		DisplayName: Empress Hooves
+		Tooltip: ""
+	}
+
+	EmpressMask: {
+		DisplayName: Empress Mask
+		Tooltip: ""
+	}
+
+	PrismaticEssence: {
+		DisplayName: Prismatic Essence
+		Tooltip: ""
+	}
+
+	WandOfMirrorImageItem: {
+		DisplayName: Wand Of Mirror Image Item
+		Tooltip: ""
+	}
+
+	OpticalWrench: {
+		DisplayName: Optical Wrench
+		Tooltip: ""
+	}
+
+	SoulCollectorAltarItem: {
+		Tooltip: ""
+		DisplayName: Soul Collector Altar Item
+	}
+
+	Souls: {
+		Tooltip: ""
+		DisplayName: Souls
+	}
+
+	SoulToken: {
+		Tooltip: ""
+		DisplayName: Soul Token
+	}
 }
 
 NPCs: {
@@ -438,7 +525,18 @@ NPCs: {
 	CustomCreeper.DisplayName: Creeper
 	SpaceRainCloudNPC.DisplayName: Cloudy
 	GoldenStinger.DisplayName: Golden Stinger
-	Twinkle.DisplayName: Twinkle, The Mini Stars Guardian
+
+	Twinkle: {
+		DisplayName: Twinkle, The Mini Stars Guardian
+
+		BossChecklistIntegration: {
+			SpawnInfo: Spawn conditions unknown
+			EntryName: Twinkle
+		}
+
+		BossChecklistSpawnInfo: Use [i:TheSanity/SatterdStars] at night to summon Twinkle.
+	}
+
 	DummyTargetNPC.DisplayName: Mega Dummy
 	WhiteWhaleClone.DisplayName: White Whale Clone
 	WhiteWhaleBoss.DisplayName: The White Whale
@@ -475,6 +573,8 @@ NPCs: {
 	SpectreRetinazer.DisplayName: Spectre Retinazer
 	CreeperEnemy.DisplayName: Creeper Enemy
 	TrueTorchGod.DisplayName: True Torch God
+	BonePortal.DisplayName: Bone Portal
+	WeepingAngel.DisplayName: Weeping Angel
 }
 
 Projectiles: {
@@ -704,6 +804,47 @@ Projectiles: {
 	MeatballHealingOrb.DisplayName: Meatball Healing Orb
 	TorchGodFireballProjectile.DisplayName: Torch God Fireball Projectile
 	TorchGodPredictiveLaserProjectile.DisplayName: Torch God Predictive Laser Projectile
+	BetsyFlameBreath.DisplayName: Betsy Flame Breath
+	NebulaArcanum.DisplayName: Nebula Arcanum
+	NebulaCultistClone.DisplayName: Nebula Cultist Clone
+	NebulaFragment.DisplayName: Nebula Fragment
+	SolarCultistClone.DisplayName: Solar Cultist Clone
+	SolarFragment.DisplayName: Solar Fragment
+	SolarSlash.DisplayName: Solar Slash
+	StardustCultistClone.DisplayName: Stardust Cultist Clone
+	StardustFragment.DisplayName: Stardust Fragment
+	StardustWisp.DisplayName: Stardust Wisp
+	SupernovaBurst.DisplayName: Supernova Burst
+	VortexBolt.DisplayName: Vortex Bolt
+	VortexCultistClone.DisplayName: Vortex Cultist Clone
+	VortexFragment.DisplayName: Vortex Fragment
+	NightglowBolt.DisplayName: Nightglow Bolt
+	SunDanceRay.DisplayName: Sun Dance Ray
+	TerraprismaDaggerProjectile.DisplayName: Terraprisma Dagger Projectile
+	TerraprismaDaggerStrike.DisplayName: Terraprisma Dagger Strike
+	WandOfMirrorImageMinion.DisplayName: Wand Of Mirror Image Minion
+	BlueMoonBolt.DisplayName: Blue Moon Bolt
+	SunfuryFireball.DisplayName: Sunfury Fireball
+	TorchGodCultistRitualProjectile.DisplayName: Torch God Cultist Ritual Projectile
+	GreenBolt.DisplayName: Green Bolt
+	ThrownBone.DisplayName: Thrown Bone
+	SkelySkull.DisplayName: Skely Skull
+	SkeletonHandSlam.DisplayName: Skeleton Hand Slam
+	ChargeBlaster.DisplayName: Charge Blaster
+	BoneShardParticle.DisplayName: Bone Shard Particle
+	BigBoneSpike.DisplayName: Big Bone Spike
+	SlamTelegraphBeam.DisplayName: Slam Telegraph Beam
+	PortalCrackDecal.DisplayName: Portal Crack Decal
+	BoneWall.DisplayName: Bone Wall
+	TwinsAllyEyeFire.DisplayName: Twins Ally Eye Fire
+	TwinsAllyRetinazer.DisplayName: Twins Ally Retinazer
+	TwinsAllySpazmatism.DisplayName: Twins Ally Spazmatism
+	ExampleCustomSpearProjectile.DisplayName: Example Custom Spear Projectile
+	SoulVisualProjectile.DisplayName: Soul Visual Projectile
+	ExampleDualLineTrailProjectile.DisplayName: Example Dual Line Trail Projectile
+	ExampleBloomTailProjectile.DisplayName: Example Bloom Tail Projectile
+	ExampleBloomTailCurveProjectile.DisplayName: Example Bloom Tail Curve Projectile
+	ExampleBurstFlameCurveProjectile.DisplayName: Example Burst Flame Curve Projectile
 }
 
 Buffs: {
@@ -790,6 +931,21 @@ Buffs: {
 	ElectrictDischarge: {
 		Description: Mods.TheSanity.Buffs.ElectrictDischarge.Description
 		DisplayName: Electrict Discharge
+	}
+
+	WandOfMirrorImageBuff: {
+		Description: Mods.TheSanity.Buffs.WandOfMirrorImageBuff.Description
+		DisplayName: Wand Of Mirror Image Buff
+	}
+
+	LightInYourSoulBuff: {
+		Description: Mods.TheSanity.Buffs.LightInYourSoulBuff.Description
+		DisplayName: Light In Your Soul Buff
+	}
+
+	TwinsBacklashDebuff: {
+		DisplayName: Twins Backlash Debuff
+		Description: Mods.TheSanity.Buffs.TwinsBacklashDebuff.Description
 	}
 }
 
@@ -923,7 +1079,17 @@ Keybinds: {
 	"Open Debug Damage UI.DisplayName": Open  Debug  Damage  U I
 	"Toggle Boss Status GUI.DisplayName": Toggle  Boss  Status  G U I
 	"Toggle Dummy UI.DisplayName": Toggle  Dummy  U I
+	"Celestial Barrage.DisplayName": Celestial  Barrage
+	"Celestial Absorption.DisplayName": Celestial  Absorption
+	"Open Testing Deck.DisplayName": Open  Testing  Deck
 }
 
-Conditions.KillTwinkle: After Twinkle Has Defeated
-Tiles.CoalOre.MapEntry: Coal Ore
+Conditions: {
+	KillTwinkle: After Twinkle Has Defeated
+	KillWhiteWhale: After defeating the White Whale
+}
+
+Tiles: {
+	CoalOre.MapEntry: Coal Ore
+	SoulCollectorAltar.MapEntry: Soul Collector Altar
+}

@@ -8,7 +8,7 @@ using Terraria.ModLoader.IO;
 using Microsoft.Xna.Framework;
 using Terraria.DataStructures;
 
-namespace TheSanity
+namespace TheSanityHOre
 {
     public class HardmodeOreProgression : ModSystem
     {
@@ -166,10 +166,15 @@ namespace TheSanity
                 int y = WorldGen.genRand.Next((int)Main.rockLayer, Main.maxTilesY - 150);
                 
                 Tile tile = Main.tile[x, y];
+
+                // FIX: Blacklist dicek DULUAN sebelum HasTile.
+                // Sebelumnya kalau titik (x,y) itu udara (HasTile == false) tapi masih
+                // di dalam ruangan dungeon/temple, seluruh blok blacklist ke-skip,
+                // dan TileRunner dari titik itu bisa numpuk/nimpa dinding dungeon/lihzahrd di sekitarnya.
+                if (IsInDungeonOrTemple(x, y)) continue;
+
                 if (tile.HasTile)
                 {
-                    if (IsInDungeonOrTemple(x, y)) continue;
-
                     ushort type = tile.TileType;
                     bool inRestrictedBiome = type == TileID.SnowBlock || type == TileID.IceBlock || type == TileID.CorruptIce || type == TileID.FleshIce ||
                                              type == TileID.Sand || type == TileID.HardenedSand || type == TileID.Sandstone || type == TileID.Ebonsand || type == TileID.Crimsand ||

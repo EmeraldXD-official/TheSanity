@@ -4,11 +4,11 @@ namespace TheSanity.Items.TestingDeckDer
 {
     public static class ProjectileCloneHelper
     {
-        // Metode ini disederhanakan agar tidak merusak kompilasi proyek modmu
+        // Simplified so it doesn't break the mod's compilation
         public static void SpawnClone(Projectile source, Player caster)
         {
             if (source == null || !source.active) return;
-            
+
             Projectile.NewProjectile(
                 caster.GetSource_Misc("TestingDeckClone"),
                 Main.MouseWorld,

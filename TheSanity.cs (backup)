@@ -1,0 +1,89 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Terraria;
+using Terraria.Graphics.Effects;
+using Terraria.ModLoader;
+using TheSanity.Content.Skies;
+using TheSanity.CostumeTile;
+
+namespace TheSanity
+{
+	// =========================================================================
+	// CLASS UTAMA MOD -- wajib namanya sama kayak nama internal mod
+	// (build.txt / .csproj), dan cuma boleh ada SATU class : Mod per mod.
+	// =========================================================================
+	public class TheSanity : Mod
+	{
+		public override void Load()
+		{
+			// Hook 1: sembunyiin pesan "X has arrived" pas spawn-nya di-block
+			// sama TownNPCRespawnLockGlobalNPC (npc yang udah pernah mati &
+			// bukan lagi di-revive lewat Altar). Pesan arrival vanilla selalu
+			// pakai warna RGB (50,125,255) / #327DFF, jadi difilter dari situ
+			// -- bukan dari isi teksnya (biar ga kebentur translasi bahasa).
+			On_Main.NewText += SuppressBlockedArrivalText;
+
+			// Hook 2: kalau attempt hari itu ke-block sama lock kita, retry
+			// (dibatasi) biar kuota "1 homeless NPC per hari" ga kebuang
+			// percuma -- NPC lain yang valid masih kebagian jatah muncul.
+			On_WorldGen.SpawnHomelessNPC += RetryHomelessSpawnIfBlocked;
+		}
+
+		public override void Unload()
+		{
+			On_Main.NewText -= SuppressBlockedArrivalText;
+			On_WorldGen.SpawnHomelessNPC -= RetryHomelessSpawnIfBlocked;
+		}
+
+		private void SuppressBlockedArrivalText(On_Main.orig_NewText orig, string text, byte r, byte g, byte b)
+		{
+			if (TownNPCRespawnLockGlobalNPC.SuppressNextArrivalText && r == 50 && g == 125 && b == 255)
+			{
+				TownNPCRespawnLockGlobalNPC.SuppressNextArrivalText = false;
+				return; // teksnya ga jadi ditampilin
+			}
+
+			orig(text, r, g, b);
+		}
+
+		private void RetryHomelessSpawnIfBlocked(On_WorldGen.orig_SpawnHomelessNPC orig)
+		{
+			const int maxRetries = 5;
+
+			for (int attempt = 0; attempt <= maxRetries; attempt++)
+			{
+				TownNPCRespawnLockGlobalNPC.ResetBlockedFlag();
+				orig();
+
+				if (!TownNPCRespawnLockGlobalNPC.LastSpawnAttemptBlocked)
+					break; // spawn valid, atau emang ga ada yang coba spawn -> selesai
+			}
+		}
+
+		public override void AddRecipeGroups()
+		{
+			// Definisi grup-nya sendiri ada di SoulCollectorAltarItem.cs,
+			// di sini cuma manggil aja -- tModLoader ngewajibin hook ini
+			// jalan dari class Mod, ga bisa dari ModItem.
+			SoulCollectorAltarItem.RegisterRecipeGroups();
+		}
+	}
+
+	// =========================================================================
+	// CONFIG: MENAMPILKAN ICON MOD DI FILTER BESTIARY (BESTIARY ICON LOCATION)
+	// =========================================================================
+	public class TheSanityBestiaryIcon : ModBiome
+	{
+		// PAKSA PATH: Mengarahkan game secara manual ke file "BestiaryIconMod.png" di folder utama
+		public override string BestiaryIcon => "TheSanity/BestiaryIconMod";
+
+		public override bool IsBiomeActive(Terraria.Player player) 
+		{
+			// Dikunci false karena ini murni hanya untuk memunculkan Icon di filter Bestiary
+			return false; 
+		}
+	}
+}

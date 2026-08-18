@@ -97,6 +97,7 @@ namespace YourModName.Content.NPCs
             SpinningCurse,
             BorderShot,
             LaserBarrage,
+            SplitCombo,
             ReturnToCenter,
             DeathrayClockwise,
             DeathrayTransition,
@@ -432,10 +433,26 @@ namespace YourModName.Content.NPCs
                         TwinsLaserBarrage.Tick(npc, self, target);
                         if (TwinsLaserBarrage.IsDone(self))
                         {
+                            self.LastStandStateRaw = (float)State.SplitCombo;
+                            TwinsSplitCombo.Start(npc, self);
+                        }
+                        break;
+                    }
+
+                case State.SplitCombo:
+                    {
+                        TwinsSplitCombo.Tick(npc, self, target);
+                        if (TwinsSplitCombo.IsDone(self))
+                        {
                             // Budget attack-loop DICEK DI SINI - tepat begitu 1 PUTARAN PENUH
                             // (Dash->RetBeam->CursedRain->SpinningCurse->BorderShot->
-                            // LaserBarrage, SEMUA 6 pattern) kelar - dijamin SETIAP putaran
-                            // selalu nyertain LENGKAP semua 6 pattern, gak dipotong di tengah.
+                            // LaserBarrage->SplitCombo, SEMUA 7 pattern) kelar - dijamin SETIAP
+                            // putaran selalu nyertain LENGKAP semua 7 pattern, gak dipotong di
+                            // tengah (termasuk SplitCombo - kalau dipotong di tengah, Retinazer
+                            // bisa ke-tinggal jauh dari Spaz / nyangkut vulnerable, makanya
+                            // checkpoint aman WAJIB nunggu dia beneran regroup dulu, sama kayak
+                            // gimana ResetTransientPatternVisuals di TwinsRework.cs jadi jaring
+                            // pengaman kalau Last Stand/Phase 2 laen yang motong duluan).
                             //
                             // FIX: sekarang di-OR sama LastStandExpiryPending juga - kalau
                             // budget waktu master (60 detik) udah abis TAPI attack loop-nya

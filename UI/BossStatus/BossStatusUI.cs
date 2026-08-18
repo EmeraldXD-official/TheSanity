@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Terraria;
 using Terraria.Audio;
@@ -113,6 +114,83 @@ namespace TheSanity.Interface
 
             return record;
         }
+
+        // --- TAMBAHAN: (de)serialisasi buat dikirim lewat ModPacket (sync multiplayer) ---
+        public void WriteToPacket(BinaryWriter writer) {
+            writer.Write(BossName ?? "");
+            writer.Write(NpcType);
+            writer.Write(AttemptNumber);
+            writer.Write(DurationStr ?? "");
+            writer.Write(DurationTicks);
+            writer.Write(TotalHits);
+            writer.Write(TotalDamage);
+            writer.Write(BestWeapon ?? "");
+
+            writer.Write((ushort)WeaponNames.Count);
+            for (int i = 0; i < WeaponNames.Count; i++) {
+                writer.Write(WeaponNames[i] ?? "");
+                writer.Write(WeaponDamages[i]);
+            }
+
+            writer.Write(BossHPPercent);
+            writer.Write(SlowdownPercent);
+            writer.Write(AvgFPS);
+            writer.Write(RtaStr ?? "");
+
+            writer.Write((ushort)PlayerRankNames.Count);
+            for (int i = 0; i < PlayerRankNames.Count; i++) {
+                writer.Write(PlayerRankNames[i] ?? "");
+                writer.Write(PlayerRankDamages[i]);
+                writer.Write(PlayerRankHitsReceived[i]);
+                writer.Write(PlayerRankHitsDealt[i]);
+                writer.Write(PlayerRankDeaths[i]);
+            }
+
+            writer.Write(GlobalDebuffTrapDamage);
+            writer.Write(DeathReason ?? "None");
+            writer.Write(IsPinned);
+            writer.Write(WorldName ?? "");
+        }
+
+        public static PlayerBossRecord ReadFromPacket(BinaryReader reader) {
+            var record = new PlayerBossRecord {
+                BossName = reader.ReadString(),
+                NpcType = reader.ReadInt32(),
+                AttemptNumber = reader.ReadInt32(),
+                DurationStr = reader.ReadString(),
+                DurationTicks = reader.ReadInt32(),
+                TotalHits = reader.ReadInt32(),
+                TotalDamage = reader.ReadInt32(),
+                BestWeapon = reader.ReadString()
+            };
+
+            int weaponCount = reader.ReadUInt16();
+            for (int i = 0; i < weaponCount; i++) {
+                record.WeaponNames.Add(reader.ReadString());
+                record.WeaponDamages.Add(reader.ReadInt32());
+            }
+
+            record.BossHPPercent = reader.ReadInt32();
+            record.SlowdownPercent = reader.ReadDouble();
+            record.AvgFPS = reader.ReadDouble();
+            record.RtaStr = reader.ReadString();
+
+            int rankCount = reader.ReadUInt16();
+            for (int i = 0; i < rankCount; i++) {
+                record.PlayerRankNames.Add(reader.ReadString());
+                record.PlayerRankDamages.Add(reader.ReadInt32());
+                record.PlayerRankHitsReceived.Add(reader.ReadInt32());
+                record.PlayerRankHitsDealt.Add(reader.ReadInt32());
+                record.PlayerRankDeaths.Add(reader.ReadInt32());
+            }
+
+            record.GlobalDebuffTrapDamage = reader.ReadInt32();
+            record.DeathReason = reader.ReadString();
+            record.IsPinned = reader.ReadBoolean();
+            record.WorldName = reader.ReadString();
+
+            return record;
+        }
     }
 
     public class BossStatusPlayer : ModPlayer
@@ -151,6 +229,29 @@ namespace TheSanity.Interface
             for (int i = 0; i < records.Count; i++) {
                 records[i].AttemptNumber = i + 1;
             }
+        }
+
+        // --- TAMBAHAN: MULTIPLAYER SYNC ---
+        // Dipanggil otomatis sama tModLoader tiap ada player baru join server, supaya player
+        // yang baru connect (dan semua player lain) langsung tau riwayat boss fight kita.
+        // Tanpa hook ini, BossRecords cuma "hidup" di client pemiliknya sendiri.
+        public override void SyncPlayer(int toWho, int fromWho, bool newPlayer) {
+            SendRecordsSync(toWho, fromWho);
+        }
+
+        // Kirim seluruh isi BossRecords milik player ini lewat jaringan.
+        // toWho/fromWho ikutin konvensi ModPacket.Send (toClient/ignoreClient).
+        public void SendRecordsSync(int toWho, int fromWho) {
+            if (Main.netMode == NetmodeID.SinglePlayer) return;
+
+            ModPacket packet = Mod.GetPacket();
+            packet.Write(global::TheSanity.UI.BossStatus.BossStatusSystem.NET_MSG_SYNC_RECORDS);
+            packet.Write((byte)Player.whoAmI);
+            packet.Write((ushort)BossRecords.Count);
+            foreach (var record in BossRecords) {
+                record.WriteToPacket(packet);
+            }
+            packet.Send(toWho, fromWho);
         }
     }
 
@@ -315,6 +416,10 @@ namespace TheSanity.Interface
 
         private int lastTotalRecordCount = -1;
 
+        // --- TAMBAHAN: state buat scrollbar yang bisa di-klik & drag (klik-hold LMB lalu tarik) ---
+        // Cuma satu yang boleh aktif di waktu bersamaan (satu mouse), makanya cukup 1 field string id.
+        private string activeScrollbarId = null;
+
         private class UIParticle {
             public Vector2 Position;
             public Vector2 Velocity;
@@ -382,6 +487,7 @@ namespace TheSanity.Interface
         public override void Draw(SpriteBatch spriteBatch) {
             if (!Visible) {
                 wasVisible = false;
+                activeScrollbarId = null;
                 return;
             }
 
@@ -508,6 +614,7 @@ namespace TheSanity.Interface
                 isTypingBossSearch = isTypingPlayerSearch = false;
                 Main.blockInput = false;
                 PlayerInput.WritingText = false;
+                activeScrollbarId = null;
                 SoundEngine.PlaySound(SoundID.DoorClosed); 
                 return;
             }
@@ -564,6 +671,58 @@ namespace TheSanity.Interface
             }
 
             oldKeyboardState = currentKeyboardState;
+        }
+
+        // --- TAMBAHAN: SCROLLBAR YANG BISA DI-KLIK & DI-DRAG ---
+        // Ditaruh nempel di pojok kanan area yang bisa di-scroll. User tinggal klik-hold LMB
+        // di batangnya lalu geser ke atas/bawah, ga perlu andelin scroll wheel mouse yang kadang rewel.
+        //
+        // areaX/areaY/areaW/areaH: rectangle penuh dari panel/box yang scrollable-nya.
+        // topPadding/bottomPadding: jarak dari atas & bawah area yang TIDAK termasuk daftar item
+        // (misal buat search bar di atas, atau tombol-tombol di bawah).
+        private void DrawVerticalScrollbar(SpriteBatch spriteBatch, string scrollbarId, float areaX, float areaY, float areaW, float areaH, float topPadding, float bottomPadding, int totalItems, int visibleItems, ref int scrollValue) {
+            int maxScroll = Math.Max(0, totalItems - visibleItems);
+            if (maxScroll <= 0) return; // ga ada yang perlu di-scroll, ga usah gambar batangnya
+
+            Texture2D pixel = TextureAssets.MagicPixel.Value;
+
+            float trackX = areaX + areaW - 9;
+            float trackY = areaY + topPadding;
+            float trackH = Math.Max(20f, areaH - topPadding - bottomPadding);
+
+            Rectangle trackRect = new Rectangle((int)trackX, (int)trackY, 6, (int)trackH);
+            spriteBatch.Draw(pixel, trackRect, Color.Black * 0.4f);
+
+            float thumbRatio = MathHelper.Clamp((float)visibleItems / totalItems, 0.10f, 1f);
+            float thumbH = trackH * thumbRatio;
+            float usableTrack = Math.Max(1f, trackH - thumbH);
+            float scrollRatio = maxScroll > 0 ? (float)scrollValue / maxScroll : 0f;
+            float thumbY = trackY + usableTrack * scrollRatio;
+
+            Rectangle thumbRect = new Rectangle((int)trackX - 1, (int)thumbY, 8, (int)thumbH);
+
+            Point mousePt = Main.MouseScreen.ToPoint();
+            bool hoverThumb = thumbRect.Contains(mousePt);
+            bool hoverTrack = trackRect.Contains(mousePt);
+
+            // Mulai drag: boleh klik langsung di thumb-nya, atau klik di jalur track (loncat ke posisi itu)
+            if (Main.mouseLeft && activeScrollbarId == null && (hoverThumb || hoverTrack)) {
+                activeScrollbarId = scrollbarId;
+            }
+
+            bool isDraggingThis = activeScrollbarId == scrollbarId;
+            if (isDraggingThis) {
+                Main.LocalPlayer.mouseInterface = true;
+                if (Main.mouseLeft) {
+                    float relativeY = (Main.MouseScreen.Y - trackY - thumbH / 2f) / usableTrack;
+                    scrollValue = (int)Math.Round(MathHelper.Clamp(relativeY, 0f, 1f) * maxScroll);
+                } else {
+                    activeScrollbarId = null;
+                }
+            }
+
+            Color thumbColor = isDraggingThis ? Color.Orange : (hoverThumb ? Color.Orange * 0.75f : Color.Gray * 0.65f);
+            spriteBatch.Draw(pixel, thumbRect, thumbColor);
         }
 
         private void DrawBossListPanel(SpriteBatch spriteBatch, float x, float y, float w, float h, ref bool jointClick) {
@@ -671,6 +830,8 @@ namespace TheSanity.Interface
                 }
                 rowY += 34;
             }
+
+            DrawVerticalScrollbar(spriteBatch, "bossList", x, y, w, h, 36, 40, bossIDs.Count, visibleMaxCount, ref leftPanelScroll);
 
             float sortBtnY = y + h - 32;
             Rectangle btnLeftRect = new Rectangle((int)x + 5, (int)sortBtnY, 24, 24);
@@ -840,6 +1001,8 @@ namespace TheSanity.Interface
                 wItemY += 20;
             }
 
+            DrawVerticalScrollbar(spriteBatch, "weaponBox", weaponBox.X, weaponBox.Y, weaponBox.Width, weaponBox.Height, 42, 4, wNames.Count, visibleWeaponsMax, ref centerSubGuiScroll);
+
             Rectangle rankBox = new Rectangle((int)x + 12, (int)(weaponBox.Y + singleBoxH + 8), (int)w - 24, (int)singleBoxH);
             spriteBatch.Draw(pixel, rankBox, Color.Black * 0.5f);
             DrawChatString(spriteBatch, "[ PLAYER TIER MATRIX (DAMAGE, RECEIVED HITS, DEALT HITS, DEATHS) ]", new Vector2(rankBox.X + 8, rankBox.Y + 4), Color.LightSkyBlue * 0.9f, 0.70f);
@@ -883,6 +1046,8 @@ namespace TheSanity.Interface
                 DrawChatString(spriteBatch, fullStatString, new Vector2(rankBox.X + 10, rItemY), rankColor, 0.70f);
                 rItemY += 20;
             }
+
+            DrawVerticalScrollbar(spriteBatch, "rankBox", rankBox.X, rankBox.Y, rankBox.Width, rankBox.Height, 22, 4, rNames.Count, visibleRanksMax, ref centerRankScroll);
         }
 
         private void DrawAttemptLogsPanel(SpriteBatch spriteBatch, float x, float y, float w, float h, ref bool jointClick) {
@@ -955,6 +1120,8 @@ namespace TheSanity.Interface
                 }
                 rowY += 26;
             }
+
+            DrawVerticalScrollbar(spriteBatch, "attemptLogs", x, y, w, h, 34, 30, renderingHistoryList.Count, visibleAttemptsMax, ref rightPanelScroll);
 
             // 4 tombol: SRT, RFH, PIN, DEL
             float buttonsY = y + h - 2; 
@@ -1111,6 +1278,8 @@ namespace TheSanity.Interface
                 }
                 rowY += 28;
             }
+
+            DrawVerticalScrollbar(spriteBatch, "playerList", x, y, w, h, 55, 10, activePlayerIndices.Count, visiblePlayersMax, ref playerPanelScroll);
         }
 
         private void DrawGlobalRankPanel(SpriteBatch spriteBatch, float x, float y, float w, float h) {
@@ -1165,6 +1334,8 @@ namespace TheSanity.Interface
 
                 rowY += 32;
             }
+
+            DrawVerticalScrollbar(spriteBatch, "globalRank", x, y, w, h, 45, 10, globalRankings.Count, visibleRanksMax, ref globalRankPanelScroll);
         }
     }
 }

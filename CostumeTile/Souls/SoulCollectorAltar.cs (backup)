@@ -1,0 +1,134 @@
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using Terraria;
+using Terraria.DataStructures;
+using Terraria.Enums;
+using Terraria.GameContent;
+using Terraria.ID;
+using Terraria.ModLoader;
+using Terraria.ObjectData;
+
+namespace TheSanity.CostumeTile
+{
+    public class SoulCollectorAltar : ModTile
+    {
+        // Kalau sprite altar (70x50) ukurannya beda dari kotak placement (5x3 = 80x48),
+        // atur offset ini biar posisinya pas / center secara visual.
+        // X: (80 - 70) / 2 = 5   |   Y: (48 - 50) / 2 = -1 (naik 1px)
+        private static readonly Vector2 DrawOffset = new Vector2(5f, -1f);
+
+        // ---- Pengaturan visual "SoulEyeBlue" ----
+        // Spritesheet 34x224, 4 frame ditumpuk vertikal -> tiap frame 34x56
+        private const int EyeFrameWidth = 34;
+        private const int EyeFrameHeight = 56;
+        private const int EyeFrameCount = 4;
+        private const int EyeTicksPerFrame = 4; // makin kecil makin cepat animasinya
+
+        // X: (80 - 34) / 2 = 23  -> center horizontal di area 5x16 = 80px
+        // Y: -44 -> titik tengah sprite (56/2 = 28) jatuh di antara blok virtual 4 dan 5
+        //           DI ATAS altar (y = -16 relatif dari atas altar)
+        private static readonly Vector2 EyeOffset = new Vector2(23f, -44f);
+
+        public override void SetStaticDefaults()
+        {
+            Main.tileSolid[Type] = false;
+            Main.tileNoAttach[Type] = true;
+            Main.tileFrameImportant[Type] = true;
+            Main.tileLighted[Type] = true;
+
+            TileID.Sets.HasOutlines[Type] = true;
+
+            TileObjectData.newTile.Width = 5;
+            TileObjectData.newTile.Height = 3;
+
+            // Ini cuma grid untuk PLACEMENT/COLLISION (bukan untuk motong gambar).
+            TileObjectData.newTile.CoordinateWidth = 16;
+            TileObjectData.newTile.CoordinateHeights = new int[] { 16, 16, 16 };
+            TileObjectData.newTile.CoordinatePadding = 2;
+
+            TileObjectData.newTile.UsesCustomCanPlace = true;
+            TileObjectData.newTile.AnchorBottom = new AnchorData(
+                AnchorType.SolidTile | AnchorType.SolidWithTop, TileObjectData.newTile.Width, 0);
+
+            TileObjectData.addTile(Type);
+
+            DustType = DustID.PurpleTorch; // ganti sesuai tema "Sanity"
+            AddMapEntry(new Color(120, 60, 150), CreateMapEntryName());
+        }
+
+        // Menggerakkan frame animasi mata (dibaca lewat Main.tileFrame[Type] saat menggambar)
+        public override void AnimateTile(ref int frame, ref int frameCounter)
+        {
+            frameCounter++;
+            if (frameCounter >= EyeTicksPerFrame)
+            {
+                frameCounter = 0;
+                frame = (frame + 1) % EyeFrameCount;
+            }
+        }
+
+        public override bool PreDraw(int i, int j, SpriteBatch spriteBatch)
+        {
+            Tile tile = Main.tile[i, j];
+
+            // Gambar HANYA sekali, waktu posisi ini adalah kotak kiri-atas
+            // dari multitile (frame 0,0). Kotak lainnya tidak digambar sama sekali.
+            if (tile.TileFrameX != 0 || tile.TileFrameY != 0)
+                return false;
+
+            Vector2 zero = Main.drawToScreen
+                ? Vector2.Zero
+                : new Vector2(Main.offScreenRange, Main.offScreenRange);
+
+            Vector2 basePos = new Vector2(
+                i * 16 - (int)Main.screenPosition.X,
+                j * 16 - (int)Main.screenPosition.Y) + zero;
+
+            Color color = Lighting.GetColor(i, j);
+
+            // 1. SoulEyeBlue digambar DULU -> jadi ada di paling belakang
+            // Di-crossfade antara frame sekarang & frame berikutnya biar transisinya smooth,
+            // bukan langsung "loncat" tiap ganti frame.
+            Texture2D eye = ModContent.Request<Texture2D>(
+                "TheSanity/CostumeTile/SoulEyeBlue").Value;
+
+            int eyeFrame = Main.tileFrame[Type] % EyeFrameCount;
+            int eyeNextFrame = (eyeFrame + 1) % EyeFrameCount;
+            float eyeT = MathHelper.Clamp(
+                Main.tileFrameCounter[Type] / (float)EyeTicksPerFrame, 0f, 1f);
+
+            Rectangle eyeSourceCurrent = new Rectangle(0, eyeFrame * EyeFrameHeight, EyeFrameWidth, EyeFrameHeight);
+            Rectangle eyeSourceNext = new Rectangle(0, eyeNextFrame * EyeFrameHeight, EyeFrameWidth, EyeFrameHeight);
+
+            spriteBatch.Draw(eye, basePos + EyeOffset, eyeSourceCurrent, Color.White * (1f - eyeT), 0f, Vector2.Zero, 1f, SpriteEffects.None, 0f);
+            spriteBatch.Draw(eye, basePos + EyeOffset, eyeSourceNext, Color.White * eyeT, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0f);
+
+            // 2. Badan altar (70x50) digambar SETELAH eye -> menutupi eye di belakangnya
+            Texture2D tex = TextureAssets.Tile[Type].Value;
+            spriteBatch.Draw(tex, basePos + DrawOffset, null, color, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0f);
+
+            return false; // matikan drawing default sepenuhnya (semua kotak)
+        }
+
+        public override void PostDraw(int i, int j, SpriteBatch spriteBatch)
+        {
+            Tile tile = Main.tile[i, j];
+
+            if (tile.TileFrameX != 0 || tile.TileFrameY != 0)
+                return;
+
+            Vector2 zero = Main.drawToScreen
+                ? Vector2.Zero
+                : new Vector2(Main.offScreenRange, Main.offScreenRange);
+
+            Vector2 basePos = new Vector2(
+                i * 16 - (int)Main.screenPosition.X,
+                j * 16 - (int)Main.screenPosition.Y) + zero;
+
+            // 3. Glow badan altar tetap di paling depan (efek cahaya di atas semuanya)
+            Texture2D glow = ModContent.Request<Texture2D>(
+                "TheSanity/CostumeTile/SoulCollectorAltarGlow").Value;
+            spriteBatch.Draw(glow, basePos + DrawOffset, null, Color.White, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0f);
+        }
+    }
+}

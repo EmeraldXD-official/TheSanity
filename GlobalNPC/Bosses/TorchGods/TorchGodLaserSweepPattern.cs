@@ -32,7 +32,7 @@ namespace TheSanity.GlobalNPC.Bosses.TorchGods.Patterns
 		// TorchGodPredictiveLaserProjectile, biar pattern ini gak nganggep
 		// "udah kelar" padahal proyektilnya masih aktif (atau sebaliknya).
 		private const int PredictTicks = 60;
-		private const int SweepTicks = 60;
+		private const int SweepTicks = 180; // HARUS sama persis kayak SweepTicks di TorchGodPredictiveLaserProjectile
 		private const int TotalDurationTicks = PredictTicks + SweepTicks + 10;
 
 		private const int LaserDamage = 45;

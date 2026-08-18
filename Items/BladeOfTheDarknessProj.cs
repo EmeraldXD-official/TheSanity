@@ -38,7 +38,10 @@ namespace TheSanity.Items
             Projectile.usesLocalNPCImmunity = true;
             Projectile.localNPCHitCooldown = 8; 
 
-            Projectile.hide = true;
+            // 🔧 FIX POSISI: hide dimatikan supaya proyektil digambar lewat jalur normal
+            // (Main.DrawProjectiles -> PreDraw), bukan lewat PlayerDrawLayer custom yang
+            // gampang ketiban layer body/arm lain dan bikin pedang keliatan di belakang player.
+            Projectile.hide = false;
         }
 
         private int timer = 0;
@@ -100,14 +103,25 @@ namespace TheSanity.Items
                 Projectile.rotation = MathHelper.Lerp(start, end, smoothProgress);
             }
 
-            float curveThrust = (float)Math.Sin(progress * MathHelper.Pi) * 34f; 
-            Projectile.Center = player.MountedCenter + Projectile.rotation.ToRotationVector2() * curveThrust;
+            // 🔧 FIX POSISI: pedang sekarang di-anchor ke posisi TANGAN (GetFrontHandPosition),
+            // bukan ke player.MountedCenter. Ini yang bikin pedang keliatan "digenggam" beneran
+            // kayak di ExampleCustomSwingProjectile, bukan ngambang di badan/belakang player.
+            player.SetCompositeArmFront(true, Player.CompositeArmStretchAmount.Full, Projectile.rotation - MathHelper.PiOver2);
+            Vector2 handPosition = player.GetFrontHandPosition(Player.CompositeArmStretchAmount.Full, Projectile.rotation - MathHelper.PiOver2);
+
+            // curveThrust dikecilin dari 34f -> 18f supaya bobot ayunan masih kerasa
+            // tapi pedang tetap "nempel" di sekitar tangan, gak melayang jauh dari body.
+            float curveThrust = (float)Math.Sin(progress * MathHelper.Pi) * 18f; 
+            Projectile.Center = handPosition + Projectile.rotation.ToRotationVector2() * curveThrust;
 
             player.itemRotation = Projectile.rotation;
             if (player.direction == -1) {
                 player.itemRotation += MathHelper.Pi;
             }
-            player.SetCompositeArmFront(true, Player.CompositeArmStretchAmount.Full, Projectile.rotation - MathHelper.PiOver2);
+
+            // 🔧 FIX: tandain proyektil ini sebagai held item si player (samain kayak vanilla),
+            // supaya berbagai sistem game (kamera, exclude npc collision, dll) treat dia dengan benar.
+            player.heldProj = Projectile.whoAmI;
 
             timer++;
             if (timer >= maxTime) {
@@ -172,17 +186,11 @@ namespace TheSanity.Items
         }
 
         public override bool PreDraw(ref Color lightColor) {
-            return false; 
-        }
-
-        public void DrawFromPlayerLayer(ref PlayerDrawSet drawInfo) {
             Texture2D texture = ModContent.Request<Texture2D>(Texture).Value;
-            Player player = Main.player[Projectile.owner];
-            
-            Vector2 origin = texture.Size() / 2f; 
-            float handleOffset = texture.Width * 0.38f; 
-            Color lightColor = Lighting.GetColor((int)(Projectile.Center.X / 16f), (int)(Projectile.Center.Y / 16f));
+            Vector2 origin = texture.Size() / 2f;
+            float handleOffset = texture.Width * 0.38f;
 
+            // ================== ⚔️ AFTERIMAGE TRAIL (siluet gelap pedang lama) ==================
             for (int i = Projectile.oldRot.Length - 1; i >= 0; i--) {
                 if (Projectile.oldRot[i] == 0f && i > 0) continue;
 
@@ -210,6 +218,7 @@ namespace TheSanity.Items
                 Main.EntitySpriteDraw(texture, trailDrawPos + bladeDirection * 35f, null, Color.Black * baseAlpha * 1.0f, actualDrawRot, origin, Projectile.scale, effects, 0);
             }
 
+            // ================== 🗡️ PEDANG UTAMA (di tangan, di depan player) ==================
             int currentCombo = (int)Projectile.ai[0];
             SpriteEffects mainEffects = SpriteEffects.None;
             float mainDrawRotationOffset = MathHelper.PiOver4;
@@ -219,8 +228,11 @@ namespace TheSanity.Items
                 mainDrawRotationOffset = -MathHelper.PiOver4;
             }
 
+            Color mainLightColor = Lighting.GetColor((int)(Projectile.Center.X / 16f), (int)(Projectile.Center.Y / 16f));
             Vector2 mainDrawPos = Projectile.Center + Projectile.rotation.ToRotationVector2() * handleOffset - Main.screenPosition;
-            Main.EntitySpriteDraw(texture, mainDrawPos, null, lightColor, Projectile.rotation + mainDrawRotationOffset, origin, Projectile.scale, mainEffects, 0);
+            Main.EntitySpriteDraw(texture, mainDrawPos, null, mainLightColor, Projectile.rotation + mainDrawRotationOffset, origin, Projectile.scale, mainEffects, 0);
+
+            return false; 
         }
 
         public override void ModifyDamageHitbox(ref Rectangle hitbox) {
@@ -233,28 +245,6 @@ namespace TheSanity.Items
             int bottom = (int)Math.Max(Projectile.Center.Y, tipPosition.Y);
 
             hitbox = new Rectangle(left - 25, top - 25, (right - left) + 50, (bottom - top) + 50);
-        }
-    }
-
-    public class BladeOfTheDarknessPlayerLayer : PlayerDrawLayer
-    {
-        public override Position GetDefaultPosition() => new AfterParent(PlayerDrawLayers.HeldItem);
-
-        protected override void Draw(ref PlayerDrawSet drawInfo) {
-            if (drawInfo.shadow != 0f) return; 
-
-            Player player = drawInfo.drawPlayer;
-            BladeOfTheDarknessProj modProj = null;
-            for (int i = 0; i < Main.maxProjectiles; i++) {
-                Projectile p = Main.projectile[i];
-                if (p.active && p.type == ModContent.ProjectileType<BladeOfTheDarknessProj>() && p.owner == player.whoAmI) {
-                    modProj = p.ModProjectile as BladeOfTheDarknessProj;
-                    break;
-                }
-            }
-
-            if (modProj == null) return;
-            modProj.DrawFromPlayerLayer(ref drawInfo);
         }
     }
 }

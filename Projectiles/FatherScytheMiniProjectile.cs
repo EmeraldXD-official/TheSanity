@@ -30,6 +30,15 @@ namespace TheSanity.Projectiles
             Projectile.scale = 0.5f;        
             Projectile.aiStyle = -1;        
             Projectile.timeLeft = 600;      
+
+            // 🔧 FIX: proyektil ini cuma nge-hit SEKALI lalu Kill() sendiri (liat OnHitNPC),
+            // jadi dia gak butuh sistem immunity apapun. Tanpa baris ini, dia kena immunity
+            // GLOBAL per-player bawaan vanilla -> kalau NPC abis kena hit dari proyektil lain
+            // (termasuk sabit utamanya sendiri), mini ini malah gagal damage & "nunggu gantian".
+            // localNPCHitCooldown = -1 artinya proyektil ini "ignore iframes": begitu dia collide,
+            // dia SELALU berhasil ngehit target-nya, gak peduli status immunity NPC saat itu.
+            Projectile.usesLocalNPCImmunity = true;
+            Projectile.localNPCHitCooldown = -1;
         }
 
         public override void AI() {

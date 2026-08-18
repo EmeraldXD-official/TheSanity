@@ -17,20 +17,20 @@ namespace TheSanity.Items.TestingDeckDer
             Item.useStyle = ItemUseStyleID.Shoot;
             Item.useTime = 12;
             Item.useAnimation = 12;
-            Item.UseSound = SoundID.Item8; // Suara laser/sihir saat spawn
-            Item.autoReuse = true; // Tekan tahan LMB untuk spawn terus menerus
+            Item.UseSound = SoundID.Item8; // Laser/magic sound when spawning
+            Item.autoReuse = true; // Hold LMB to spawn continuously
         }
 
-        public override bool AltFunctionUse(Player player) => true; // Mengaktifkan fungsi klik kanan
+        public override bool AltFunctionUse(Player player) => true; // Enables right-click functionality
 
         public override bool CanUseItem(Player player)
         {
-            if (player.altFunctionUse == 2) // Jika Klik Kanan
+            if (player.altFunctionUse == 2) // Right click
             {
                 Item.useStyle = ItemUseStyleID.HoldUp;
                 Item.UseSound = SoundID.MenuOpen;
             }
-            else // Jika Klik Kiri (LMB)
+            else // Left click (LMB)
             {
                 Item.useStyle = ItemUseStyleID.Shoot;
                 Item.UseSound = SoundID.Item8;
@@ -44,35 +44,35 @@ namespace TheSanity.Items.TestingDeckDer
 
             if (player.altFunctionUse == 2)
             {
-                // Klik kanan membuka GUI
+                // Right click opens the GUI
                 TestingDeckSystem.ToggleUI();
             }
             else
             {
-                // Klik Kiri (LMB): Mengeluarkan projectile aktif ke arah / posisi Cursor
+                // Left click (LMB): fires the currently selected projectile toward/at the cursor
                 int type = TestingDeckSystem.SelectedProjectileType;
                 if (type > 0)
                 {
-                    Vector2 spawnPosition = Main.MouseWorld; // Tepat di posisi kursor
-                    
-                    // Membuat velocity/kecepatan default menghadap arah kursor dari arah player
+                    Vector2 spawnPosition = Main.MouseWorld; // Right at the cursor position
+
+                    // Default velocity aimed from the player toward the cursor
                     Vector2 velocity = Main.MouseWorld - player.Center;
                     if (velocity != Vector2.Zero) velocity.Normalize();
-                    velocity *= 8f; // Kecepatan gerak projectile standard
+                    velocity *= 8f; // Standard projectile speed
 
                     Projectile.NewProjectile(
                         player.GetSource_ItemUse(Item),
                         spawnPosition,
                         velocity,
                         type,
-                        100, // Damage standard testing
+                        100, // Standard testing damage
                         3f,  // Knockback
                         player.whoAmI
                     );
                 }
                 else
                 {
-                    Main.NewText("Belum ada projectile yang dipilih! Buka GUI dengan Klik Kanan atau Hotkey.", Color.Yellow);
+                    Main.NewText("No projectile selected yet! Open the GUI with Right Click or the hotkey.", Color.Yellow);
                 }
             }
             return true;

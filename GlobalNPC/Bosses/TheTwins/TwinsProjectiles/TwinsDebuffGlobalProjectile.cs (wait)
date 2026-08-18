@@ -1,0 +1,246 @@
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.DataStructures;
+using Terraria.ID;
+using Terraria.ModLoader;
+using YourModName.Content.NPCs;
+
+namespace TheSanity.Projectiles
+{
+    // ==========================================
+    // TwinsDebuffGlobalProjectile — nempelin debuff (Broken Armor + Weak + Bleeding) ke
+    // proyektil VANILLA yang dipakai Twins (EyeFire, DeathLaser, CursedFlameHostile).
+    //
+    // Proyektil CUSTOM kita sendiri (RedPhantasmalBolt, TwinsCursedBeam) di-handle LANGSUNG
+    // lewat OnHitPlayer di class masing-masing (gak lewat sini) — soalnya itu ModProjectile
+    // milik kita sendiri, gampang di-override langsung.
+    //
+    // Kenapa perlu GlobalProjectile: EyeFire/DeathLaser/CursedFlameHostile itu proyektil ID
+    // VANILLA yang JUGA dipakai musuh/boss LAIN (DeathLaser contoh - dipakai The Twins DAN
+    // musuh lain; CursedFlameHostile dipakai Cultist dkk). Kita GAK BOLEH asal nempelin
+    // debuff ke SEMUA instance tipe itu di seluruh game — WAJIB ditandain dulu SIAPA yang
+    // nembak. Field IsFromTwins ini di-set MANUAL abis Projectile.NewProjectile() di
+    // titik-titik spawn Twins (TwinDash.FireEyeFire/FireDeathLaserVolley,
+    // TwinsLaserBarrage.FireLaserAtPlayer, TwinsCursedRain/TwinsSpinningCurse/
+    // TwinsBorderShot.FireCursedFlame varian) - proyektil dari sumber LAIN (WoF clones,
+    // Cultist, dll) TETAP GAK ke-tandain sama sekali, jadi behavior vanilla mereka di luar
+    // Twins gak keganggu sama sekali.
+    //
+    // ==========================================
+    // TAMBAHAN — SPECTRE RETINAZER/SPAZMATISM (Phase 2 clone, PAKAI AI VANILLA MURNI)
+    // ==========================================
+    // SpectreRetinazer.cs & SpectreSpazmatism.cs SENGAJA gak override AI() sama sekali -
+    // mereka nembak lewat AI VANILLA bawaan NPCID.Retinazer/NPCID.Spazmatism, jadi kita
+    // GAK PERNAH manggil Projectile.NewProjectile() sendiri buat proyektil mereka (beda dari
+    // Twin ASLI yang semua tembakannya lewat kode custom kita, makanya IsFromTwins bisa
+    // di-set manual). Cara SATU-SATUNYA buat "nyegat" proyektil yang mereka tembak: baca
+    // IEntitySource di OnSpawn() - tModLoader modern nge-patch SEMUA panggilan
+    // Projectile.NewProjectile milik AI vanilla (termasuk hardcoded AI Twins) buat nyertain
+    // npc.GetSource_FromAI() sebagai source, yang keluar sebagai EntitySource_Parent
+    // berisi NPC pemanggilnya - jadi kita BISA tau proyektil ini nembak dari Spectre yang
+    // MANA tanpa nyentuh AI vanilla-nya sama sekali.
+    //
+    // Damage di-set manual di sini (BUKAN convention "Master/3" yang dipakai pattern custom
+    // lain - request eksplisit sudah angka final Master Mode): Spectre Retinazer punya
+    // DeathLaser ("red laser") di-turunin ke 10, Spectre Spazmatism punya EyeFire diturunin
+    // ke 15 - biar versi Spectre-nya kerasa lebih ringan/nge-support doang, bukan sekuat
+    // Twin asli.
+    // ==========================================
+    public class TwinsDebuffGlobalProjectile : GlobalProjectile
+    {
+        public override bool InstancePerEntity => true;
+
+        public bool IsFromTwins;
+
+        // True kalau proyektil ini DeathLaser ("red laser") yang ditembak Spectre Retinazer
+        // lewat AI vanilla-nya - dipakai buat nge-apply Ichor (lihat OnHitPlayer) DAN sudah
+        // ke-set damage-nya jadi 10 (Master Mode) sejak OnSpawn.
+        public bool IsFromSpectreRet;
+
+        private const int SpectreRetLaserDamage = 15; // Master Mode - "damage RedLaser Spectre Ret di nerf jadi 15"
+        private const int SpectreSpazEyeFireDamage = 20; // Master Mode - "damage EyeFire Spectre Spaz jadinya cuma 20"
+
+        public override bool AppliesToEntity(Projectile projectile, bool lateInstantiation)
+        {
+            return projectile.type == ProjectileID.EyeFire
+                || projectile.type == ProjectileID.DeathLaser
+                || projectile.type == ProjectileID.CursedFlameHostile;
+        }
+
+        public override void OnSpawn(Projectile projectile, IEntitySource source)
+        {
+            TryApplySpectreNerf(projectile, source);
+        }
+
+        // ==========================================
+        // FIX ROUND 2 — user lapor damage-nya MASIH full vanilla di game, padahal OnSpawn
+        // udah dikasih fallback proximity. Berarti di kasus ini BAHKAN fallback proximity-nya
+        // ikut miss - kemungkinan proyektilnya udah sempet gerak/DeathLaser itu cepet
+        // banget, jadi begitu OnSpawn kepanggil (Center-nya sempat ke-baca beda dikit dari
+        // titik NPC nembak) udah lolos dari radius 200. Daripada nebak-nebak radius yang
+        // "pas", sekarang dibikin 2 lapis pengaman TAMBAHAN:
+        //
+        //   1. TIER KETIGA di ResolveSourceNPC: kalau proximity juga gagal, tapi di dunia
+        //      cuma ADA SATU NPC Spectre dari tipe yang dicari (kasus normal - biasanya
+        //      cuma 1 pasang Spectre yang eksis dalam satu waktu), langsung anggap itu
+        //      sumbernya, GAK PEDULI JARAK. Ini "tebakan aman" karena kalaupun cuma 1
+        //      instance yang ada, gak mungkin ada instance lain yang salah ke-tandain.
+        //
+        //   2. RETRY VIA PreAI(): OnSpawn cuma dapet SATU kesempatan di frame pertama -
+        //      kalau di frame itu semua deteksi somehow masih gagal (misal ke-panggil
+        //      SEBELUM proyektilnya beneran keregister posisinya, atau race condition
+        //      timing lain), nerf-nya gak akan PERNAH kepasang lagi selama-lamanya.
+        //      Sekarang re-coba deteksi + nerf di beberapa tick PERTAMA (lewat PreAI(),
+        //      bukan cuma OnSpawn) selama nerf-nya belum berhasil ke-apply - begitu
+        //      berhasil sekali, berhenti nyoba lagi (biar gak ada overhead nempel terus).
+        // ==========================================
+        private const int MaxRetryTicks = 12; // ~0.2 detik pertama sejak spawn
+        private int retryTicksElapsed = 0;
+        private bool nerfApplied = false;
+
+        public override void PreAI(Projectile projectile)
+        {
+            if (nerfApplied || retryTicksElapsed >= MaxRetryTicks)
+                return;
+
+            retryTicksElapsed++;
+            TryApplySpectreNerf(projectile, null);
+        }
+
+        private void TryApplySpectreNerf(Projectile projectile, IEntitySource source)
+        {
+            if (nerfApplied)
+                return;
+
+            if (projectile.type != ProjectileID.DeathLaser && projectile.type != ProjectileID.EyeFire)
+                return;
+
+            NPC npc = ResolveSourceNPC(source, projectile);
+            if (npc == null)
+                return;
+
+            if (projectile.type == ProjectileID.DeathLaser && npc.type == ModContent.NPCType<SpectreRetinazer>())
+            {
+                projectile.damage = SpectreRetLaserDamage;
+                IsFromSpectreRet = true;
+                nerfApplied = true;
+            }
+            else if (projectile.type == ProjectileID.EyeFire && npc.type == ModContent.NPCType<SpectreSpazmatism>())
+            {
+                projectile.damage = SpectreSpazEyeFireDamage;
+                nerfApplied = true;
+            }
+        }
+
+        // ==========================================
+        // FIX — "damage/debuff dari projectile Spectre gak pernah berubah": ternyata
+        // EntitySource_Parent.Entity KADANG gak ke-resolve jadi NPC Spectre yang beneran
+        // nembak (kemungkinan besar karena AI vanilla hardcoded Twins ngecek npc.type ==
+        // NPCID.Retinazer/Spazmatism buat sebagian branch-nya, sedangkan NPC Spectre kita
+        // type-nya beda/custom - jadi walau AIType/AnimationType numpang vanilla, source
+        // chain yang ke-attach ke proyektil hasil branch itu gak selalu konsisten pegang
+        // NPC pemanggil yang kita harap). Daripada gantung ke satu jalur doang, sekarang
+        // ada FALLBACK: kalau source-nya bukan EntitySource_Parent ber-NPC yang valid,
+        // cari NPC Spectre (tipe yang sesuai proyektilnya) TERDEKAT dari titik spawn
+        // proyektil - proyektil DeathLaser/EyeFire selalu spawn PERSIS di posisi NPC
+        // penembaknya, jadi jarak bakal 0 (atau nyaris 0) buat NPC yang beneran nembak,
+        // sementara NPC Spectre lain (kalau ada banyak instance sekaligus) bakal jauh lebih
+        // jauh. Radius maksimum dikasih buat jaga-jaga biar gak asal comot NPC yang gak
+        // ada hubungannya kalau ternyata source-nya emang bukan dari Spectre sama sekali.
+        // ==========================================
+        private const float FallbackSearchRadius = 200f;
+
+        private static NPC ResolveSourceNPC(IEntitySource source, Projectile projectile)
+        {
+            // TIER 1 — jalur normal (harusnya ini yang kepakai di kebanyakan kasus).
+            if (source is EntitySource_Parent parent && parent.Entity is NPC npcFromSource)
+                return npcFromSource;
+
+            // Cuma relevan buat DeathLaser (Spectre Retinazer) / EyeFire (Spectre
+            // Spazmatism), proyektil lain diabaikan total.
+            int wantedType;
+            if (projectile.type == ProjectileID.DeathLaser)
+                wantedType = ModContent.NPCType<SpectreRetinazer>();
+            else if (projectile.type == ProjectileID.EyeFire)
+                wantedType = ModContent.NPCType<SpectreSpazmatism>();
+            else
+                return null;
+
+            // TIER 2 — fallback proximity: NPC Spectre (tipe yang sesuai) TERDEKAT dari
+            // titik spawn proyektil, dalam radius wajar.
+            NPC nearest = null;
+            float bestDistSq = float.MaxValue;
+            int activeCount = 0;
+            NPC onlyInstance = null;
+
+            foreach (NPC n in Main.npc)
+            {
+                if (!n.active || n.type != wantedType)
+                    continue;
+
+                activeCount++;
+                onlyInstance = n;
+
+                float distSq = Vector2.DistanceSquared(n.Center, projectile.Center);
+                if (distSq < bestDistSq)
+                {
+                    bestDistSq = distSq;
+                    nearest = n;
+                }
+            }
+
+            if (nearest != null && bestDistSq <= FallbackSearchRadius * FallbackSearchRadius)
+                return nearest;
+
+            // TIER 3 — kalau proximity gagal (proyektilnya udah kejauhan dari NPC-nya pas
+            // deteksi ini jalan) TAPI cuma ada SATU NPC Spectre dari tipe itu di dunia,
+            // langsung anggap itu sumbernya - gak mungkin salah tandain karena emang gak
+            // ada instance lain buat dibandingin.
+            if (activeCount == 1)
+                return onlyInstance;
+
+            return null;
+        }
+
+        public override void OnHitPlayer(Projectile projectile, Player target, Player.HurtInfo info)
+        {
+            if (IsFromTwins)
+            {
+                ApplyDebuffs(target);
+            }
+
+            // ==========================================
+            // ICHOR — SEMUA "red laser" (DeathLaser) keluarga Twins ngasih Ichor, baik dari
+            // Twin ASLI (IsFromTwins, ditembak lewat TwinDash.FireDeathLaserVolley /
+            // TwinsLaserBarrage.FireLaserAtPlayer) MAUPUN dari Spectre Retinazer
+            // (IsFromSpectreRet, AI vanilla) - request eksplisit "buat semua Red laser yang
+            // dari twins original pun di kasih Ichor debuff" + laser Spectre Ret juga inflict
+            // Ichor. CursedFlameHostile & EyeFire TIDAK ikut kena Ichor - cuma DeathLaser
+            // ("red laser") doang yang dimaksud.
+            // ==========================================
+            if (projectile.type == ProjectileID.DeathLaser && (IsFromTwins || IsFromSpectreRet))
+            {
+                target.AddBuff(BuffID.Ichor, DebuffDurationTicks);
+            }
+        }
+
+        // ==========================================
+        // Helper SATU TEMPAT buat nge-apply paket debuff Twins (Broken Armor + Weak +
+        // Bleeding) - dipanggil dari sini (proyektil vanilla yang ditandai), DAN langsung
+        // dari RedPhantasmalBolt.cs / TwinsCursedBeam.cs (proyektil custom kita sendiri),
+        // DAN dari TwinsRetBeam.cs / TwinsLastStand.cs (beam "konseptual" yang ngedamage
+        // lewat target.Hurt() manual, bukan lewat proyektil beneran), DAN dari
+        // TwinsRework.cs (contact damage Spazmatism/Retinazer). Durasi-nya SATU KONSTANTA di
+        // sini biar gampang di-tune sekali doang buat semua sumber damage Twins - dipakai
+        // juga buat durasi Ichor di atas, biar seragam.
+        // ==========================================
+        public const int DebuffDurationTicks = 300; // 5 detik
+
+        public static void ApplyDebuffs(Player target)
+        {
+            target.AddBuff(BuffID.BrokenArmor, DebuffDurationTicks);
+            target.AddBuff(BuffID.Weak, DebuffDurationTicks);
+            target.AddBuff(BuffID.Bleeding, DebuffDurationTicks);
+        }
+    }
+}

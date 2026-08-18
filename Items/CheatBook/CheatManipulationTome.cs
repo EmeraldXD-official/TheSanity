@@ -47,7 +47,7 @@ namespace TheSanity.Items.CheatBook
             player.immuneTime = 20;
             player.noFallDmg = true;
             
-            // Fix: Diberi batas maksimum statLifeMax2 agar bar jantung tidak patah/glitch
+            // Fix: Cap life at statLifeMax2 so the heart life bar doesn't break/glitch
             if (player.statLife < player.statLifeMax2) {
                 player.statLife++;
             }

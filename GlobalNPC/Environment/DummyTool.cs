@@ -44,6 +44,7 @@ namespace TheSanity.Items
                     }
                     
                     if (removedCount > 0) {
+                        DpsTracker.Reset(); // Semua Dummy hilang, meter DPS balik ke 0
                         Main.NewText($"❌ [Dummy System] Success Clear {removedCount} Dummy!", Color.OrangeRed);
                     }
                 } 

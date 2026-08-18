@@ -100,6 +100,17 @@ namespace TheSanity.GlobalNPC.Bosses.Twinkle
             npcLoot.Add(ItemDropRule.MasterModeDropOnAllPlayers(ModContent.ItemType<TwinkleRelic>()));
         }
 
+        // =================================================================
+        // 🪙 FIX: SET FLAG "DOWNED" SAAT BOSS MATI
+        // Tanpa ini, TwinkleDownedSystem.downedTwinkle tidak akan pernah
+        // berubah jadi true, sehingga progression lock di
+        // TwinkleProgressionLock.cs tidak akan pernah terbuka.
+        // =================================================================
+        public override void OnKill()
+        {
+            TwinkleDownedSystem.downedTwinkle = true;
+        }
+
         public override void AI()
         {
             NPC.TargetClosest(true);

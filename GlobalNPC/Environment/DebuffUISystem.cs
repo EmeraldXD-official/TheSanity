@@ -17,6 +17,10 @@ namespace TheSanity.Buff
         // ✨ VARIABEL BARU: Menyimpan status On/Off Contact Damage (Default: false / OFF)
         public static bool ContactDamageEnabled = false;
 
+        // ✨ VARIABEL BARU: Kalau ON, Dummy jadi "Friendly" (NPC.friendly = true) sehingga
+        // projectile hostile (punya musuh) ikut bisa mendamage Dummy. Default OFF (Hostile Enemy).
+        public static bool FriendlyModeEnabled = false;
+
         public override void Load() {
             if (!Main.dedServ) {
                 DebuffUserInterface = new UserInterface();

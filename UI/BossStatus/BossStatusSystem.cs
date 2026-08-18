@@ -2,6 +2,7 @@ using Microsoft.Xna.Framework;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using Terraria;
 using Terraria.DataStructures;
@@ -50,6 +51,64 @@ namespace TheSanity.UI.BossStatus
         public static Dictionary<string, int> BossAttempts = new Dictionary<string, int>();
         public static List<BossFightSession> ActiveSessions = new List<BossFightSession>();
         public static int SessionCooldownTicks = 0; 
+
+        // =====================================================================================
+        // --- MULTIPLAYER SYNC ---
+        // BossRecords itu data per-ModPlayer yang cuma "benar" di client pemiliknya sendiri.
+        // tModLoader TIDAK otomatis nge-sync data custom seperti ini ke client lain, jadi kita
+        // kirim manual pakai ModPacket setiap kali: (a) ada player baru fight boss (dari EndSession),
+        // atau (b) ada player baru join server (lewat hook SyncPlayer di BossStatusPlayer).
+        //
+        // PENTING: method HandlePacket di bawah ini WAJIB dipanggil dari HandlePacket milik
+        // class Mod utama kalian (yang extends Mod), contoh:
+        //
+        //     public override void HandlePacket(BinaryReader reader, int whoAmI) {
+        //         TheSanity.UI.BossStatus.BossStatusSystem.HandlePacket(reader, whoAmI);
+        //     }
+        //
+        // Tanpa baris itu, packet sync ini ga akan pernah kebaca sama sekali.
+        // =====================================================================================
+        public const byte NET_MSG_SYNC_RECORDS = 1;
+
+        public static void HandlePacket(BinaryReader reader, int whoAmI) {
+            byte msgType = reader.ReadByte();
+            switch (msgType) {
+                case NET_MSG_SYNC_RECORDS:
+                    ReceiveSyncRecords(reader, whoAmI);
+                    break;
+            }
+        }
+
+        private static void ReceiveSyncRecords(BinaryReader reader, int whoAmI) {
+            byte ownerIndexInPacket = reader.ReadByte();
+            ushort recordCount = reader.ReadUInt16();
+
+            var records = new List<global::TheSanity.Interface.PlayerBossRecord>(recordCount);
+            for (int i = 0; i < recordCount; i++) {
+                records.Add(global::TheSanity.Interface.PlayerBossRecord.ReadFromPacket(reader));
+            }
+
+            // Di server, JANGAN percaya begitu aja index yang dikirim client (anti-cheat basic):
+            // pakai whoAmI asli dari koneksinya, bukan byte yang ditulis client.
+            int ownerIndex = Main.netMode == NetmodeID.Server ? whoAmI : ownerIndexInPacket;
+
+            if (ownerIndex < 0 || ownerIndex >= Main.maxPlayers || !Main.player[ownerIndex].active) return;
+
+            var ownerModPlayer = Main.player[ownerIndex].GetModPlayer<global::TheSanity.Interface.BossStatusPlayer>();
+            ownerModPlayer.BossRecords = records;
+
+            if (Main.netMode == NetmodeID.Server) {
+                // Server terusin ke semua client lain (kecuali si pengirim, dia udah punya datanya sendiri).
+                ModPacket relay = ModContent.GetInstance<BossStatusSystem>().Mod.GetPacket();
+                relay.Write(NET_MSG_SYNC_RECORDS);
+                relay.Write((byte)ownerIndex);
+                relay.Write((ushort)records.Count);
+                foreach (var record in records) {
+                    record.WriteToPacket(relay);
+                }
+                relay.Send(-1, ownerIndex);
+            }
+        }
 
         public override void Load() {
             BossAttempts = new Dictionary<string, int>();
@@ -400,6 +459,13 @@ namespace TheSanity.UI.BossStatus
                 });
 
                 rPlayer.HasUnreadRecords = true; 
+
+                // --- TAMBAHAN: broadcast hasil fight ini ke semua client lain ---
+                // Tanpa ini, record cuma nyimpen lokal dan player lain ga akan pernah liat kita
+                // udah pernah ngelawan boss ini (lihat catatan NET_MSG_SYNC_RECORDS di atas).
+                if (Main.netMode == NetmodeID.MultiplayerClient) {
+                    rPlayer.SendRecordsSync(-1, Main.myPlayer);
+                }
             }
 
             if (Main.netMode == NetmodeID.Server) {

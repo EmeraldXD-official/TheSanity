@@ -4,11 +4,14 @@ using ReLogic.Content;
 using System;
 using System.Collections.Generic;
 using Terraria;
+using Terraria.Audio;
 using Terraria.GameContent;
 using Terraria.ID;
 using Terraria.ModLoader;
+using Luminance.Assets;
 using Luminance.Common.Utilities;
 using TheSanity.Projectiles;
+using ReLogic.Utilities;
 
 namespace YourModName.Content.NPCs
 {
@@ -32,15 +35,13 @@ namespace YourModName.Content.NPCs
         // beda dari dugaan kita, game tidak crash — otomatis null dan kita fallback aman.
         private static Asset<Texture2D> RetinazerGlowTexture;
 
-        // Sprite starburst buat Eye Laser Flash — numpang tekstur VANILLA proyektil
-        // "Rainbow" (item Rainbow Rod, ProjectileID.RainbowRodBullet). Sprite ini
-        // kebetulan emang udah kebentuk starburst putih polos (bukan pelangi/gradient
-        // kayak namanya - warnanya di-cycle lewat kode, bukan lewat sprite), jadi TINGGAL
-        // DI-TINT MERAH pas draw, gampang bersih (beda kasus sama PhantasmalBolt yang
-        // dasarnya cyan - lihat komentar RedTint di RedPhantasmalBolt.cs). Di-load
-        // terpisah (try-catch sendiri) dari RetinazerGlowTexture di atas, biar kalau
-        // salah satu gagal load, yang lain tetap jalan normal.
-        private static Asset<Texture2D> EyeFlashStarTexture;
+        // Eye Laser Flash SEKARANG GAK numpang sprite vanilla "Rainbow" (Rainbow Rod,
+        // ProjectileID.RainbowRodBullet) lagi buat starburst-nya - diganti sprite "+"
+        // sprite "+" dari asset bawaan Luminance (ShineFlareTexture, lihat PlusGlowTexture
+        // di bawah), digambar PERSIS dengan pola yang sama kayak sprite vanilla yang lama
+        // (1 texture utuh, 2 lapis outer+core, origin di tengah, di-scale ke ukuran dunia) -
+        // cuma texture-nya diganti, biar gak bergantung asset vanilla lagi. Lihat
+        // DrawEyeLaserFlash di bawah buat detailnya.
 
         // ==========================================
         // STATE UNTUK PATTERN ATTACK (dibaca/ditulis dari TwinDash.cs & TwinsRetBeam.cs)
@@ -65,6 +66,24 @@ namespace YourModName.Content.NPCs
         // ==========================================
         public bool IsEnraged;
 
+        // ==========================================
+        // ScaleBoltDamage — dipanggil dari SEMUA pattern file (TwinDash, TwinsBorderShot,
+        // TwinsCursedBeam, TwinsCursedRain, TwinsLastStand, TwinsSpinningCurse,
+        // TwinsSplitCombo, dst) tiap kali nge-spawn GreenBolt/RedPhantasmalBolt.
+        //
+        // REQUEST: bonus +20% damage otomatis pas Last Stand DICABUT - lonjakan damage
+        // kerasa kegedean, apalagi digabung sama Deathray yang sekarang udah ignore
+        // i-frame (lihat DeathrayCooldownSlot di TwinsLastStand.cs). Fungsi ini
+        // SENGAJA DIPERTAHANKAN (bukan dihapus + ganti semua call site jadi baseDamage
+        // langsung) biar SEMUA file pattern yang manggil ScaleBoltDamage(...) gak perlu
+        // diubah satu-satu - sekarang cuma passthrough, return baseDamage apa adanya,
+        // gak ada perkalian apa pun lagi baik Last Stand aktif maupun nggak.
+        // ==========================================
+        public static int ScaleBoltDamage(int baseDamage)
+        {
+            return baseDamage;
+        }
+
         // Akumulator jarak tempuh (px) sejak terakhir kali TwinDash nembak sepasang
         // RedPhantasmalBolt ke kanan-kiri selama Dashing (cuma dipakai kalau IsEnraged).
         // Di-reset ke 0 tiap kali dash BARU dimulai (lihat TwinDash.Pattern1, transisi
@@ -87,7 +106,16 @@ namespace YourModName.Content.NPCs
             SpinningCurse,
             BorderShot,
             LaserBarrage,
-            SplitCombo // PATTERN PALING TERAKHIR di rotasi - lihat TwinsSplitCombo.cs
+            SplitCombo,
+            // BARU: cuma disisipin ke rotasi kalau IsEnraged true (Phase 3) - lihat komentar
+            // dispatcher di bawah & header TwinsEnrageSweep.cs. Dulu pattern paling terakhir,
+            // SEKARANG digantikan HopVolley di bawah sebagai penutup baru (EnrageSweep TETAP
+            // ada di rotasi, cuma bukan yang paling akhir lagi).
+            EnrageSweep,
+            // BARU: cuma disisipin ke rotasi kalau IsEnraged true (Phase 3), PERSIS setelah
+            // EnrageSweep - lihat komentar header TwinsBorderHopVolley.cs. PATTERN PALING
+            // TERAKHIR sekarang, penutup sebelum balik ke Dash.
+            HopVolley
         }
         public SpazPattern CurrentPattern = SpazPattern.Dash;
 
@@ -162,11 +190,35 @@ namespace YourModName.Content.NPCs
         public bool LastStandDeathrayActive; // dibaca render (PreDraw) buat nampilin garis beam-nya
         public float LastStandBoltTimer;
 
+        // Slot instance suara loop "Beam" (TheSanity/Sounds/Beam) yang nyala TERUS-MENERUS
+        // selama Deathray muter (mulai dari transisi pertama sampai beneran berhenti di
+        // StartDeathAnimation) - lihat TwinsLastStand.StartDeathrayLoopSound/
+        // StopDeathrayLoopSound/UpdateDeathrayLoopSoundPosition.
+        public SlotId LastStandDeathraySoundSlot;
+
         // Death animation (jatuh + ledakan harmless selama 5 detik SETELAH landing, sebelum
         // kill manual). LastStandHasLanded jadi penanda kapan timer 5 detik itu MULAI ngitung
         // (begitu Twin beneran nyentuh block, bukan dari saat gravity baru diaktifin).
         public bool LastStandHasLanded;
         public float LastStandNextExplosionCountdown;
+
+        // REQUEST: ledakan besar final & kill manual sekarang DIPISAH 1 detik (ledakan duluan
+        // di detik ke-6, baru kill-nya di detik ke-7, biar ledakan besarnya kelihatan dulu
+        // sebelum Twin resmi "mati") - flag ini nyegah SpawnFinalBigExplosion() ke-trigger
+        // BERKALI-KALI selama window 1 detik itu (soalnya kondisi timer-nya >= threshold,
+        // yang tanpa guard ini bakal true TERUS tiap tick sampai kill beneran kejadian).
+        public bool LastStandFinalExplosionSpawned;
+
+        // ==========================================
+        // FALL TUMBLE — request "jangan kaku/goofy pas jatuh". Twin sekarang MUTER PELAN
+        // (bukan diam di rotation 0 dari awal jatuh sampai landing kayak papan kayu), lalu
+        // pas landing "tumbang" ke sudut miring (bukan snap balik ke 0), dibantu 2x mantulan
+        // kecil biar berasa ada bobot. Semua field ini generic slot dibaca/ditulis dari
+        // TwinsLastStand.TickFallingTumble/HandleFallLandingImpact/TickSettledFlopSway.
+        // ==========================================
+        public float LastStandFallAngularVelocity; // radian/tick, muter selama masih di udara
+        public float LastStandFallSettleRotation;   // sudut "tumbang" akhir yang dituju pas landing
+        public int LastStandFallBounceCount;        // sisa mantulan kecil pas landing (0 = udah bener2 settle)
 
         // ==========================================
         // FIX: budget waktu master (HealthDrainDurationTicks) SEKARANG CUMA nandain "pending"
@@ -188,6 +240,14 @@ namespace YourModName.Content.NPCs
         // ==========================================
         public float LastStandDeathrayTransitionFromSign;
         public bool LastStandDeathrayTransitionToClockwise;
+
+        // REQUEST: screen shake gede "menggelegar" pas Deathray PERTAMA nyala DAN tiap kali
+        // muter balik (CW<->CCW) - itu lewat ScreenShakeSystem.StartShake() biasa dipanggil
+        // langsung dari BeginDeathrayTransition, gak butuh state tambahan. Field INI cuma buat
+        // shake RINGAN yang nyala TERUS-MENERUS sepanjang seluruh durasi Deathray (Transition +
+        // Clockwise + CounterClockwise) - counter-nya disimpen di sini biar retrigger-nya
+        // periodik (bukan tiap tick), lihat TwinsLastStand.TickDeathrayDamageAndBolts.
+        public float LastStandDeathrayContinuousShakeTimer;
 
         // ==========================================
         // STATE UNTUK PATTERN RETBEAM (dibaca/ditulis dari TwinsRetBeam.cs)
@@ -281,6 +341,50 @@ namespace YourModName.Content.NPCs
         public int ComboSplitLapsRequired;
         public float ComboSplitFireTimer;
 
+        // ==========================================
+        // STATE UNTUK PATTERN ENRAGE SWEEP (dibaca/ditulis dari TwinsEnrageSweep.cs) - PATTERN
+        // BARU khusus Phase 3/Enraged (juga dipakai Last Stand), disisipin setelah SplitCombo
+        // sebelum balik ke Dash. Lihat komentar header TwinsEnrageSweep.cs buat alur lengkap.
+        // ==========================================
+        public float EnrageSweepStateRaw;
+        public float EnrageSweepTimer;
+        public int EnrageSweepRepeatsRemaining;
+        public Vector2 EnrageSweepMoveTarget;    // titik di tepi border yang dituju tiap ulangan
+        public float EnrageSweepBaseFacingAngle; // arah ke player, dikunci SEKALI pas nyampe titik border
+        public float EnrageSweepBiasSign;        // +1 = mulai bias BAWAH, -1 = mulai bias ATAS
+        public float EnrageSweepCurrentAngle;    // sudut hadap LIVE selama sweep (dipakai buat arah tembak)
+        public float EnrageSweepFireCountdown;   // countdown tick sampai tembakan berikutnya (tiap 0.1 detik)
+        public bool EnrageSweepRedTurn;          // giliran warna attempt ini: true = Red, false = Green - gantian tiap abis Dash (Merah -> Hijau -> Merah -> ...)
+
+        // ==========================================
+        // STATE UNTUK PATTERN BORDER HOP VOLLEY (dibaca/ditulis dari
+        // TwinsBorderHopVolley.cs) - PATTERN PALING TERAKHIR sekarang (Phase 3/Enraged
+        // ONLY), disisipin PERSIS setelah EnrageSweep, SEBELUM balik ke Dash. Lihat
+        // komentar header TwinsBorderHopVolley.cs buat alur lengkap.
+        // ==========================================
+        public float HopVolleyStateRaw;      // fase pattern-level (Active/Regrouping/Done) - sumber kebenaran, instance Spazmatism
+        public float HopVolleyTimer;         // dipakai buat safety timeout Regrouping
+        public int HopVolleyRepeatsRequired; // jumlah hop+tembak yang WAJIB diselesaikan tiap Twin (5-10x, SELALU 10x kalau Last Stand)
+
+        // Gerbang independensi Retinazer - SAMA filosofi kayak ComboSplitActive. Begitu
+        // true, PreAI/FindFrame Retinazer di bawah pindah ke jalur independen HopVolley.
+        public bool HopVolleyActive;
+
+        // Vulnerable window (transfer damage balik ke pool HP Spazmatism) - mekanismenya
+        // SAMA PERSIS kayak ComboSplitVulnerable/HandleVulnerability punya SplitCombo.
+        public bool HopVolleyVulnerable;
+        public bool HopVolleyDamageTrackingInit;
+        public int HopVolleyLastTrackedLife;
+
+        // ---- Field per-Twin: dipakai LANGSUNG dari instance masing-masing NPC sendiri
+        // (Spazmatism baca/tulis di instance-nya, Retinazer di instance-nya sendiri) -
+        // BEDA dari ComboSplit yang formulanya di-drive dari SATU sumber kebenaran shared,
+        // di sini kedua Twin BENERAN gerak independen/asinkron ("tanpa sejajar" sesuai
+        // request), jadi butuh bookkeeping sendiri-sendiri per Twin. ----
+        public Vector2 HopVolleyMoveTarget; // titik border yang lagi dituju TWIN INI
+        public int HopVolleyHopsDone;       // sudah berapa kali TWIN INI selesai hop+tembak
+        public bool HopVolleyFinished;      // TWIN INI sudah capai HopVolleyRepeatsRequired, nunggu partner-nya
+
         // Gerbang utama: begitu true (di-set dari TwinsSplitCombo.Start(), dibaca dari
         // instance Spazmatism), PreAI/FindFrame/PreDraw Retinazer di bawah PINDAH JALUR dari
         // "nempel 1:1 ke Spaz" (default, seumur hidup fight) ke jalur independen yang
@@ -300,6 +404,40 @@ namespace YourModName.Content.NPCs
         // ngedeteksi seberapa banyak npc.life Retinazer turun tiap tick.
         public bool ComboSplitDamageTrackingInit;
         public int ComboSplitLastTrackedLife;
+
+        // ==========================================
+        // STATE UNTUK SPAWN INTRO (dibaca/ditulis dari TwinsSpawnIntro.cs) — cutscene
+        // pembuka, SATU KALI doang seumur hidup NPC leader (Spazmatism) ini. Numpang alur
+        // yang PERSIS sama kayak PlutoHead (lihat PlutoSpawnDash.cs): CameraPullIn -> RunIn
+        // -> BossIntro (layar gelap + judul "Mechanical Nightmare" diketik + nama "The
+        // Twins" muncul) -> CameraReturn -> lanjut fight normal (CurrentPattern = Dash).
+        // BEDA dari Pluto: dispatcher Twins gak numpang npc.ai[0] pool-picker sama sekali
+        // (lihat komentar RetBeam* di atas soal ai[0..3] udah kepake Dash+animasi frame),
+        // jadi state/timer-nya di sini juga cuma field public terpisah biasa, SAMA POLA
+        // kayak semua pattern lain di file ini (RetBeam*, CursedRain*, dst). Retinazer
+        // TIDAK butuh logic sendiri di sini - dia otomatis nempel posisi/rotasi/
+        // dontTakeDamage Spazmatism lewat blok mirror normal yang udah ada di PreAI paling
+        // atas, sama kayak SELURUH pattern lain.
+        // ==========================================
+        public bool SpawnIntroInitialized; // true abis pertama kali di-cek, gak pernah nyala ulang
+        public bool SpawnIntroActive;      // true SELAMA ke-4 stage cutscene masih jalan
+        public int SpawnIntroStage;
+        public float SpawnIntroTimer;
+        public float SpawnIntroRunDashDuration; // dihitung sekali pas mulai Stage RunIn (lihat TwinsSpawnIntro.cs)
+
+        // Offset kamera SAAT INI (world px), dibaca TwinsSpawnCameraPlayer.cs lewat
+        // ModifyScreenPosition -- analog SpawnAnimCameraOffset punya Pluto.
+        public Vector2 SpawnIntroCameraOffset;
+
+        // --- Progress Stage "BossIntro", dibaca TwinsSpawnIntroSystem.cs buat nge-draw ---
+        public float SpawnIntroDarkenAlpha;
+        public int SpawnIntroTypedCharCount;
+        public bool SpawnIntroShowBottomText;
+        public float SpawnIntroGradientRevealProgress = -1f; // 0..1 selama sapuan reveal, -1 = off
+        public float SpawnIntroContentAlpha = 1f;
+
+        public bool IsSpawnIntroActive => SpawnIntroActive;
+        public bool IsSpawnIntroBossTextActive => SpawnIntroActive && SpawnIntroStage == TwinsSpawnIntro.StageBossIntro;
 
         // ==========================================
         // tembak, dan BUKAN body-center) - dihitung LIVE tiap frame dari rotation NPC saat
@@ -351,6 +489,12 @@ namespace YourModName.Content.NPCs
             // bawah otomatis snap dia balik nempel & invincible lagi mulai tick berikutnya.
             ComboSplitActive = false;
             ComboSplitVulnerable = false;
+
+            // BARU: JAGA-JAGA yang sama PERSIS buat HopVolley - kalau event lain motong
+            // pattern ini PAS Retinazer lagi kepisah/vulnerable, wajib dipaksa bersih di
+            // sini juga (lihat komentar header TwinsBorderHopVolley.cs).
+            HopVolleyActive = false;
+            HopVolleyVulnerable = false;
         }
 
         // Index proyektil TwinsCursedBeam yang lagi aktif (-1 kalau gak ada). Di-set oleh
@@ -364,11 +508,15 @@ namespace YourModName.Content.NPCs
         // (bukan cuma pas IsDashing lagi), biar efeknya selalu keliatan.
         public List<TwinsAfterimageSnapshot> Trail = new List<TwinsAfterimageSnapshot>();
         private const int TrailMaxLength = 6;
-        private const int AfterimageSlices = 6; // makin banyak = gradasi makin halus
 
-        // Warna gradasi after-image: ATAS merah, BAWAH hijau lime — sesuai request.
-        private static readonly Color AfterimageTopColor = Color.Red;
-        private static readonly Color AfterimageBottomColor = new Color(140, 255, 110); // lime muda
+        // ==========================================
+        // REVISI: dulu 1 warna gradasi (atas merah - bawah hijau lime) yang dipakai bareng
+        // buat Spazmatism MAUPUN Retinazer, dan "napas" pelan pindah-pindah rasio campuran
+        // tiap tick (blendWave). SEKARANG per-Twin masing-masing punya 1 warna SOLID/STATIK -
+        // Spazmatism selalu hijau, Retinazer selalu merah, GAK ADA transisi/gonta-ganti lagi.
+        // ==========================================
+        private static readonly Color RetinazerAfterimageColor = Color.Red;
+        private static readonly Color SpazmatismAfterimageColor = new Color(140, 255, 110); // lime muda
 
         public override void SetStaticDefaults()
         {
@@ -385,17 +533,6 @@ namespace YourModName.Content.NPCs
                 // ke sprite Retinazer biasa tanpa glowmask tambahan.
                 RetinazerGlowTexture = null;
             }
-
-            try
-            {
-                EyeFlashStarTexture = ModContent.Request<Texture2D>("Terraria/Images/Projectile_" + ProjectileID.RainbowRodBullet, AssetRequestMode.ImmediateLoad);
-            }
-            catch
-            {
-                // Kalau ternyata gagal (nama path berubah/dsb), jangan crash — DrawEyeLaserFlash
-                // di bawah otomatis fallback ke starburst manual (DrawBloomLine) kalau texture ini null.
-                EyeFlashStarTexture = null;
-            }
         }
 
         public override bool AppliesToEntity(NPC entity, bool lateInstantiation)
@@ -411,6 +548,15 @@ namespace YourModName.Content.NPCs
             if (npc.type == NPCID.Spazmatism || npc.type == NPCID.Retinazer)
             {
                 npc.HitSound = SoundID.NPCHit4; // sound hit metal/mekanik vanilla
+
+                // HP: PAKAI VANILLA APA ADANYA - gak di-override/di-buff manual sama sekali
+                // lagi (dulu sempat 187,000, lalu digabung sama HP Retinazer, dll - semua
+                // itu DIHAPUS). npc.lifeMax dibiarin murni hasil scaling Normal/Expert/Master
+                // bawaan vanilla buat tipe ini, gak perlu diitung/di-set manual di sini.
+
+                // Custom health bar (format 11x12 ala Fargo, gradasi Merah/Hijau) - lihat
+                // TheTwinsBars.cs.
+                npc.BossBar = ModContent.GetInstance<TheSanity.BossBars.TheTwinsBars>();
             }
         }
 
@@ -449,6 +595,45 @@ namespace YourModName.Content.NPCs
             }
 
             return base.CheckActive(npc);
+        }
+
+        // ==========================================
+        // FIX BUG "health bar Retinazer nunjukin 500k" — akar masalahnya ADA DI SINI, bukan
+        // cuma kosmetik. TwinsSplitCombo.cs SEBELUMNYA nge-"inflate" npc.lifeMax/npc.life
+        // Retinazer jadi angka dummy raksasa (5,000,000) SELAMA sub-state Circling (window
+        // vulnerable) - itu murni buat jaga-jaga biar checkDead() vanilla Retinazer gak
+        // keburu ke-trigger DI TENGAH tick SEBELUM sempat kita "transfer" damage-nya balik
+        // ke npc.life Spazmatism. Efek sampingnya: boss-bar/mod lain (BossChecklist dkk) yang
+        // baca npc.life/lifeMax Retinazer langsung nampilin angka dummy itu.
+        //
+        // FIX SEBENARNYA: CheckDead di-override di sini - SELAMA window vulnerable itu,
+        // Retinazer SECARA HARFIAH gak boleh mati lewat jalur vanilla-nya sendiri, APAPUN
+        // nilai life-nya. Karena itu, TwinsSplitCombo.cs SEKARANG BOLEH pakai npc.life/
+        // lifeMax REAL (mirror persis dari Spazmatism, angka yang beneran masuk akal) tanpa
+        // resiko dia mati sendirian di tengah jalan - kill "beneran" TETAP SELALU lewat
+        // spaz.checkDead() manual (lihat TwinsSplitCombo.HandleVulnerability), satu jalur
+        // konsisten kayak biasa.
+        // ==========================================
+        public override bool CheckDead(NPC npc)
+        {
+            if (npc.type == NPCID.Retinazer)
+            {
+                int spazIndex = NPC.FindFirstNPC(NPCID.Spazmatism);
+                bool comboVulnerable = false;
+                if (spazIndex != -1 && Main.npc[spazIndex].active)
+                {
+                    TwinsReworkOverride spazGlobal = Main.npc[spazIndex].GetGlobalNPC<TwinsReworkOverride>();
+                    // BARU: sama aturan kayak ComboSplitVulnerable - selama HopVolleyVulnerable
+                    // true juga, batalkan proses "mati sendiri" Retinazer (lihat komentar header
+                    // TwinsBorderHopVolley.cs, mekanisme transfer damage-nya sama persis).
+                    comboVulnerable = spazGlobal.ComboSplitVulnerable || spazGlobal.HopVolleyVulnerable;
+                }
+
+                if (comboVulnerable)
+                    return false; // batalkan proses "mati sendiri" - biar spaz.checkDead() manual yang megang otoritas kill
+            }
+
+            return true; // kasus lain: biarin vanilla mati seperti biasa
         }
 
         // ==========================================
@@ -508,26 +693,63 @@ namespace YourModName.Content.NPCs
                     npc.damage = spaz.damage;
                     npc.target = spaz.target;
 
+                    // ==========================================
+                    // CATATAN: SEMPAT dicoba set npc.realLife = spaz.whoAmI di sini buat
+                    // nyatuin health bar (biar gak keliatan "dobel", ~374k dari 187k+187k) -
+                    // DIHAPUS LAGI karena ternyata realLife itu field VANILLA yang BUKAN
+                    // cuma buat display doang: NPC.StrikeNPC vanilla PUNYA LOGIC KHUSUS yang
+                    // OTOMATIS ngeredirect damage hit ke Main.npc[realLife].life SECARA
+                    // NATIVE (dipakai jugua sama Golem/Destroyer/worm segments) - itu jalan
+                    // BARENGAN sama transfer manual kita sendiri di
+                    // TwinsSplitCombo.HandleVulnerability (yang MANUAL ngedeteksi ret.life
+                    // turun terus nyubtract jumlah yang SAMA dari spaz.life) - HASILNYA
+                    // damage yang kena Retinazer selama SplitCombo jadi DOBEL (sekali dari
+                    // vanilla native realLife redirect, sekali lagi dari transfer manual
+                    // kita) - itu penyebab bug "pre-hardmode weapon bisa fast-kill kalau
+                    // yang kena Ret". Health bar jadi keliatan "dobel" lagi sekarang (trade-
+                    // off yang DISENGAJA - kosmetik doang, jauh lebih ringan daripada bug
+                    // damage dobel yang literally bikin fight jadi rusak).
+                    // ==========================================
+
                     if (spazGlobal.ComboSplitActive)
                     {
                         // ==========================================
-                        // JALUR INDEPENDEN (SplitCombo) — SATU-SATUNYA momen di seluruh fight
-                        // Retinazer BENERAN gerak sendiri (bukan nempel ke Spaz). Lihat
-                        // TwinsSplitCombo.cs buat alur lengkap (Separating -> Circling ->
-                        // Regrouping -> Done) dan HandleVulnerability buat gimana damage yang
-                        // kena badan Retinazer di sini "ditransfer" balik ke 1 pool HP milik
-                        // Spazmatism.
+                        // JALUR INDEPENDEN (SplitCombo) — salah satu dari dua momen di seluruh
+                        // fight Retinazer BENERAN gerak sendiri (bukan nempel ke Spaz - yang
+                        // satunya lagi HopVolley di bawah). Lihat TwinsSplitCombo.cs buat alur
+                        // lengkap (Separating -> Circling -> Regrouping -> Done) dan
+                        // HandleVulnerability buat gimana damage yang kena badan Retinazer di
+                        // sini "ditransfer" balik ke 1 pool HP milik Spazmatism.
                         // ==========================================
-                        npc.hide = false; // digambar pakai sprite vanilla-nya sendiri (lihat PreDraw)
+                        // Tetap disembunyikan dari draw vanilla (npc.hide gak berpengaruh ke
+                        // render manual kita, tapi dijaga konsisten true kayak mode normal -
+                        // lihat komentar panjang di PreDraw kenapa Retinazer SELALU digambar
+                        // manual, gak pernah lewat vanilla, buat ngehindarin crash render).
+                        npc.hide = true;
 
-                        Player retTarget = (npc.target >= 0 && npc.target < Main.maxPlayers) ? Main.player[npc.target] : null;
-                        if (retTarget != null && retTarget.active && !retTarget.dead)
-                        {
-                            TwinsSplitCombo.RetinazerTick(npc, spaz, spazGlobal, this, retTarget);
-                        }
-                        // (kalau target-nya somehow gak valid tick ini, Retinazer cukup diem di
-                        // posisi terakhirnya - dispatcher Spazmatism sendiri yang bakal
-                        // ngurus buat cabut dari player mati/gak aktif lewat jalur normalnya)
+                        // Gerak/rotasi/vulnerability sepenuhnya diurus di sini - pattern ini
+                        // murni geometris (ngikutin titik tengah arena), gak butuh data player
+                        // sama sekali (lihat komentar header TwinsSplitCombo.cs).
+                        TwinsSplitCombo.RetinazerTick(npc, spaz, spazGlobal, this);
+                    }
+                    else if (spazGlobal.HopVolleyActive)
+                    {
+                        // ==========================================
+                        // JALUR INDEPENDEN (BorderHopVolley) — momen KEDUA di seluruh fight
+                        // Retinazer beneran gerak sendiri, BEDA dari SplitCombo: gerakannya
+                        // ASINKRON & "tanpa sejajar" (titik hop di-roll independen, gak
+                        // mengikuti formula shared/mirror punya Spaz) - lihat header
+                        // TwinsBorderHopVolley.cs buat alur lengkap.
+                        // ==========================================
+                        npc.hide = true;
+
+                        // Pattern ini NGINCER PLAYER (arah tembak & hadap), beda dari SplitCombo
+                        // yang murni geometris - butuh objek Player live di sini.
+                        Player hopTarget = spaz.target >= 0 && spaz.target < Main.maxPlayers
+                            ? Main.player[spaz.target]
+                            : Main.LocalPlayer;
+
+                        TwinsBorderHopVolley.RetinazerTick(npc, spaz, spazGlobal, this, hopTarget);
                     }
                     else
                     {
@@ -581,9 +803,58 @@ namespace YourModName.Content.NPCs
                 npc.TargetClosest(true);
                 Player target = Main.player[npc.target];
 
+                // ==========================================
+                // SPAWN INTRO — cutscene pembuka SATU KALI doang, dicek PALING DULUAN dari
+                // SEMUA dispatcher lain (bahkan sebelum dawn despawn & Last Stand) - selama
+                // ini aktif, Twins BENERAN gak bisa diserang (dontTakeDamage) DAN gak ngasih
+                // contact damage sama sekali (npc.damage dipaksa 0) ke player, sesuai
+                // request. Lihat TwinsSpawnIntro.cs buat alur lengkap 4 stage-nya.
+                // ==========================================
+                if (!SpawnIntroInitialized)
+                {
+                    SpawnIntroInitialized = true;
+                    TwinsSpawnIntro.Start(this);
+                }
+
+                if (SpawnIntroActive)
+                {
+                    TwinsSpawnIntro.Tick(npc, this, target);
+                    return false;
+                }
+
                 if (!target.active || target.dead)
                 {
-                    npc.velocity.Y += 0.2f; // Kabur ke bawah jika player mati
+                    // FIX BUG "Twin gak despawn pas player mati di tengah Last Stand
+                    // (kejadian paling gampang ke-notice pas lagi state LaserBarrage/Deathray,
+                    // karena durasinya paling lama)": gerbang lama di sini cuma "!LastStandActive"
+                    // doang - jadi SELURUH durasi Last Stand (termasuk 9 attack pattern loop-nya:
+                    // Dash, RetBeam, CursedRain, SpinningCurse, BorderShot, LaserBarrage,
+                    // SplitCombo, EnrageSweep, HopVolley) ikut keblokir despawn-nya, PADAHAL
+                    // yang SEHARUSNYA gak boleh keputus cuma finale-nya doang (DeathAnimation/
+                    // Done - jatuh+ledakan sekali-pakai). Akibatnya kalau player mati SEBELUM
+                    // finale itu mulai, Twin cuma "npc.velocity.Y += 0.2f" pelan SELAMANYA -
+                    // gak pernah beneran active = false.
+                    //
+                    // FIX: gerbang sekarang ngecek finale-nya SECARA SPESIFIK
+                    // (TwinsLastStand.IsInFinale), bukan LastStandActive secara umum.
+                    bool inLastStandFinale = LastStandActive && TwinsLastStand.IsInFinale(this);
+                    if (inLastStandFinale)
+                    {
+                        // Cuma di sini doang despawn tetap diblokir - biarin finale kelar
+                        // sampai kill manual (OnKill/loot) walau player yang ditarget
+                        // kebetulan mati pas animasi ini jalan.
+                        npc.velocity.Y += 0.2f;
+                        return false;
+                    }
+
+                    // SEMUA kasus lain (di luar rotasi normal MAUPUN di tengah salah satu
+                    // attack pattern Last Stand) - despawn INSTAN begitu player-nya mati.
+                    // Dulu pakai TickDawnDespawn (kabur ke atas pelan-pelan, baru beneran
+                    // ilang setelah ~beberapa detik begitu jaraknya cukup jauh) - itu masuk
+                    // akal buat dawn despawn (player-nya masih hidup & nonton Twin kabur),
+                    // tapi gak ada gunanya sama sekali di sini karena gak ada yang masih
+                    // nonton begitu player-nya mati. Request eksplisit: instan.
+                    InstantDespawn(npc);
                     return false;
                 }
 
@@ -614,6 +885,35 @@ namespace YourModName.Content.NPCs
                     : (CurrentPattern == SpazPattern.Dash || CurrentPattern == SpazPattern.BorderShot);
 
                 npc.damage = inHighContactDamagePattern ? ContactDamageDashOrBorderShot : ContactDamageNormal;
+
+                // ==========================================
+                // RULE BARU: "invincible = no contact damage" — kapan pun Twin lagi INVINCIBLE
+                // (npc.dontTakeDamage true - misal pas Phase transition diem/snap, pas kabur
+                // dawn/player-mati, dsb), dia GAK NGASIH contact damage sama sekali, KECUALI
+                // lagi di salah satu dari 7 pattern attack Last Stand (Dash..SplitCombo) -
+                // request eksplisit "kecuali di all pattern Last Stand". TAPI ada pengecualian
+                // BALIK dari pengecualian itu: SELAMA Spectre clone lagi ada/holding
+                // (PhaseTwoSpectresActive ATAU LastStandHoldingForSpectres), TETAP no contact
+                // damage APAPUN kondisinya - termasuk kalau somehow lagi Last Stand juga
+                // ("kecuali pas Spectre muncul dia tetep No Contact damage").
+                //
+                // Dicek di SINI (bukan di npc.damage assignment atasnya) biar gak ganggu
+                // logic dinamis 20/120 di atas sama sekali - ini murni override TERAKHIR yang
+                // nge-nol-in npc.damage kalau kondisinya kena.
+                //
+                // CATATAN: npc.dontTakeDamage yang dibaca di sini adalah nilai HASIL TICK
+                // SEBELUMNYA (belum tentu udah di-update phase/pattern spesifik di bawah pada
+                // tick ini) - sama kayak toleransi "1 tick delay diabaikan" yang udah dipakai
+                // di banyak tempat lain di file ini (misal mirror damage Retinazer), gak
+                // kerasa bedanya di gameplay.
+                // ==========================================
+                bool spectresHolding = PhaseTwoSpectresActive || LastStandHoldingForSpectres;
+                bool inLastStandAttackPattern = LastStandActive && TwinsLastStand.IsCurrentlyAnyAttackPattern(this);
+
+                if (spectresHolding || (npc.dontTakeDamage && !inLastStandAttackPattern))
+                {
+                    npc.damage = 0;
+                }
 
                 // ==========================================
                 // LAST STAND (HP <= 1%) — PRIORITAS PALING TINGGI, motong TOTAL semua
@@ -696,10 +996,15 @@ namespace YourModName.Content.NPCs
                 //   - Selama LaserBarrage aktif, Tick() dipanggil tiap tick. Begitu IsDone()
                 //     true (4 sisi x 20 tembakan kelar), pindah ke SplitCombo dan panggil
                 //     Start().
-                //   - Selama SplitCombo aktif (PATTERN PALING TERAKHIR), Tick() dipanggil tiap
-                //     tick. Begitu IsDone() true (pisah ke border + 3-6x putaran combo + balik
-                //     regroup kelar), pindah BALIK ke Dash dan panggil ResetToHover() biar Dash
-                //     mulai bersih dari State.Hovering - rotasi ulang dari awal lagi.
+                //   - Selama SplitCombo aktif, Tick() dipanggil tiap tick. Begitu IsDone() true
+                //     (pisah ke border + 3-6x putaran combo + balik regroup kelar): KALAU
+                //     IsEnraged true (Phase 3), pindah ke EnrageSweep dulu; kalau belum,
+                //     langsung balik ke Dash kayak biasa (lihat TwinsEnrageSweep.cs).
+                //   - Selama EnrageSweep aktif (PATTERN PALING TERAKHIR, cuma kepakai Phase 3
+                //     ke atas), Tick() dipanggil tiap tick. Begitu IsDone() true (3-6x sweep
+                //     muter+tembak keliling border kelar), pindah BALIK ke Dash dan panggil
+                //     ResetToHover() biar Dash mulai bersih dari State.Hovering - rotasi ulang
+                //     dari awal lagi.
                 //
                 // patternCycleFinished di-set true PERSIS pada tick manapun pattern yang lagi
                 // aktif baru aja nyelesein siklus penuhnya. nextPatternToStart CUMA nyimpen
@@ -770,7 +1075,33 @@ namespace YourModName.Content.NPCs
                         if (TwinsSplitCombo.IsDone(this))
                         {
                             patternCycleFinished = true;
+                            // BARU: kalau udah Enraged (Phase 3), sisipin EnrageSweep dulu
+                            // sebelum balik ke Dash - kalau belum Enraged, tetep langsung ke
+                            // Dash kayak biasa (pattern ini emang khusus Phase 3 ke atas).
+                            nextPatternToStart = IsEnraged ? SpazPattern.EnrageSweep : SpazPattern.Dash;
+                        }
+                        break;
+
+                    case SpazPattern.HopVolley:
+                        TwinsBorderHopVolley.Tick(npc, this, target);
+                        if (TwinsBorderHopVolley.IsDone(this))
+                        {
+                            // BARU: HopVolley SEKARANG penutup rotasi (dulu EnrageSweep) -
+                            // patternCycleFinished dipindah ke sini, lihat komentar blok Phase 2
+                            // check di bawah kenapa flag ini penting (nge-skip Start() pattern
+                            // berikutnya kalau Phase 2 mau trigger PAS di tick yang sama).
+                            patternCycleFinished = true;
                             nextPatternToStart = SpazPattern.Dash;
+                        }
+                        break;
+
+                    case SpazPattern.EnrageSweep:
+                        TwinsEnrageSweep.Tick(npc, this, target);
+                        if (TwinsEnrageSweep.IsDone(this))
+                        {
+                            // BARU: EnrageSweep bukan lagi penutup - lanjut ke HopVolley dulu
+                            // sebelum beneran balik ke Dash (lihat header TwinsBorderHopVolley.cs).
+                            nextPatternToStart = SpazPattern.HopVolley;
                         }
                         break;
                 }
@@ -808,6 +1139,8 @@ namespace YourModName.Content.NPCs
                         case SpazPattern.BorderShot:    TwinsBorderShot.Start(npc, this); break;
                         case SpazPattern.LaserBarrage:  TwinsLaserBarrage.Start(npc, this); break;
                         case SpazPattern.SplitCombo:    TwinsSplitCombo.Start(npc, this); break;
+                        case SpazPattern.EnrageSweep:   TwinsEnrageSweep.Start(npc, this, target); break;
+                        case SpazPattern.HopVolley:     TwinsBorderHopVolley.Start(npc, this, target); break;
                         case SpazPattern.Dash:          TwinDash.ResetToHover(npc); break;
                     }
                 }
@@ -819,12 +1152,14 @@ namespace YourModName.Content.NPCs
         }
 
         // ==========================================
-        // HELPER — DAWN DESPAWN: Twin kabur ke atas layar begitu pagi tiba (Main.dayTime),
-        // lalu beneran despawn TANPA loot/downed-flag sama sekali begitu udah cukup jauh
-        // dari target. Cuma dipanggil dari sisi Spazmatism (leader), Retinazer selalu
-        // ikut ke-nonaktifin manual di sini juga di tick yang sama - BUKAN lewat
-        // checkDead()/OnKill (itu jalur "kalah beneran" yang ngedrop loot), jadi dawn
-        // escape harus lewat npc.active = false polos buat KEDUANYA.
+        // HELPER — DAWN DESPAWN (SEKARANG DIPAKAI JUGA BUAT "PLAYER MATI"): Twin kabur ke atas
+        // layar begitu pagi tiba (Main.dayTime) ATAU begitu target player-nya mati (lihat
+        // pemanggilan di PreAI Spazmatism - dua-duanya numpang fungsi PERSIS SAMA ini), lalu
+        // beneran despawn TANPA loot/downed-flag sama sekali begitu udah cukup jauh dari
+        // target. Cuma dipanggil dari sisi Spazmatism (leader), Retinazer selalu ikut
+        // ke-nonaktifin manual di sini juga di tick yang sama - BUKAN lewat checkDead()/
+        // OnKill (itu jalur "kalah beneran" yang ngedrop loot), jadi despawn ini harus lewat
+        // npc.active = false polos buat KEDUANYA.
         // ==========================================
         private const float DawnFleeAcceleration = 0.15f; // makin lama makin kencang "kabur"-nya
         private const float DawnFleeMaxSpeed = 24f;
@@ -862,6 +1197,26 @@ namespace YourModName.Content.NPCs
         }
 
         // ==========================================
+        // HELPER — INSTANT DESPAWN (dipakai buat "player mati", GANTI TickDawnDespawn di
+        // kasus itu): langsung npc.active = false polos di tick yang sama, TANPA animasi
+        // kabur/delay jarak sama sekali - beda dari TickDawnDespawn (dipakai KHUSUS buat
+        // "kabur pas pagi", sengaja dibikin ada animasi terbang karena player-nya masih
+        // hidup & bisa lihat). Sama kayak TickDawnDespawn: TANPA loot/downed-flag, dan
+        // Retinazer ikut dimatiin manual di tick yang sama juga (bukan lewat checkDead()/
+        // OnKill).
+        // ==========================================
+        private static void InstantDespawn(NPC npc)
+        {
+            npc.active = false;
+
+            int retIndex = NPC.FindFirstNPC(NPCID.Retinazer);
+            if (retIndex != -1)
+                Main.npc[retIndex].active = false;
+
+            npc.netUpdate = true;
+        }
+
+        // ==========================================
         // KEMATIAN — Ret WAJIB mati "resmi" bareng Spaz, bukan sekadar despawn
         // ==========================================
         // OnKill dipanggil vanilla PERSIS pas sebuah NPC resmi kalah (life <= 0 dan sudah
@@ -891,7 +1246,35 @@ namespace YourModName.Content.NPCs
                     ret.HitEffect(0, 10); // efek visual/sound kematian standar
                     ret.checkDead();      // ini yang bikin kill-nya "resmi" (loot, netmessage, downed-flag, dll)
                 }
+
+                // BUGFIX: bersihin particle statics (TwinsDeathExplosionFX/TwinsAmbientFX) di
+                // sini - momen ini "source of truth" satu-satunya buat fight beneran kelar.
+                // Tanpa ini, particle ledakan yang kebetulan belum habis Life-nya pas
+                // npc.checkDead() manual kejadian (TwinsLastStand.TickDeathAnimation) bakal
+                // beku permanen di posisi terakhir dan ke-render lagi pas Twins di-spawn ulang
+                // (glow putih "hantu" nongol sendiri di lokasi kematian sebelumnya). Aman
+                // dipanggil di sini walau cuma lewat instance Spazmatism - kedua static class
+                // gak peduli instance NPC mana yang manggil.
+                TwinsDeathExplosionFX.Clear();
+                TwinsAmbientFX.Clear();
             }
+        }
+
+        // ==========================================
+        // MAP ICON — paksa pakai texture boss head "phase 2" (versi enraged) di map/minimap,
+        // bukan yang default vanilla (phase 1). Vanilla Twins normalnya switch index sendiri
+        // pas Enraged kepicu (NPC_Head_Boss_15->16 buat Retinazer, NPC_Head_Boss_20->21 buat
+        // Spazmatism), tapi rework ini bikin Twins praktis SELALU dianggap "enraged" dari
+        // rework-nya sendiri (lihat IsEnraged dkk di tempat lain), jadi mending paksa fix ke
+        // versi phase 2-nya dari awal - gak perlu nunggu logic switch vanilla yang state-nya
+        // udah gak dipakai/gak relevan lagi di sini.
+        // ==========================================
+        public override void BossHeadSlot(NPC npc, ref int index)
+        {
+            if (npc.type == NPCID.Retinazer)
+                index = 16; // NPC_Head_Boss_16 (Retinazer, phase 2 / enraged)
+            else if (npc.type == NPCID.Spazmatism)
+                index = 21; // NPC_Head_Boss_21 (Spazmatism, phase 2 / enraged)
         }
 
         // ==========================================
@@ -961,10 +1344,14 @@ namespace YourModName.Content.NPCs
             else if (npc.type == NPCID.Retinazer)
             {
                 int spazIndex = NPC.FindFirstNPC(NPCID.Spazmatism);
-                bool comboSplit = spazIndex != -1 && Main.npc[spazIndex].active
-                    && Main.npc[spazIndex].GetGlobalNPC<TwinsReworkOverride>().ComboSplitActive;
+                // BARU: "independentMode" (dulu "comboSplit") SEKARANG juga true selama
+                // HopVolleyActive - dua-duanya sama-sama butuh animasi frame sendiri (bukan
+                // numpang frame Spazmatism), lihat header TwinsBorderHopVolley.cs.
+                bool independentMode = spazIndex != -1 && Main.npc[spazIndex].active
+                    && (Main.npc[spazIndex].GetGlobalNPC<TwinsReworkOverride>().ComboSplitActive
+                        || Main.npc[spazIndex].GetGlobalNPC<TwinsReworkOverride>().HopVolleyActive);
 
-                if (comboSplit)
+                if (independentMode)
                 {
                     // JALUR INDEPENDEN (SplitCombo) — posisi/rotasi UDAH diatur sendiri di PreAI
                     // (TwinsSplitCombo.RetinazerTick), di sini CUMA ngurus animasi frame-nya
@@ -1034,18 +1421,18 @@ namespace YourModName.Content.NPCs
         // ==========================================
         public override bool PreDraw(NPC npc, SpriteBatch spriteBatch, Vector2 screenPos, Color drawColor)
         {
-            // Batalkan render bawaan Retinazer karena digambar manual oleh Spazmatizm - KECUALI
-            // selama SplitCombo, di mana Retinazer beneran ada di posisinya sendiri (bukan
-            // numpuk di atas Spaz lagi) dan WAJIB digambar sendiri pakai draw vanilla biasa
-            // (frame/rotation/spriteDirection udah kita atur sendiri di PreAI/FindFrame -
-            // lihat TwinsSplitCombo.cs & blok comboSplit di FindFrame di atas).
+            // Batalkan render bawaan Retinazer SELALU - baik lagi mode mirror (nempel Spaz)
+            // MAUPUN independen (SplitCombo). Sempat dicoba `return true` (biarin vanilla
+            // gambar sendiri) khusus pas independen, TAPI itu bikin NullReferenceException
+            // nge-crash render NPC di beberapa hook pihak ketiga (Luminance CutsceneManager /
+            // PrimitivePixelationSystem yang numpang di Main.DrawNPCs) - efeknya Retinazer
+            // "hilang" total pas Circling. FIX: Retinazer SELALU digambar manual dari PreDraw
+            // Spazmatism di bawah (blok "A. DRAW RETINAZER"), sekarang di POSISINYA SENDIRI
+            // (ret.Center) kalau lagi independen - bukan lagi diasumsikan numpuk pas di posisi
+            // Spaz - jadi gak perlu nyentuh draw vanilla/hook pihak ketiga sama sekali.
             if (npc.type == NPCID.Retinazer)
             {
-                int spazIndex = NPC.FindFirstNPC(NPCID.Spazmatism);
-                bool comboSplit = spazIndex != -1 && Main.npc[spazIndex].active
-                    && Main.npc[spazIndex].GetGlobalNPC<TwinsReworkOverride>().ComboSplitActive;
-
-                return comboSplit; // true = biarin vanilla gambar sendiri, false = tetap disembunyikan kayak biasa
+                return false;
             }
 
             if (npc.type == NPCID.Spazmatism)
@@ -1078,21 +1465,29 @@ namespace YourModName.Content.NPCs
                     DrawLaserBarrageAimLine(spriteBatch, npc, screenPos);
                 }
 
-                // --- LAST STAND: garis "Deathray" yang muter terus-menerus (CW -> transisi
-                // -> CCW) - SELALU solid & ngedamage selama fase ini aktif, gak ada
-                // telegraph/fade sama sekali (gerakan muternya sendiri yang jadi warning).
-                // Bentuknya "V" (kecil di ujung muka, MELEBAR seiring jauh - lihat
-                // DrawDeathrayCone), dan titik awalnya BUKAN npc.Center persis, tapi digeser
-                // maju ke ujung sprite (npc.width * 0.5) biar keliatan keluar dari muka. ---
+                // --- LAST STAND: garis "Deathray" — SEKARANG digambar DI SINI, SEBELUM
+                // sprite Retinazer (A) & Spazmatism (B) di bawah, biar beam-nya kegambar
+                // DI BELAKANG Twins (ketutup sebagian sama sprite opaque-nya), bukan numpuk
+                // di atasnya. Ini KEBALIKAN dari alasan lama (dulu ditaruh SETELAH sprite
+                // Twin buat ngehindarin bug matriks proyeksi yang bikin beam-nya salah
+                // posisi/skala - itu udah dibenerin di DrawTaperedQuad, jadi sekarang aman
+                // ditaruh di layer manapun sesuai kebutuhan visual, bukan buat workaround
+                // bug lagi). Muzzle-nya SEKARANG pakai BeamMuzzleOffset (sama titik kayak
+                // Glow "+"/beam lain, lihat definisinya di dekat EyeGlowMuzzleOffset) -
+                // GANTI dari npc.width*0.5f lama yang bikin tiap jenis beam punya titik
+                // moncong beda-beda sendiri.
                 if (LastStandDeathrayActive)
                 {
                     Vector2 deathrayDirection = LastStandDeathrayAngle.ToRotationVector2();
-                    Vector2 deathrayMuzzle = npc.Center + deathrayDirection * (npc.width * 0.5f);
+                    Vector2 deathrayMuzzle = npc.Center + deathrayDirection * BeamMuzzleOffset;
 
                     // Pass glow (lebih lebar & transparan) dulu, baru core (lebih sempit &
                     // pekat) di atasnya - sama filosofi 2-pass kayak beam lain di codebase ini.
-                    DrawDeathrayCone(spriteBatch, deathrayMuzzle, deathrayDirection, screenPos, 2600f, 20f, 160f, new Color(255, 60, 40), 0.45f);
-                    DrawDeathrayCone(spriteBatch, deathrayMuzzle, deathrayDirection, screenPos, 2600f, 12f, 100f, new Color(255, 20, 20), 1f);
+                    // Start thickness core dinaikin ke 32px (2 block, 16px/block) - outer/bloom
+                    // pass ikut disesuaikan proporsinya biar tetep kebaca sebagai halo, bukan
+                    // ketiban core.
+                    DrawDeathrayCone(spriteBatch, deathrayMuzzle, deathrayDirection, screenPos, 2600f, 45f, 160f, new Color(255, 60, 40), 0.45f);
+                    DrawDeathrayCone(spriteBatch, deathrayMuzzle, deathrayDirection, screenPos, 2600f, 32f, 120f, new Color(255, 20, 20), 1f);
                 }
 
                 // --- EYE LASER FLASH digambar di PALING AKHIR, lihat komentar di bawah
@@ -1102,7 +1497,7 @@ namespace YourModName.Content.NPCs
                 // --- AFTER-IMAGE TRAIL SPAZMATISM (digambar di bawah sprite utama, selalu tampil) ---
                 if (Trail.Count > 0)
                 {
-                    DrawAfterimageTrail(spriteBatch, TextureAssets.Npc[NPCID.Spazmatism].Value, Trail, npc.scale, screenPos);
+                    DrawAfterimageTrail(spriteBatch, TextureAssets.Npc[NPCID.Spazmatism].Value, Trail, npc.scale, screenPos, SpazmatismAfterimageColor);
                 }
 
                 // Spazmatism digeser dikit ke belakang (lawan arah hadap) biar keliatan
@@ -1130,12 +1525,34 @@ namespace YourModName.Content.NPCs
                     }
                 }
 
+                // ==========================================
+                // VISUAL UPGRADE — rim-light energy outline di sprite Twins. Trik "8-sample
+                // additive offset" (draw sprite yang SAMA 8x di sekeliling posisi asli, tiap
+                // sample geser dikit + additive tint transparan) - numpuk jadi glow outline
+                // yang ngikutin SILUET sprite persis (bukan bounding box kotak), tanpa perlu
+                // shader/texture tambahan sama sekali. Intensitasnya NAIK pas Enraged/Last
+                // Stand aktif, biar makin "menyala" di momen yang emang udah lebih intens -
+                // TAPI ini PURE VISUAL, gak nyentuh timing/logic pattern apapun.
+                // ==========================================
+                float rimIntensity = 0.55f;
+                if (IsEnraged) rimIntensity += 0.5f;
+                if (LastStandDeathrayActive) rimIntensity += 0.35f;
+
                 // --- A. DRAW RETINAZER DI LAYER BAWAH ---
                 int retIndex = NPC.FindFirstNPC(NPCID.Retinazer);
                 if (retIndex != -1)
                 {
                     NPC ret = Main.npc[retIndex];
                     Texture2D retTexture = TextureAssets.Npc[NPCID.Retinazer].Value;
+
+                    // FIX BUG "Ret hilang": posisi gambar Retinazer SEKARANG diambil dari
+                    // ret.Center SENDIRI (bukan drawPos, yang itu punya Spazmatism) - di mode
+                    // mirror normal dua-duanya toh SAMA PERSIS (ret.Center == spaz.Center),
+                    // jadi ini aman dipakai di KEDUA mode tanpa perlu percabangan apa pun.
+                    // Selama SplitCombo independen, ret.Center beneran posisinya sendiri
+                    // (jauh dari Spaz) - draw manual di sini yang bikin dia kegambar BENAR di
+                    // posisi itu, tanpa nyentuh draw vanilla/hook pihak ketiga sama sekali.
+                    Vector2 retDrawPos = ret.Center - screenPos;
 
                     // After-image Retinazer sendiri — PLEK KETIPLEK kayak punya Spazmatism,
                     // cuma sumber datanya Trail milik INSTANCE Retinazer (bukan "this", yang
@@ -1144,7 +1561,7 @@ namespace YourModName.Content.NPCs
                     TwinsReworkOverride retGlobal = ret.GetGlobalNPC<TwinsReworkOverride>();
                     if (retGlobal.Trail.Count > 0)
                     {
-                        DrawAfterimageTrail(spriteBatch, retTexture, retGlobal.Trail, ret.scale, screenPos);
+                        DrawAfterimageTrail(spriteBatch, retTexture, retGlobal.Trail, ret.scale, screenPos, RetinazerAfterimageColor);
                     }
 
                     // 1. Base sprite Retinazer, kena lighting normal (bukan full-bright lagi).
@@ -1153,9 +1570,13 @@ namespace YourModName.Content.NPCs
                     // digambar SEMI-TRANSPARENT (lihat TwinsPhaseTransition.OriginalTwinAlpha).
                     float originalAlpha = (PhaseTwoSpectresActive || LastStandHoldingForSpectres) ? TwinsPhaseTransition.OriginalTwinAlpha : 1f;
                     Color retLitColor = Lighting.GetColor(ret.Center.ToTileCoordinates()) * ret.Opacity * originalAlpha;
+
+                    // Rim glow Retinazer - merah-oranye, senada sama tema mata/laser-nya.
+                    DrawRimGlow(spriteBatch, retTexture, ret.frame, retDrawPos, ret.rotation, drawOrigin, ret.scale, effects, new Color(255, 70, 40), rimIntensity * ret.Opacity * originalAlpha);
+
                     spriteBatch.Draw(
                         retTexture,
-                        drawPos,
+                        retDrawPos,
                         ret.frame,
                         retLitColor,
                         ret.rotation,
@@ -1170,7 +1591,7 @@ namespace YourModName.Content.NPCs
                     {
                         spriteBatch.Draw(
                             RetinazerGlowTexture.Value,
-                            drawPos,
+                            retDrawPos,
                             ret.frame,
                             Color.White * ret.Opacity * originalAlpha,
                             ret.rotation,
@@ -1187,6 +1608,10 @@ namespace YourModName.Content.NPCs
                 // ATAU LastStandHoldingForSpectres.
                 Texture2D spazTexture = TextureAssets.Npc[NPCID.Spazmatism].Value;
                 Color spazDrawColor = (PhaseTwoSpectresActive || LastStandHoldingForSpectres) ? drawColor * TwinsPhaseTransition.OriginalTwinAlpha : drawColor;
+
+                // Rim glow Spazmatism - hijau-lime, senada sama tema after-image trail-nya.
+                DrawRimGlow(spriteBatch, spazTexture, npc.frame, spazDrawPos, npc.rotation, drawOrigin, npc.scale, effects, new Color(90, 255, 100), rimIntensity * npc.Opacity * ((PhaseTwoSpectresActive || LastStandHoldingForSpectres) ? TwinsPhaseTransition.OriginalTwinAlpha : 1f));
+
                 spriteBatch.Draw(
                     spazTexture,
                     spazDrawPos,
@@ -1198,6 +1623,17 @@ namespace YourModName.Content.NPCs
                     effects,
                     0f
                 );
+
+                // --- VISUAL UPGRADE: ambient energy sparks (lihat TwinsAmbientFX.cs) -
+                // digambar SETELAH kedua sprite Twin biar sparks-nya numpuk DI ATAS badan
+                // (efek "berenergi"), tapi SEBELUM Eye Laser Flash (itu emang harus paling
+                // akhir, lihat komentar di bawah).
+                TwinsAmbientFX.DrawSparks(spriteBatch, screenPos);
+
+                // --- VISUAL UPGRADE: ledakan death animation Last Stand (lihat
+                // TwinsDeathExplosionFX.cs) - sama alasannya kayak sparks di atas, digambar
+                // manual dari sini karena PreDraw Twins return false. ---
+                TwinsDeathExplosionFX.DrawExplosions(spriteBatch, screenPos);
 
                 // --- EYE LASER FLASH (glow merah di depan wajah Retinazer) ---
                 // PENTING: ini HARUS digambar PALING TERAKHIR, SETELAH sprite Retinazer (A)
@@ -1236,7 +1672,7 @@ namespace YourModName.Content.NPCs
             float flicker = 0.75f + 0.25f * (float)Math.Sin(Main.GameUpdateCount * 0.9f);
             float alpha = MathHelper.Lerp(0.35f, 1f, progress) * flicker;
 
-            DrawAimLine(spriteBatch, npc, screenPos, TelegraphDirection, new Color(150, 255, 120), alpha);
+            DrawAimLine(spriteBatch, npc.Center + TelegraphDirection * BeamMuzzleOffset, screenPos, TelegraphDirection, new Color(150, 255, 120), alpha);
         }
 
         // ==========================================
@@ -1251,15 +1687,20 @@ namespace YourModName.Content.NPCs
             float flicker = 0.75f + 0.25f * (float)Math.Sin(Main.GameUpdateCount * 0.9f);
             float alpha = MathHelper.Lerp(0.35f, 1f, progress) * flicker;
 
-            DrawAimLine(spriteBatch, npc, screenPos, RetBeamAimDirection, new Color(255, 40, 40), alpha);
+            // Muzzle DIHITUNG SEKALI dari arah TENGAH (RetBeamAimDirection) - dipakai bareng
+            // buat ketiga garis (tengah + 2 sisi W-pattern), jadi ketiganya beneran nongol
+            // dari titik yang SAMA PERSIS di ujung moncong, bukan 3 titik beda di busur.
+            Vector2 muzzleWorld = npc.Center + RetBeamAimDirection * BeamMuzzleOffset;
+
+            DrawAimLine(spriteBatch, muzzleWorld, screenPos, RetBeamAimDirection, new Color(255, 40, 40), alpha);
 
             // ---- ENRAGED: 2 garis tambahan kanan-kiri, bentuk "W" - titik awal SAMA, tapi
             // nyebar keluar. Sisi kanan/kiri cuma NGIKUTIN arah tengah (di-rotate offset tetap),
             // gak punya prediksi sendiri.
             if (IsEnraged)
             {
-                DrawAimLine(spriteBatch, npc, screenPos, RetBeamAimDirection.RotatedBy(TwinsRetBeam.SideSpreadAngle), new Color(255, 40, 40), alpha);
-                DrawAimLine(spriteBatch, npc, screenPos, RetBeamAimDirection.RotatedBy(-TwinsRetBeam.SideSpreadAngle), new Color(255, 40, 40), alpha);
+                DrawAimLine(spriteBatch, muzzleWorld, screenPos, RetBeamAimDirection.RotatedBy(TwinsRetBeam.SideSpreadAngle), new Color(255, 40, 40), alpha);
+                DrawAimLine(spriteBatch, muzzleWorld, screenPos, RetBeamAimDirection.RotatedBy(-TwinsRetBeam.SideSpreadAngle), new Color(255, 40, 40), alpha);
             }
         }
 
@@ -1268,13 +1709,15 @@ namespace YourModName.Content.NPCs
         // ==========================================
         private void DrawRetBeamFullBeamLine(SpriteBatch spriteBatch, NPC npc, Vector2 screenPos)
         {
-            DrawAimLine(spriteBatch, npc, screenPos, RetBeamAimDirection, new Color(255, 10, 10), 1f);
+            Vector2 muzzleWorld = npc.Center + RetBeamAimDirection * BeamMuzzleOffset;
+
+            DrawAimLine(spriteBatch, muzzleWorld, screenPos, RetBeamAimDirection, new Color(255, 10, 10), 1f);
 
             // ---- ENRAGED: sisi kanan-kiri juga jadi full beam solid bareng yang tengah ----
             if (IsEnraged)
             {
-                DrawAimLine(spriteBatch, npc, screenPos, RetBeamAimDirection.RotatedBy(TwinsRetBeam.SideSpreadAngle), new Color(255, 10, 10), 1f);
-                DrawAimLine(spriteBatch, npc, screenPos, RetBeamAimDirection.RotatedBy(-TwinsRetBeam.SideSpreadAngle), new Color(255, 10, 10), 1f);
+                DrawAimLine(spriteBatch, muzzleWorld, screenPos, RetBeamAimDirection.RotatedBy(TwinsRetBeam.SideSpreadAngle), new Color(255, 10, 10), 1f);
+                DrawAimLine(spriteBatch, muzzleWorld, screenPos, RetBeamAimDirection.RotatedBy(-TwinsRetBeam.SideSpreadAngle), new Color(255, 10, 10), 1f);
             }
         }
 
@@ -1291,7 +1734,7 @@ namespace YourModName.Content.NPCs
             float flicker = 0.75f + 0.25f * (float)Math.Sin(Main.GameUpdateCount * 0.9f);
             float alpha = MathHelper.Lerp(0.35f, 1f, progress) * flicker;
 
-            DrawAimLine(spriteBatch, npc, screenPos, LaserBarrageAimDirection, new Color(255, 40, 40), alpha);
+            DrawAimLine(spriteBatch, npc.Center + LaserBarrageAimDirection * BeamMuzzleOffset, screenPos, LaserBarrageAimDirection, new Color(255, 40, 40), alpha);
         }
 
         // ==========================================
@@ -1302,13 +1745,20 @@ namespace YourModName.Content.NPCs
         // hadap DAN kecepatan gerak Twins kapan pun frame ini digambar, gak peduli NPC-nya
         // lagi diem atau lagi ngebut (Reposition, dash, dll).
         //
-        // Sprite-nya numpang tekstur VANILLA "Rainbow" (EyeFlashStarTexture, dari proyektil
-        // Rainbow Rod - lihat komentar di deklarasi field-nya) - starburst putih polos,
-        // gampang di-tint. Digambar 2 LAPIS biar berasa lebih "nge-bloom" (sebelumnya cuma
-        // 1 lapis flat, makanya kerasa kurang nendang):
-        //   - OUTER: lebih besar & lebih transparan, warna merah-oranye - badan glow yang lembut.
-        //   - CORE  : lebih kecil & lebih terang/opaque, warna hampir putih-kemerahan - titik
-        //             panas di tengah, ini yang bikin efeknya kerasa "menyala" bukan cuma tempel.
+        // Bentuknya "+" - sprite ShineFlareTexture dari Luminance.Assets.MiscTexturesRegistry
+        // (putih polos, di-tint pas draw), digambar SATU KALI utuh per lapis (bukan disusun
+        // dari beberapa lengan/noise scroll lagi - itu percobaan sebelumnya, ternyata
+        // kegedean/kurang kebaca pas dipakai attack yang spam 20x/sisi) - GANTI TOTAL dari
+        // sprite starburst VANILLA "Rainbow" (Rainbow Rod, ProjectileID.RainbowRodBullet)
+        // yang dipakai sebelumnya (sempet ganti ke sprite custom sendiri, TwinsPlusGlow.png,
+        // sebelum akhirnya dipindah ke asset Luminance biar gak perlu nyimpen/maintain
+        // texture "+" sendiri). Lihat DrawEyeLaserFlash di bawah buat detail drawing-nya.
+        // Digambar 2 LAPIS biar berasa lebih "nge-bloom":
+        //   - OUTER: lebih besar & lebih transparan, warna merah-oranye - badan glow yang
+        //     lembut.
+        //   - CORE  : lebih kecil & lebih terang/opaque, warna hampir putih-kemerahan -
+        //     titik panas di tengah, ini yang bikin efeknya kerasa "menyala" bukan cuma
+        //     tempel.
         //
         // DUA MODE ANIMASI (parameter continuous):
         //   - continuous = true  -> dipakai SELAMA RetBeam-nya nge-beam (Aiming/FullBeam).
@@ -1320,13 +1770,24 @@ namespace YourModName.Content.NPCs
         //     tick pertama) lalu mengecil+pudar (ease-in) sampai abis di EyeFlashDuration -
         //     dipakai buat tembakan sesaat (BorderShot/LaserBarrage).
         //
-        // FALLBACK: kalau EyeFlashStarTexture gagal load (null), balik ke starburst manual
-        // 8-spoke pakai Luminance.Common.Utilities.Utilities.DrawBloomLine (fungsi ASLI
-        // Luminance), 2 lapis juga (outer+core) biar tetap konsisten kuat/lemahnya.
+        // GAK ADA fallback lagi di sini (dulu ada starburst manual 8-spoke pakai DrawBloomLine
+        // buat jaga-jaga kalau TwinsPlusGlow.png gagal load) - karena ShineFlareTexture dari
+        // Luminance itu LazyAsset yang loading-nya dijamin Luminance sendiri, dan Luminance
+        // emang udah hard dependency mod ini.
         // ==========================================
         private const int EyeFlashGrowTicks = 4;           // ~0.07 detik naik cepat ke ukuran puncak (mode PULSE)
-        private const float EyeFlashPeakWorldSize = 100f;  // diameter dunia (px) inti glow pas puncak - diperbesar dari 64
+        private const float EyeFlashPeakWorldSize = 115f;  // diameter dunia (px) inti glow pas puncak - dinaikin 15% dari 100
         private const float EyeGlowMuzzleOffset = 95f;     // jarak dari Center NPC ke arah depan wajah Retinazer
+
+        // Titik muncul BERSAMA buat SEMUA jenis laser beam (Deathray, RetBeam, Telegraph,
+        // LaserBarrage tembakan & beam-nya) - PUBLIC biar bisa dipake file lain
+        // (TwinsLastStand.cs, TwinsLaserBarrage.cs) juga, jadi cuma ada SATU angka sumber
+        // kebenaran buat titik moncong, gak kececer beda-beda tiap file kayak sebelumnya
+        // (ada yang npc.width*0.5f, ada yang direction*30f, ada yang malah 0/pas di
+        // Center). Sengaja diitung RELATIF ke EyeGlowMuzzleOffset (posisi Glow "+") dikurangi
+        // 1 block (16px) - biar beam nongol PAS di ujung moncong, sedikit DI BELAKANG
+        // Glow-nya (bukan numpuk persis atau malah nongol di depan Glow).
+        public const float BeamMuzzleOffset = EyeGlowMuzzleOffset - 16f;
 
         private void DrawEyeLaserFlash(SpriteBatch spriteBatch, NPC npc, Vector2 screenPos, bool continuous)
         {
@@ -1369,36 +1830,404 @@ namespace YourModName.Content.NPCs
                 coreWorldSize = EyeFlashPeakWorldSize * pulseProgress;
             }
 
-            Color outerColor = new Color(255, 45, 25) * (alpha * 0.65f);
-            Color coreColor = new Color(255, 190, 150) * alpha;
+            Color outerColor = new Color(255, 45, 25) * (alpha * 0.85f); // opacity dinaikin dari 0.65, biar merahnya lebih "tebel"
+            Color coreColor = new Color(255, 130, 100) * alpha;         // digeser dari (255,190,150) yg kepucetan, sekarang lebih merah
             float outerWorldSize = coreWorldSize * 1.7f;
 
             spriteBatch.End();
             spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
 
-            if (EyeFlashStarTexture != null)
-            {
-                Texture2D starTexture = EyeFlashStarTexture.Value;
-                Vector2 origin = new Vector2(starTexture.Width * 0.5f, starTexture.Height * 0.5f);
+            Texture2D plusTexture = PlusGlowTexture;
+            Vector2 origin = new Vector2(plusTexture.Width * 0.5f, plusTexture.Height * 0.5f);
 
-                // OUTER - badan glow lembut, lebih besar & transparan.
-                spriteBatch.Draw(starTexture, center, null, outerColor, 0f, origin, outerWorldSize / starTexture.Width, SpriteEffects.None, 0f);
-                // CORE - titik panas di tengah, lebih kecil & terang.
-                spriteBatch.Draw(starTexture, center, null, coreColor, 0f, origin, coreWorldSize / starTexture.Width, SpriteEffects.None, 0f);
+            // OUTER - badan glow lembut, lebih besar & transparan.
+            spriteBatch.Draw(plusTexture, center, null, outerColor, 0f, origin, outerWorldSize / plusTexture.Width, SpriteEffects.None, 0f);
+            // CORE - titik panas di tengah, lebih kecil & terang.
+            spriteBatch.Draw(plusTexture, center, null, coreColor, 0f, origin, coreWorldSize / plusTexture.Width, SpriteEffects.None, 0f);
+
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+        }
+
+        // ==========================================
+        // PLUS-GLOW TEXTURE — sekarang PAKAI ASSET BAWAAN LUMINANCE (ShineFlareTexture,
+        // di Luminance.Assets.MiscTexturesRegistry) - GANTI dari sprite custom kita sendiri
+        // (TwinsPlusGlow.png) yang sebelumnya harus ditambahin manual ke project. Karena
+        // mod ini sudah hard-dependency ke Luminance (lihat using Luminance.Common.Utilities
+        // & Luminance.Assets di atas), gak perlu lagi bikin/nyimpen asset "+" sendiri -
+        // tinggal numpang punya Luminance, bentuknya emang persis silang "+" 4-arah,
+        // putih polos dengan tepi lembut nge-blur (jadi gampang di-tint warna apapun pas
+        // draw, sama kayak alasan TwinsPlusGlow.png dulu).
+        //
+        // Loading-nya SUDAH otomatis di-handle Luminance sendiri lewat LazyAsset<Texture2D>
+        // (deferred load, gak perlu ModContent.Request/try-catch manual lagi di
+        // SetStaticDefaults kayak sebelumnya) - makanya gak ada lagi null-check/fallback
+        // starburst manual di DrawEyeLaserFlash, karena texture ini gak akan pernah null
+        // selama Luminance ke-load (yang emang WAJIB, karena ini hard dependency).
+        //
+        // DIBUTUHKAN: modReferences = Luminance di build.txt (harusnya udah ada, karena
+        // Luminance.Common.Utilities.Utilities.DrawBloomLine juga dipakai di file ini).
+        // ==========================================
+        private static Texture2D PlusGlowTexture => MiscTexturesRegistry.ShineFlareTexture.Value;
+
+        // ==========================================
+        // NOISE PLASMA TEXTURE — request "beam-nya jangan garis polos, kasih sprite noise
+        // yang tetep merah". TwinsBeamNoise.png adalah texture procedural (256x64, TILEABLE
+        // horizontal secara sempurna) berisi turbulensi merah-ke-jingga yang di-generate
+        // sekali di luar game (bukan runtime), disimpan sebagai asset biasa persis kayak
+        // RedBeamBottom/Middle/Top. Diminta lewat ModContent.Request sama kayak texture beam
+        // lain di file ini/TwinsCursedBeam.cs, gak di-cache manual biar konsisten gaya sama
+        // kode existing (asset loader tModLoader sendiri udah cache internal, jadi request
+        // berulang tiap frame murah).
+        //
+        // PATH ASSET YANG DIBUTUHKAN (WAJIB ditambahin ke project, lihat pesan penjelasan):
+        //   TheSanity/GlobalNPC/Bosses/Twins/TwinsBeamNoise.png
+        // ==========================================
+        private static Texture2D BeamNoiseTexture => ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Bosses/TheTwins/TwinsBeamNoise").Value;
+
+        // ==========================================
+        // HELPER — satu "pita plasma": nge-draw BeamNoiseTexture yang di-SCROLL terus
+        // sepanjang waktu (scrollSpeedTexelsPerTick) buat efek energi ngalir/crackling,
+        // GANTI dari rectangle MagicPixel rata polos. sourceRect.Width sengaja dikasih
+        // SEPANJANG beam (bisa jauh lebih lebar dari texture aslinya yang cuma 256px) -
+        // karena spritebatch-nya di-Begin() pakai SamplerState.LinearWrap (bukan Clamp),
+        // GPU otomatis NGE-TILE texture itu berulang-ulang buat nutupin seluruh sourceRect,
+        // jadi cukup SATU draw call per lapis buat nutupin seluruh panjang beam, gak perlu
+        // loop banyak sprite kayak teknik tiling manual biasa.
+        // ==========================================
+        private void DrawNoisePlasmaStrip(SpriteBatch spriteBatch, Vector2 startScreen, float rotation, float length, float thickness, Color tint, float scrollSpeedTexelsPerTick, float scrollSeedOffset)
+        {
+            Texture2D noiseTex = BeamNoiseTexture;
+            if (noiseTex == null || length <= 0f || thickness <= 0f)
+                return;
+
+            int scrollX = (int)(Main.GameUpdateCount * scrollSpeedTexelsPerTick + scrollSeedOffset);
+
+            Rectangle sourceRect = new Rectangle(scrollX, 0, (int)length, noiseTex.Height);
+            Vector2 originInSourceSpace = new Vector2(0f, noiseTex.Height * 0.5f);
+            Vector2 scale = new Vector2(1f, thickness / noiseTex.Height);
+
+            spriteBatch.Draw(noiseTex, startScreen, sourceRect, tint, rotation, originInSourceSpace, scale, SpriteEffects.None, 0f);
+        }
+
+        // ==========================================
+        // HELPER GENERIC — gambar garis lurus (dipakai telegraph dash hijau & RetBeam merah).
+        // Pakai overload Draw dengan Rectangle TUJUAN langsung supaya ukuran akhirnya PASTI
+        // persis sekian pixel, gak peduli ukuran asli tekstur MagicPixel-nya.
+        //
+        // UPDATE (request "biar gak polos, kasih sprite noise"): sekarang badan garisnya
+        // BUKAN rectangle MagicPixel rata lagi - ada 2 LAPIS TwinsBeamNoise yang scroll
+        // berlawanan arah (efek turbulensi, bukan cuma geser rata 1 arah): lapis "body"
+        // (lebih lebar, warna dasar) & lapis "core" (lebih tipis, lebih terang, scroll lebih
+        // cepat & arah kebalik) buat kesan energi crackling/ngalir. Plus lapisan BLOOM
+        // additive (dari update sebelumnya) tetap dipertahankan sebagai ambient glow di
+        // belakang semuanya. Satu garis SOLID tipis di paling atas dipertahankan (bukan
+        // noise) murni buat KEJELASAN GAMEPLAY - biar trajectory beam tetap 100% jelas
+        // dibaca/di-dodge walau plasma-nya lagi flicker.
+        // ==========================================
+        private void DrawAimLine(SpriteBatch spriteBatch, Vector2 muzzleWorld, Vector2 screenPos, Vector2 direction, Color baseColor, float alpha)
+        {
+            // Muzzle-nya SEKARANG di-pass eksplisit dari caller (bukan dihitung sendiri dari
+            // npc.Center + direction*BeamMuzzleOffset lagi) - biar caller yang punya BEBERAPA
+            // garis sekaligus (RetBeam W-pattern) bisa nyuruh SEMUA garis pakai titik awal
+            // yang SAMA PERSIS, walau arahnya beda-beda (lihat DrawRetBeamAimLine/
+            // DrawRetBeamFullBeamLine - dulu 3 garis itu masing-masing hitung muzzle sendiri
+            // dari arahnya sendiri, hasilnya 3 titik beda tersebar di busur radius
+            // BeamMuzzleOffset, BUKAN 1 titik yang sama - makanya garis kanan/kiri keliatan
+            // gak nongol pas di ujung moncong).
+            Vector2 start = muzzleWorld - screenPos;
+            const float LineLength = 2600f; // cukup panjang biar nembus ujung layar manapun
+
+            const int PlasmaBodyThickness = 20;
+            const int PlasmaCoreThickness = 9;
+            const int SolidCoreThickness = 3; // garis crisp tipis, murni buat kejelasan gameplay
+
+            float rotation = direction.ToRotation();
+
+            Texture2D pixel = TextureAssets.MagicPixel.Value;
+            Rectangle pixelSourceRect = new Rectangle(0, 0, pixel.Width, pixel.Height);
+            Vector2 pixelOrigin = new Vector2(0f, pixel.Height * 0.5f);
+
+            // --- BLOOM (ADDITIVE, ~5 block nyebar di sekitar garis) ---
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+            DrawBloomAroundLine(spriteBatch, start, rotation, LineLength, baseColor, alpha);
+
+            // --- PLASMA (noise texture, ADDITIVE + SamplerState WRAP biar bisa tiling) ---
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, SamplerState.LinearWrap, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+            Color plasmaBodyTint = baseColor * (alpha * 0.85f);
+            Color plasmaCoreTint = Color.Lerp(baseColor, Color.White, 0.35f) * alpha;
+            DrawNoisePlasmaStrip(spriteBatch, start, rotation, LineLength, PlasmaBodyThickness, plasmaBodyTint, 0.9f, 0f);
+            DrawNoisePlasmaStrip(spriteBatch, start, rotation, LineLength, PlasmaCoreThickness, plasmaCoreTint, -1.6f, 400f);
+
+            // --- SOLID CORE (crisp, tipis, murni buat kejelasan gameplay) ---
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+            Color coreColor = Color.Lerp(baseColor, Color.White, 0.2f) * alpha;
+            Rectangle coreDest = new Rectangle((int)start.X, (int)start.Y, (int)LineLength, SolidCoreThickness);
+            spriteBatch.Draw(pixel, coreDest, pixelSourceRect, coreColor, rotation, pixelOrigin, SpriteEffects.None, 0f);
+        }
+
+        // ==========================================
+        // BEAM GLOW TEXTURE — TwinsBeamGlow.png: gradient vertikal LEMBUT (putih, alpha
+        // gaussian dari terang di tengah ke transparan penuh di tepi atas/bawah), lebarnya
+        // trivial (8px, isinya SAMA di tiap kolom) jadi otomatis tileable sempurna tanpa
+        // perlu wrap sampler - tinggal di-stretch aja horizontal, hasilnya identik kayak
+        // di-tile. Dipakai GANTI tumpukan rectangle MagicPixel di bloom (yang sebelumnya
+        // keliatan "koak"/ada tembok tegas antar lapis) - satu texture per-pixel gradient
+        // kayak gini otomatis smooth 100%, gak ada step sama sekali.
+        //
+        // PATH ASSET YANG DIBUTUHKAN (WAJIB ditambahin, lihat pesan penjelasan):
+        //   TheSanity/GlobalNPC/Bosses/Twins/TwinsBeamGlow.png
+        // ==========================================
+        private static Texture2D BeamGlowTexture => ModContent.Request<Texture2D>("TheSanity/GlobalNPC/Bosses/TheTwins/TwinsBeamGlow").Value;
+
+        // ==========================================
+        // HELPER — lapisan bloom buat DrawAimLine. GANTI TOTAL dari versi lama (4 rectangle
+        // MagicPixel ditumpuk, makin luar makin lebar & transparan - makanya keliatan "koak",
+        // soalnya tiap rectangle punya TEPI TEGAS sendiri-sendiri, bukan gradasi kontinu).
+        // Sekarang cuma 2 draw call pakai TwinsBeamGlow (gradient per-pixel beneran) - lapis
+        // luar lebar+samar buat ambient light, lapis dalam sempit+terang buat numpuk lebih
+        // pekat deket garis. Dua-duanya sama-sama SMOOTH (gak ada tepi tegas), jadi walau
+        // ditumpuk tetep gak keliatan sambungan/step sama sekali.
+        // ==========================================
+        private void DrawBloomAroundLine(SpriteBatch spriteBatch, Vector2 startScreen, float rotation, float length, Color glowColor, float alpha)
+        {
+            Texture2D glowTex = BeamGlowTexture;
+            if (glowTex == null || length <= 0f)
+                return;
+
+            Rectangle sourceRect = new Rectangle(0, 0, glowTex.Width, glowTex.Height);
+            Vector2 originInSourceSpace = new Vector2(0f, glowTex.Height * 0.5f);
+
+            // Lapis luar: lebar (~5 block/80px), samar - ambient light dasar, fade-nya
+            // udah kebawa dari gradient texture-nya sendiri, bukan dari alpha step manual.
+            Vector2 outerScale = new Vector2(length / glowTex.Width, 80f / glowTex.Height);
+            spriteBatch.Draw(glowTex, startScreen, sourceRect, glowColor * (alpha * 0.5f), rotation, originInSourceSpace, outerScale, SpriteEffects.None, 0f);
+
+            // Lapis dalam: lebih sempit & lebih terang - numpuk (additive) jadi lebih pekat
+            // persis di sekitar badan garis, gradiennya tetep mulus juga.
+            Vector2 innerScale = new Vector2(length / glowTex.Width, 32f / glowTex.Height);
+            spriteBatch.Draw(glowTex, startScreen, sourceRect, glowColor * (alpha * 0.8f), rotation, originInSourceSpace, innerScale, SpriteEffects.None, 0f);
+        }
+
+        // ==========================================
+        // FIX v3 (request: "laser di Last Stand ngga stabil/nggak pas di tengah - posisi
+        // kanan melenceng ke bawah, posisi kiri melenceng ke atas"):
+        //
+        // FIX v2 (BasicEffect + DrawUserPrimitives, matrix View/Projection dihitung manual
+        // sendiri lewat GetDeathrayBeamEffect/ApplyDeathrayScreenSpaceMatrices/
+        // DrawTaperedQuadPrimitive - SUDAH DIHAPUS SEMUA) emang berhasil bikin taper-nya
+        // mulus (1 quad trapesium, 2 vertex interpolasi GPU), TAPI proyeksi ortografik yang
+        // dihitung manual di situ ternyata TIDAK 100% identik sama proyeksi internal yang
+        // dipakai SpriteBatch sendiri - selisihnya kecil banget deket tengah layar, tapi
+        // MEMBESAR (nge-skew) makin jauh dari titik tengah, PERSIS gejala yang dilaporin
+        // (kanan->bawah, kiri->atas - itu tanda-tanda rotasi/skew yang salah proporsi
+        // terhadap jarak dari pusat, bukan cuma geser rata konstan).
+        //
+        // GAK ADA CARA AMAN buat mastiin proyeksi manual itu 100% identik sama punya
+        // SpriteBatch tanpa bisa compile-test langsung di game (constant precision GPU
+        // internal MonoGame/FNA gak diekspos), jadi FIX v3 ini BALIK LAGI ke teknik
+        // spriteBatch.Draw() biasa (DrawTaperedStripStretch/DrawTaperedStripScroll di bawah,
+        // sama kayak SEMUA beam lain di file ini - RetBeam, LaserBarrage, Telegraph, garis
+        // pemandu - yang TIDAK PERNAH ada laporan geser) - transform-nya (zoom+shake+proyeksi)
+        // otomatis PERSIS sama karena datang dari spriteBatch.Begin() itu sendiri, bukan
+        // dihitung ulang manual.
+        //
+        // Konsekuensinya taper balik ke pendekatan bersegmen (BUKAN 1 quad smooth lagi), TAPI
+        // DeathraySegmentCount dinaikin JAUH dari 48 ke 160 - jarak antar segmen di sepanjang
+        // 2600px jadi ~16px/segmen (dulu ~54px/segmen), staircase-nya jadi jauh lebih halus
+        // hampir gak keliatan, sementara POSISI tetap dijamin 100% konsisten karena teknik
+        // render-nya balik ke yang udah kebukti gak pernah geser. Biaya performanya minim -
+        // SpriteBatch (SpriteSortMode.Deferred) otomatis nge-batch draw call yang texture &
+        // state-nya sama jadi tetep ringan walau jumlah segmennya naik banyak.
+        // ==========================================
+        private const int DeathraySegmentCount = 160;
+
+        // Varian buat lapis SOLID/GRADIENT (bloom pakai BeamGlowTexture, outline pakai
+        // MagicPixel) - tiap segmen di-STRETCH (scale.X) buat nutupin panjang segmennya,
+        // BUKAN sourceRect tiling - cocok buat texture yang emang didesain buat di-stretch
+        // (gradient horizontal uniform / pixel polos), sama persis teknik DrawBloomAroundLine.
+        private void DrawTaperedStripStretch(SpriteBatch spriteBatch, Texture2D texture, Vector2 startScreen, float rotation, float totalLength, float startThickness, float endThickness, Color tint)
+        {
+            if (texture == null || totalLength <= 0f)
+                return;
+
+            Vector2 direction = rotation.ToRotationVector2();
+            float segLength = totalLength / DeathraySegmentCount;
+            Rectangle sourceRect = new Rectangle(0, 0, texture.Width, texture.Height);
+            Vector2 origin = new Vector2(0f, texture.Height * 0.5f);
+
+            for (int i = 0; i < DeathraySegmentCount; i++)
+            {
+                float tMid = (i + 0.5f) / DeathraySegmentCount;
+                float thickness = MathHelper.Lerp(startThickness, endThickness, tMid);
+                if (thickness <= 0.05f)
+                    continue;
+
+                Vector2 segStart = startScreen + direction * (segLength * i);
+
+                // FIX (request: "bloom-nya keliatan putus-putus kayak ada garis grid-nya"):
+                // DULU pakai segLength+2f biar antar segmen OVERLAP dikit (jaga-jaga celah
+                // sub-pixel di sambungan) - tapi karena lapis ini di-draw pakai BlendState
+                // Additive (lihat DrawDeathrayCone), area overlap 2px itu ke-BLEND DUA KALI
+                // (numpuk lebih terang dari segmen sekitarnya). Di 48 segmen efeknya nyaris
+                // gak keliatan, tapi begitu DeathraySegmentCount naik ke 160, jarak antar
+                // seam jadi rapat banget - pola "lebih terang tiap ~16px" itu jadi kelihatan
+                // sebagai grid/garis putus-putus berulang.
+                // FIX-nya: overlap DIHAPUS TOTAL (scale.X balik ke segLength persis, BUKAN
+                // segLength+2f) - AMAN buat texture di lapis ini (BeamGlowTexture & MagicPixel)
+                // karena KONTEN-nya SAMA PERSIS di tiap kolom X (gradient vertikal murni /
+                // pixel polos, gak ada variasi horizontal sama sekali), jadi walau ada celah
+                // sub-pixel teoretis di sambungan, gak ada apa pun yang "hilang" secara visual
+                // di situ - beda kasus sama DrawTaperedStripScroll di bawah (noise, KONTEN
+                // beda-beda per X) yang overlap-nya TETAP dipertahankan karena di sana celah
+                // beneran bisa nampilin bolong di source-nya.
+                Vector2 scale = new Vector2(segLength / texture.Width, thickness / texture.Height);
+                spriteBatch.Draw(texture, segStart, sourceRect, tint, rotation, origin, scale, SpriteEffects.None, 0f);
             }
-            else
+        }
+
+        // Varian buat lapis NOISE yang perlu SCROLL (plasma body & core) - tiap segmen
+        // sourceRect.X digeser sesuai posisi segmen di sepanjang beam + scroll offset,
+        // SamplerState.LinearWrap (di-set caller, DrawDeathrayCone) otomatis nge-tile
+        // noise-nya biar nyambung mulus antar segmen - PERSIS teknik DrawNoisePlasmaStrip,
+        // cuma dipecah per segmen di sini biar bisa taper ketebalannya.
+        private void DrawTaperedStripScroll(SpriteBatch spriteBatch, Texture2D texture, Vector2 startScreen, float rotation, float totalLength, float startThickness, float endThickness, Color tint, float scrollSpeedTexelsPerTick, float scrollSeedOffset)
+        {
+            if (texture == null || totalLength <= 0f)
+                return;
+
+            Vector2 direction = rotation.ToRotationVector2();
+            float segLength = totalLength / DeathraySegmentCount;
+            int scrollBase = (int)(Main.GameUpdateCount * scrollSpeedTexelsPerTick + scrollSeedOffset);
+            Vector2 origin = new Vector2(0f, texture.Height * 0.5f);
+
+            for (int i = 0; i < DeathraySegmentCount; i++)
             {
-                // Fallback: starburst manual 8-spoke pakai DrawBloomLine (2 lapis, konsisten
-                // sama kuat/lemahnya sama versi sprite di atas).
-                const int SpokeCount = 8;
+                float tMid = (i + 0.5f) / DeathraySegmentCount;
+                float thickness = MathHelper.Lerp(startThickness, endThickness, tMid);
+                if (thickness <= 0.05f)
+                    continue;
 
-                for (int i = 0; i < SpokeCount; i++)
+                Vector2 segStart = startScreen + direction * (segLength * i);
+                Rectangle sourceRect = new Rectangle(scrollBase + (int)(segLength * i), 0, (int)segLength + 2, texture.Height);
+                Vector2 scale = new Vector2(1f, thickness / texture.Height);
+                spriteBatch.Draw(texture, segStart, sourceRect, tint, rotation, origin, scale, SpriteEffects.None, 0f);
+            }
+        }
+
+        // ==========================================
+        // HELPER — LAST STAND: garis Deathray berbentuk "V" (kecil di deket muka, MELEBAR
+        // seiring jauh). Tiap lapis (bloom, plasma body, plasma core, outline) lewat
+        // DrawTaperedStripStretch/DrawTaperedStripScroll (segmented spriteBatch.Draw biasa,
+        // lihat komentar FIX v3 panjang di atas) - BUKAN pipeline custom BasicEffect lagi.
+        // ==========================================
+        private void DrawDeathrayCone(SpriteBatch spriteBatch, Vector2 worldOrigin, Vector2 direction, Vector2 screenPos, float totalLength, float startThickness, float endThickness, Color color, float alpha)
+        {
+            const float BloomExtraWidth = 50f; // dikecilin dari 80f - sebelumnya kelewat lebar/dominan
+
+            Vector2 start = worldOrigin - screenPos;
+            float rotation = direction.ToRotation();
+
+            // --- BLOOM (ADDITIVE) — pakai BeamGlowTexture (gradient tengah-terang/pinggir-
+            // fade, SAMA persis texture yang dipakai DrawBloomAroundLine). ---
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, SamplerState.LinearClamp, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+            Texture2D glowTex = BeamGlowTexture;
+            DrawTaperedStripStretch(spriteBatch, glowTex, start, rotation, totalLength,
+                startThickness + BloomExtraWidth, endThickness + BloomExtraWidth,
+                color * (alpha * 0.55f));
+
+            // --- PLASMA NOISE (2 lapis, scroll berlawanan, WRAP sampler biar noise-nya tiling) ---
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, SamplerState.LinearWrap, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+            Texture2D noiseTex = BeamNoiseTexture;
+            if (noiseTex != null)
+            {
+                Color plasmaBodyTint = color * (alpha * 0.9f);
+                Color plasmaCoreTint = Color.Lerp(color, Color.White, 0.4f) * alpha;
+
+                DrawTaperedStripScroll(spriteBatch, noiseTex, start, rotation, totalLength,
+                    startThickness, endThickness, plasmaBodyTint, 0.9f, 0f);
+
+                DrawTaperedStripScroll(spriteBatch, noiseTex, start, rotation, totalLength,
+                    startThickness * 0.45f, endThickness * 0.45f, plasmaCoreTint, -1.6f, 400f);
+            }
+
+            // --- SOLID OUTLINE (crisp tipis, murni buat kejelasan gameplay) ---
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.AlphaBlend, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+            Color outlineColor = Color.Lerp(color, Color.White, 0.25f) * alpha;
+            DrawTaperedStripStretch(spriteBatch, TextureAssets.MagicPixel.Value, start, rotation, totalLength,
+                startThickness * 0.18f, endThickness * 0.18f, outlineColor);
+        }
+
+        // ==========================================
+        // HELPER — VISUAL UPGRADE: "energy rim-light" di sekeliling siluet sprite. Trik
+        // klasik non-shader: gambar TEXTURE YANG SAMA berkali-kali di sekitar posisi asli
+        // (radius kecil, nyebar merata 360°), tiap sample additive + alpha rendah - numpuk
+        // jadi glow yang NGIKUTIN BENTUK SILUET sprite persis (transparent part tetep
+        // transparent), bukan kotak/bounding box kayak drop-shadow biasa. Sprite ASLI-nya
+        // sendiri digambar NORMAL setelah ini oleh caller (di atas rim glow-nya), jadi hasil
+        // akhirnya keliatan kayak sprite yang "menyala" di pinggirnya doang.
+        // ==========================================
+        // ==========================================
+        // VISUAL UPGRADE — "energy aura" 2 lapis, SEKARANG pakai asset bloom ASLI dari
+        // Luminance (MiscTexturesRegistry), bukan cuma trik primitif sendiri:
+        //   1. Rim outline (trik 8-sample additive offset - ngikutin SILUET sprite persis)
+        //   2. Halo bloom BULAT (BloomFlare) di belakang sprite, ukurannya "napas" pelan
+        //      pakai sinus - biar Twins keliatan hidup/berenergi bahkan pas idle
+        //   3. Kalau enraged/pulseBoost aktif: numpuk ChromaticBurst tipis di atasnya buat
+        //      aksen "energi meledak-ledak" ekstra di momen yang emang lagi intens
+        // Sprite ASLI-nya sendiri digambar NORMAL setelah ini oleh caller (di atas semua
+        // lapisan glow ini).
+        // ==========================================
+        private void DrawRimGlow(SpriteBatch spriteBatch, Texture2D texture, Rectangle frame, Vector2 drawPos, float rotation, Vector2 origin, float scale, SpriteEffects effects, Color glowColor, float intensity)
+        {
+            if (intensity <= 0.01f || texture == null)
+                return;
+
+            const int RimGlowSamples = 8;
+            const float RimGlowDistance = 4.5f; // px jarak offset tiap sample di layar
+
+            spriteBatch.End();
+            spriteBatch.Begin(SpriteSortMode.Deferred, BlendState.Additive, Main.DefaultSamplerState, DepthStencilState.None, Main.Rasterizer, null, Main.GameViewMatrix.TransformationMatrix);
+
+            // --- 1. RIM OUTLINE (siluet sprite, trik 8-sample) ---
+            Color tint = glowColor * (intensity * 0.11f);
+            for (int i = 0; i < RimGlowSamples; i++)
+            {
+                float angle = MathHelper.TwoPi * i / RimGlowSamples;
+                Vector2 offset = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)) * RimGlowDistance;
+                spriteBatch.Draw(texture, drawPos + offset, frame, tint, rotation, origin, scale, effects, 0f);
+            }
+
+            // --- 2. HALO BLOOM BULAT (Luminance BloomFlare) - "napas" pelan pakai sinus,
+            // numpang di titik yang SAMA kayak sprite (drawPos), ukurannya proporsional ke
+            // frame.Width sprite-nya biar nutupin badan Twin secukupnya, gak kegedean. ---
+            Texture2D haloTex = MiscTexturesRegistry.BloomFlare.Value;
+            if (haloTex != null)
+            {
+                float breathe = 0.85f + 0.15f * (float)Math.Sin(Main.GameUpdateCount * 0.045f);
+                float haloScale = (frame.Width * scale * 1.25f / haloTex.Width) * breathe;
+                Vector2 haloOrigin = new Vector2(haloTex.Width, haloTex.Height) * 0.5f;
+                spriteBatch.Draw(haloTex, drawPos, null, glowColor * (intensity * 0.22f), 0f, haloOrigin, haloScale, SpriteEffects.None, 0f);
+            }
+
+            // --- 3. AKSEN "ledakan energi" (Luminance ChromaticBurst) - CUMA nongol kalau
+            // intensity di atas ambang normal (berarti Enraged/Last Stand lagi aktif),
+            // numpuk tipis di atas halo, ngasih kesan "listrik statis"/energi gak stabil. ---
+            if (intensity > 1f)
+            {
+                Texture2D burstTex = MiscTexturesRegistry.ChromaticBurst.Value;
+                if (burstTex != null)
                 {
-                    float angle = MathHelper.TwoPi * i / SpokeCount;
-                    Vector2 spokeDir = angle.ToRotationVector2();
-
-                    Utilities.DrawBloomLine(spriteBatch, center, center + spokeDir * (outerWorldSize * 0.5f), outerColor, 6f);
-                    Utilities.DrawBloomLine(spriteBatch, center, center + spokeDir * (coreWorldSize * 0.5f), coreColor, 3f);
+                    float burstAlpha = (intensity - 1f) * 0.35f;
+                    float burstScale = frame.Width * scale * 1.1f / burstTex.Width;
+                    Vector2 burstOrigin = new Vector2(burstTex.Width, burstTex.Height) * 0.5f;
+                    spriteBatch.Draw(burstTex, drawPos, null, Color.White * burstAlpha, Main.GameUpdateCount * 0.02f, burstOrigin, burstScale, SpriteEffects.None, 0f);
                 }
             }
 
@@ -1407,102 +2236,12 @@ namespace YourModName.Content.NPCs
         }
 
         // ==========================================
-        // HELPER GENERIC — gambar garis lurus (dipakai telegraph dash hijau & RetBeam merah).
-        // Core solid setengah block (8px) + outline lebih transparan nutup sampai 1 block (16px).
-        // Pakai overload Draw dengan Rectangle TUJUAN langsung supaya ukuran akhirnya PASTI
-        // persis sekian pixel, gak peduli ukuran asli tekstur MagicPixel-nya.
+        // HELPER — After-image trail dengan warna SOLID/STATIK (gak ada gradasi/transisi
+        // lagi). Generic: dipanggil buat Spazmatism (texture + Trail miliknya sendiri, warna
+        // hijau) DAN buat Retinazer (retTexture + Trail milik instance Retinazer sendiri,
+        // warna merah) - "plek ketiplek" sama persis, cuma warnanya beda tergantung caller.
         // ==========================================
-        private void DrawAimLine(SpriteBatch spriteBatch, NPC npc, Vector2 screenPos, Vector2 direction, Color baseColor, float alpha)
-        {
-            Vector2 start = npc.Center - screenPos;
-            const float LineLength = 2600f; // cukup panjang biar nembus ujung layar manapun
-
-            // 1 block Terraria = 16px.
-            const int CoreThickness = 8;
-            const int OutlineThickness = 16;
-
-            float rotation = direction.ToRotation();
-
-            Texture2D pixel = TextureAssets.MagicPixel.Value;
-            Rectangle sourceRect = new Rectangle(0, 0, pixel.Width, pixel.Height);
-            Vector2 originInSourceSpace = new Vector2(0f, pixel.Height * 0.5f); // kiri, center vertikal
-
-            // --- OUTLINE (digambar duluan, lebih transparan, total tebal 1 block) ---
-            Color outlineColor = baseColor * (alpha * 0.35f);
-            Rectangle outlineDest = new Rectangle((int)start.X, (int)start.Y, (int)LineLength, OutlineThickness);
-            spriteBatch.Draw(
-                pixel,
-                outlineDest,
-                sourceRect,
-                outlineColor,
-                rotation,
-                originInSourceSpace,
-                SpriteEffects.None,
-                0f
-            );
-
-            // --- CORE (digambar di atas outline, solid, setengah block) ---
-            Color coreColor = baseColor * alpha;
-            Rectangle coreDest = new Rectangle((int)start.X, (int)start.Y, (int)LineLength, CoreThickness);
-            spriteBatch.Draw(
-                pixel,
-                coreDest,
-                sourceRect,
-                coreColor,
-                rotation,
-                originInSourceSpace,
-                SpriteEffects.None,
-                0f
-            );
-        }
-
-        // ==========================================
-        // HELPER — LAST STAND: garis Deathray berbentuk "V" (kecil di deket muka, MELEBAR
-        // seiring jauh) - BEDA dari DrawAimLine yang ketebalannya rata dari ujung ke ujung.
-        // Digambar per-segmen (stretched-pixel juga), ketebalan tiap segmen di-lerp dari
-        // startThickness ke endThickness sepanjang totalLength, biar hasilnya kayak corong/
-        // kerucut memanjang bukan garis lurus rata.
-        // ==========================================
-        private void DrawDeathrayCone(SpriteBatch spriteBatch, Vector2 worldOrigin, Vector2 direction, Vector2 screenPos, float totalLength, float startThickness, float endThickness, Color color, float alpha)
-        {
-            const int Segments = 24;
-
-            Texture2D pixel = TextureAssets.MagicPixel.Value;
-            Rectangle sourceRect = new Rectangle(0, 0, pixel.Width, pixel.Height);
-            Vector2 originInSourceSpace = new Vector2(0f, pixel.Height * 0.5f); // kiri, center vertikal
-            float rotation = direction.ToRotation();
-            float segLength = totalLength / Segments;
-
-            for (int i = 0; i < Segments; i++)
-            {
-                float tMid = (i + 0.5f) / Segments;
-                float thickness = MathHelper.Lerp(startThickness, endThickness, tMid);
-
-                Vector2 segWorldStart = worldOrigin + direction * (segLength * i);
-                Vector2 segScreenStart = segWorldStart - screenPos;
-
-                // Sedikit overlap (+2px panjang) antar segmen biar gak ada celah tipis
-                // kelihatan di sambungannya.
-                Rectangle segDest = new Rectangle((int)segScreenStart.X, (int)segScreenStart.Y, (int)segLength + 2, (int)thickness);
-                spriteBatch.Draw(
-                    pixel,
-                    segDest,
-                    sourceRect,
-                    color * alpha,
-                    rotation,
-                    originInSourceSpace,
-                    SpriteEffects.None,
-                    0f
-                );
-            }
-        }
-
-        // ==========================================
-        // HELPER — After-image trail dengan gradasi warna atas-merah / bawah-lime.
-        // Generic: dipanggil buat Spazmatism (texture + Trail miliknya sendiri) DAN buat
-        // Retinazer (retTexture + Trail milik instance Retinazer sendiri), "plek ketiplek".
-        // ==========================================
-        private void DrawAfterimageTrail(SpriteBatch spriteBatch, Texture2D texture, List<TwinsAfterimageSnapshot> trail, float scale, Vector2 screenPos)
+        private void DrawAfterimageTrail(SpriteBatch spriteBatch, Texture2D texture, List<TwinsAfterimageSnapshot> trail, float scale, Vector2 screenPos, Color afterimageColor)
         {
             for (int i = 0; i < trail.Count; i++)
             {
@@ -1510,48 +2249,23 @@ namespace YourModName.Content.NPCs
 
                 // Ghost paling baru (index terakhir) paling keliatan, makin lama makin transparan.
                 float ageFactor = (i + 1f) / trail.Count;
-                float baseAlpha = ageFactor * 0.45f; // 0.45f = opacity maksimum trail, boleh diubah
+                float alpha = ageFactor * 0.45f; // 0.45f = opacity maksimum trail, boleh diubah
 
                 Vector2 pos = snap.Center - screenPos;
-                Vector2 fullOrigin = new Vector2(snap.Frame.Width * 0.5f, snap.Frame.Height * 0.5f);
+                Vector2 origin = new Vector2(snap.Frame.Width * 0.5f, snap.Frame.Height * 0.5f);
                 SpriteEffects effects = snap.SpriteDirection == -1 ? SpriteEffects.None : SpriteEffects.FlipHorizontally;
 
-                // Animasi "nge-blend": rasio campuran warnanya digeser tiap tick pakai gelombang
-                // sinus (beda fase per ghost juga, ditambah i * 0.8f), jadi kelihatan kayak
-                // gradasinya "napas" bukan statis diam.
-                float blendWave = (float)Math.Sin(Main.GameUpdateCount * 0.15f + i * 0.8f) * 0.5f + 0.5f;
-
-                float sliceHeight = snap.Frame.Height / (float)AfterimageSlices;
-                for (int s = 0; s < AfterimageSlices; s++)
-                {
-                    Rectangle sourceSlice = new Rectangle(
-                        snap.Frame.X,
-                        (int)(snap.Frame.Y + s * sliceHeight),
-                        snap.Frame.Width,
-                        (int)Math.Ceiling(sliceHeight)
-                    );
-
-                    // Origin digeser ke atas sesuai posisi slice, supaya tiap potongan tetap
-                    // berputar pas mengelilingi titik pivot yang sama kayak sprite utuh
-                    // (jadi rotasinya tetap benar walau kita gambar per-potongan horizontal).
-                    Vector2 sliceOrigin = new Vector2(fullOrigin.X, fullOrigin.Y - s * sliceHeight);
-
-                    float sliceT = AfterimageSlices == 1 ? 0f : s / (float)(AfterimageSlices - 1); // 0 atas .. 1 bawah
-                    float mixT = MathHelper.Clamp(sliceT + (blendWave - 0.5f) * 0.6f, 0f, 1f);
-                    Color sliceColor = Color.Lerp(AfterimageTopColor, AfterimageBottomColor, mixT) * baseAlpha;
-
-                    spriteBatch.Draw(
-                        texture,
-                        pos,
-                        sourceSlice,
-                        sliceColor,
-                        snap.Rotation,
-                        sliceOrigin,
-                        scale,
-                        effects,
-                        0f
-                    );
-                }
+                spriteBatch.Draw(
+                    texture,
+                    pos,
+                    snap.Frame,
+                    afterimageColor * alpha,
+                    snap.Rotation,
+                    origin,
+                    scale,
+                    effects,
+                    0f
+                );
             }
         }
     }

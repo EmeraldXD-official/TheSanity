@@ -1,0 +1,150 @@
+using System;
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.DataStructures;
+using Terraria.GameContent.ItemDropRules;
+using Terraria.ID;
+using Terraria.ModLoader;
+
+namespace TheSanity.CostumeTile
+{
+    // =========================================================
+    // ITEM: Souls
+    // Sprite: 14x88, 4 frame vertikal (tiap frame 14x22)
+    // =========================================================
+    public class Souls : ModItem
+    {
+        // 60 detik * 60 tick/detik = 3600 tick sebelum item ini hilang
+        private const int LifespanTicks = 3600;
+
+        // Timer umur item, disimpan per-instance (bukan pakai Item.ai[] karena Item tidak punya itu)
+        private int lifeTimer = 0;
+
+        public override void SetStaticDefaults()
+        {
+            // Fitur bawaan vanilla khusus item "soul": animasi frame otomatis,
+            // gerakan melayang, dan GLOW di kegelapan (persis kayak Soul of Night dkk)
+            ItemID.Sets.AnimatesAsSoul[Type] = true;
+            ItemID.Sets.ItemIconPulse[Type] = true;
+            ItemID.Sets.ItemNoGravity[Type] = true;
+
+            // WAJIB: daftarkan animasinya, kalau tidak Main.itemAnimations[Type] bakal null
+            // dan bikin game crash pas coba menggambar item ini.
+            // 4 frame vertikal, ganti frame tiap 6 tick.
+            Main.RegisterItemAnimation(Type, new DrawAnimationVertical(6, 4));
+        }
+
+        public override void SetDefaults()
+        {
+            Item.width = 14;
+            Item.height = 22; // tinggi PER FRAME (88 / 4 frame = 22)
+            Item.maxStack = 9999;
+            Item.value = 0;
+            Item.rare = ItemRarityID.Blue;
+            Item.consumable = false;
+        }
+
+        // Item ini TIDAK BISA diambil player sama sekali lewat cara normal
+        public override bool CanPickup(Player player)
+        {
+            return false;
+        }
+
+        public override void PostUpdate()
+        {
+            // --- Efek melayang lembut ala "soul"/wisp ---
+            float t = Main.GameUpdateCount * 0.05f + Item.whoAmI;
+            Item.velocity.X += (float)Math.Cos(t * 0.7f) * 0.015f;
+            Item.velocity.Y += (float)Math.Sin(t) * 0.02f;
+            Item.velocity *= 0.98f; // redam biar ga makin ngebut
+
+            // --- Cahaya biru lembut di sekitar item (opsional, sesuai tema Soul) ---
+            Lighting.AddLight(Item.Center, 0.25f, 0.45f, 0.85f);
+
+            // --- Hitung umur item, hilang setelah 1 menit ---
+            lifeTimer += 1;
+
+            if (lifeTimer >= LifespanTicks)
+            {
+                if (Main.netMode != NetmodeID.MultiplayerClient)
+                {
+                    // Burst partikel putih di sekeliling item sebelum hilang
+                    for (int d = 0; d < 20; d++)
+                    {
+                        Vector2 dustPos = Item.position + new Vector2(
+                            Main.rand.NextFloat(0, Item.width),
+                            Main.rand.NextFloat(0, Item.height));
+
+                        Dust.NewDust(dustPos, 1, 1, DustID.WhiteTorch, 0f, 0f, 100, default, 1.4f);
+                    }
+
+                    Item.active = false;
+                    Item.TurnToAir();
+                }
+            }
+        }
+    }
+
+    // =========================================================
+    // GLOBAL DROP: berlaku untuk SEMUA musuh (termasuk NPC dari mod lain)
+    // - Non-boss: 43% chance, drop 1
+    // - Boss    : 100% chance, drop 5
+    // =========================================================
+    public class SoulsGlobalDrop : global::Terraria.ModLoader.GlobalNPC
+    {
+        public override void OnKill(NPC npc)
+        {
+            // Skip NPC kota / NPC ramah (kritter, pedagang, dll)
+            if (npc.friendly || npc.townNPC)
+                return;
+
+            int soulType = ModContent.ItemType<Souls>();
+
+            if (npc.boss)
+            {
+                // Boss: selalu drop, jumlahnya 5
+                Item.NewItem(npc.GetSource_Loot(), npc.getRect(), soulType, 5);
+            }
+            else
+            {
+                // Non-boss: 43% kemungkinan drop 1
+                if (Main.rand.NextFloat() < 0.43f)
+                {
+                    Item.NewItem(npc.GetSource_Loot(), npc.getRect(), soulType, 1);
+                }
+            }
+        }
+    }
+
+    // =========================================================
+    // ANTI-CHEAT: kalau item ini somehow masuk inventory player
+    // (misal lewat /additem atau cheat menu), otomatis dilempar
+    // keluar ke dunia tiap tick, berapa pun jumlahnya.
+    // =========================================================
+    public class SoulsAntiCheatPlayer : ModPlayer
+    {
+        public override void PostUpdate()
+        {
+            int soulType = ModContent.ItemType<Souls>();
+
+            for (int i = 0; i < Player.inventory.Length; i++)
+            {
+                Item item = Player.inventory[i];
+
+                if (item.type == soulType && item.stack > 0)
+                {
+                    if (Main.netMode != NetmodeID.MultiplayerClient)
+                    {
+                        Item.NewItem(
+                            new EntitySource_Misc("SoulsAntiCheat"),
+                            Player.getRect(),
+                            soulType,
+                            item.stack);
+                    }
+
+                    item.TurnToAir();
+                }
+            }
+        }
+    }
+}
