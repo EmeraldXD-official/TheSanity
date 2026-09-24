@@ -38,7 +38,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             Dash3X,
             SequentialNebulaBlaze,
             LaserRotation180,
-            SlamPlayer2X
+            SlamPlayer2X,
+            AbyssalLure,       // whale ngumpet di kabut + umpan palsu, lalu lunge dari titik aslinya
+            SpiralSong         // orbit spiral halus sambil nembak pola bunga berputar
         }
 
         private BossState State {
@@ -62,11 +64,22 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
         private bool spawnedClones = false;
         private float dashTelegraphRotation = 0f; 
         private int laserIndex = -1; 
-        
+
+        // --- Buat AbyssalLure (P1Attacks) ---
+        private Vector2 lureRealPos = Vector2.Zero;   // titik asli whale pas ngumpet
+        private Vector2 lureDecoy1 = Vector2.Zero;    // umpan palsu 1
+        private Vector2 lureDecoy2 = Vector2.Zero;    // umpan palsu 2
+        private bool lurePositionsChosen = false;
+
+        // --- Buat SpiralSong (P1Attacks) ---
+        private float spiralAngle = 0f;
+        private int spiralShotTimer = 0;
+
         public Vector2 rotatingCenter = Vector2.Zero; 
+        private float rotatingAngle = 0f; // sudut orbit RotatingLaserTriangle, disimpen biar reversal-nya kontinu (gak reset ke 0)
 
         public override void SetStaticDefaults() {
-            Main.npcFrameCount[NPC.type] = 3; 
+            Main.npcFrameCount[NPC.type] = 9; 
             NPCID.Sets.MPAllowedEnemies[NPC.type] = true;
             NPCID.Sets.BossBestiaryPriority.Add(NPC.type);
 
@@ -98,30 +111,35 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
         }
 
         public override void FindFrame(int frameHeight) {
-            bool useFrameThree = false;
+            // Sprite sheet baru: 9 frame total. Index 0-7 = animasi idle (loop),
+            // index 8 (frame ke-9) = frame dash/laser (dipakai gantian sama kayak useFrameThree lama).
+            bool useFrameNine = false;
 
             if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.Dash3X && NPC.velocity.Length() > 5f) {
-                useFrameThree = true; 
+                useFrameNine = true; 
             }
             else if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.SlamPlayer2X && (AttackTimer % 90) > 45 && (AttackTimer % 90) < 80) {
-                useFrameThree = true;
+                useFrameNine = true;
+            }
+            else if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.AbyssalLure && AttackTimer >= 176 && NPC.velocity.Length() > 5f) {
+                useFrameNine = true; // frame agresif pas reveal & nge-lunge
             }
             else if (State == BossState.Phase2_Active && (P2Attacks)AttackState <= P2Attacks.Dash_Letter_H && NPC.velocity.Length() > 8f) {
-                useFrameThree = true;
+                useFrameNine = true;
             }
             else if (State == BossState.Phase2_Active && (P2Attacks)AttackState == P2Attacks.PredictiveSequentialDash && NPC.velocity.Length() > 8f) {
-                useFrameThree = true;
+                useFrameNine = true;
             }
             
             if (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.LaserRotation180 && AttackTimer > 40 && AttackTimer < 140) {
-                useFrameThree = true;
+                useFrameNine = true;
             }
             else if (State == BossState.Phase2_Active && (P2Attacks)AttackState == P2Attacks.RotatingLaserTriangle) {
-                useFrameThree = true;
+                useFrameNine = true;
             }
 
-            if (useFrameThree) {
-                NPC.frame.Y = frameHeight * 2; 
+            if (useFrameNine) {
+                NPC.frame.Y = frameHeight * 8; 
                 NPC.frameCounter = 0; 
             }
             else {
@@ -130,7 +148,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                     NPC.frameCounter = 0;
                     NPC.frame.Y += frameHeight; 
 
-                    if (NPC.frame.Y >= frameHeight * 2) {
+                    if (NPC.frame.Y >= frameHeight * 8) {
                         NPC.frame.Y = 0;
                     }
                 }
@@ -158,7 +176,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             }
 
             // Kunci arah agar mulut tidak berpindah tempat secara berlawanan di tengah menembak laser
-            bool lockDirection = (State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.LaserRotation180 && AttackTimer >= 40 && AttackTimer <= 140);
+            bool lockDirection = State == BossState.Phase1 && (P1Attacks)AttackState == P1Attacks.LaserRotation180 && AttackTimer >= 40 && AttackTimer <= 140;
             if (!lockDirection) {
                 NPC.direction = NPC.Center.X < target.Center.X ? 1 : -1;
             }
@@ -417,10 +435,156 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
                     if (dashCount >= 2 && AttackTimer > 175) {
                         dashCount = 0;
-                        AttackState = (float)P1Attacks.Dash3X; 
+                        AttackState = (float)P1Attacks.AbyssalLure; 
+                        AttackTimer = 0;
+                        lurePositionsChosen = false;
+                    }
+                    break;
+
+                // ============================================================
+                // ABYSSAL LURE — pattern unik: whale "menyelam" ke dalam kabut
+                // sampai nyaris tak-kasat-mata, munculin 1 titik cahaya ASLI +
+                // 2 umpan palsu di sekitar player. Umpan asli berdenyut kayak
+                // detak jantung & sesekali bunyi; umpan palsu nyala datar/diem
+                // aja -- itu bedanya. Begitu fase ini kelar, whale nge-lunge
+                // dari titik ASLINYA (bukan dari posisi lama sebelum ngumpet),
+                // jadi pemain yang jeli merhatiin detak jantungnya bisa udah
+                // siap-siap duluan sebelum reveal-nya kejadian.
+                // ============================================================
+                case P1Attacks.AbyssalLure: {
+                    // --- FASE A (0-60): whale berenang menjauh & mulai ngumpet ---
+                    if (AttackTimer <= 60) {
+                        if (AttackTimer == 1) {
+                            float submergeAngle = Main.rand.NextFloat(MathHelper.TwoPi);
+                            lureRealPos = target.Center + submergeAngle.ToRotationVector2() * Main.rand.NextFloat(650f, 850f);
+                            lurePositionsChosen = false;
+                            NPC.localAI[3] = 1f; // pakai silhouette hitam yang udah ada di PreDraw, kesan "tenggelam"
+                        }
+
+                        NPC.velocity = Vector2.Lerp(NPC.velocity, (lureRealPos - NPC.Center).SafeNormalize(Vector2.Zero) * 14f, 0.08f);
+                        NPC.Opacity = MathHelper.Lerp(NPC.Opacity, 0.12f, 0.06f);
+
+                        if (AttackTimer % 4 == 0 && Main.netMode != NetmodeID.Server) {
+                            WhiteWhaleFogSystem.SpawnFog(NPC.Center + Main.rand.NextVector2Circular(80f, 60f));
+                        }
+                    }
+                    // --- FASE B (61-165): umpan asli + 2 umpan palsu terpampang, dengerin ritmenya ---
+                    else if (AttackTimer <= 165) {
+                        if (!lurePositionsChosen) {
+                            lurePositionsChosen = true;
+                            lureRealPos = NPC.Center; // titik asli = posisi whale skrg (udah nyaris invisible)
+
+                            float baseAngle = Main.rand.NextFloat(MathHelper.TwoPi);
+                            lureDecoy1 = target.Center + baseAngle.ToRotationVector2() * Main.rand.NextFloat(500f, 650f);
+                            lureDecoy2 = target.Center + (baseAngle + MathHelper.Pi * Main.rand.NextFloat(0.6f, 1.4f)).ToRotationVector2() * Main.rand.NextFloat(500f, 650f);
+                        }
+
+                        NPC.velocity *= 0.9f; // diam, cuma mengintai dari kabut
+
+                        if (Main.netMode != NetmodeID.Server) {
+                            // Umpan ASLI: skala-nya berdenyut naik-turun kayak detak jantung -- ini clue utamanya.
+                            float heartbeat = (float)Math.Sin(AttackTimer * 0.15f) * 0.5f + 0.5f;
+                            Dust realGlow = Dust.NewDustPerfect(lureRealPos + Main.rand.NextVector2Circular(20f, 20f), DustID.WhiteTorch, Vector2.Zero, 0, default, 1.1f + heartbeat * 0.9f);
+                            realGlow.noGravity = true;
+                            realGlow.fadeIn = 1.1f;
+
+                            // Umpan PALSU: nyala flat, gak ada ritme sama sekali.
+                            Dust decoyGlow1 = Dust.NewDustPerfect(lureDecoy1 + Main.rand.NextVector2Circular(20f, 20f), DustID.BlueTorch, Vector2.Zero, 100, default, 1.3f);
+                            decoyGlow1.noGravity = true;
+                            Dust decoyGlow2 = Dust.NewDustPerfect(lureDecoy2 + Main.rand.NextVector2Circular(20f, 20f), DustID.BlueTorch, Vector2.Zero, 100, default, 1.3f);
+                            decoyGlow2.noGravity = true;
+                        }
+
+                        // "Detak jantung" -- cuma umpan asli yang bunyi, umpan palsu selalu senyap.
+                        if ((int)AttackTimer % 40 == 0) {
+                            SoundEngine.PlaySound(SoundID.Item9, lureRealPos);
+                        }
+                    }
+                    // --- FASE C (166+): whale reveal & nge-lunge dari titik aslinya ---
+                    else {
+                        if (AttackTimer == 166) {
+                            NPC.localAI[3] = 0f;
+                            dashTelegraphRotation = (target.Center - NPC.Center).ToRotation();
+                            SoundEngine.PlaySound(SoundID.Roar, NPC.position);
+                        }
+
+                        NPC.Opacity = MathHelper.Lerp(NPC.Opacity, 1f, 0.15f);
+
+                        if (AttackTimer >= 166 && AttackTimer < 176) {
+                            // Jeda telegraph super singkat -- reward buat yang udah mantau titik cahayanya dari tadi.
+                            NPC.velocity = Vector2.Lerp(NPC.velocity, Vector2.Zero, 0.3f);
+                        }
+                        else if (AttackTimer == 176) {
+                            NPC.velocity = dashTelegraphRotation.ToRotationVector2() * 46f;
+                            SoundEngine.PlaySound(new SoundStyle("TheSanity/Music/WhaleDash"), NPC.position);
+                        }
+                        else if (AttackTimer > 205) {
+                            NPC.velocity *= 0.8f;
+                        }
+
+                        if (AttackTimer > 240) {
+                            NPC.Opacity = 1f;
+                            AttackState = (float)P1Attacks.SpiralSong;
+                            AttackTimer = 0;
+                        }
+                    }
+                    break;
+                }
+
+                // ============================================================
+                // SPIRAL SONG — whale berenang dalam lintasan spiral yang mengalun
+                // halus (radius berdenyut, sudut terus nambah) sambil nembak
+                // proyektil tegak lurus arah orbitnya. Karena titik tembaknya
+                // ikut berputar bareng orbitnya, hasilnya pola kelopak/spiral
+                // yang melebar keluar -- beda total sama nembak lurus/sequential
+                // di SequentialNebulaBlaze. Gerakannya sendiri lerp konstan &
+                // rendah, jadi kesannya "berenang mengalun", bukan dash-berhenti.
+                // ============================================================
+                case P1Attacks.SpiralSong: {
+                    if (AttackTimer == 1) {
+                        spiralAngle = (NPC.Center - target.Center).ToRotation();
+                        spiralShotTimer = 0;
+                    }
+
+                    const float orbitSpeed = 0.045f;
+                    float radius = 480f + (float)Math.Sin(AttackTimer * 0.025f) * 160f; // radius "napas" -- ngedeket-menjauh halus
+                    spiralAngle += orbitSpeed;
+
+                    Vector2 orbitTarget = target.Center + spiralAngle.ToRotationVector2() * radius;
+                    NPC.velocity = Vector2.Lerp(NPC.velocity, (orbitTarget - NPC.Center) * 0.12f, 0.09f);
+
+                    spiralShotTimer++;
+                    if (spiralShotTimer >= 14) {
+                        spiralShotTimer = 0;
+
+                        if (Main.netMode != NetmodeID.MultiplayerClient) {
+                            // Tembak tegak lurus arah orbit -- karena sumbernya sendiri lagi
+                            // muter, ini yang bikin pola proyektilnya jadi ngelebar spiral.
+                            Vector2 shootDir = (spiralAngle + MathHelper.PiOver2).ToRotationVector2();
+
+                            Projectile.NewProjectile(
+                                NPC.GetSource_FromAI(),
+                                NPC.Center,
+                                shootDir * 7.5f,
+                                ModContent.ProjectileType<Projectiles.NebulaBlazeHostile>(),
+                                26,
+                                0f,
+                                Main.myPlayer
+                            );
+                        }
+                        SoundEngine.PlaySound(SoundID.Item9, NPC.Center);
+                    }
+
+                    if (Main.netMode != NetmodeID.Server && AttackTimer % 6 == 0) {
+                        WhiteWhaleFogSystem.SpawnFog(NPC.Center + Main.rand.NextVector2Circular(40f, 40f));
+                    }
+
+                    if (AttackTimer > 320) {
+                        AttackState = (float)P1Attacks.Dash3X;
                         AttackTimer = 0;
                     }
                     break;
+                }
             }
         }
 
@@ -647,34 +811,46 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                 case P2Attacks.RotatingLaserTriangle:
                     if (AttackTimer == 1) {
                         rotatingCenter = target.Center; 
+                        rotatingAngle = 0f;
                     }
 
                     float radius = 500f; 
+                    float rotationStep = MathHelper.TwoPi / 120f;
                     Vector2 mouthPosP2 = NPC.Center + new Vector2(-NPC.direction * 90f, -10f) + new Vector2(NPC.direction * 105f, 30f);
                     
                     if (AttackTimer >= 1 && AttackTimer <= 180) {
-                        float angle = (AttackTimer - 1f) * (MathHelper.TwoPi / 120f); 
-                        Vector2 targetOrbitPos = rotatingCenter + angle.ToRotationVector2() * radius; 
+                        rotatingAngle += rotationStep; 
+                        Vector2 targetOrbitPos = rotatingCenter + rotatingAngle.ToRotationVector2() * radius; 
                         NPC.velocity = (targetOrbitPos - NPC.Center) * 0.25f;
 
                         if (AttackTimer > 40 && AttackTimer % 15 == 0) {
                             if (Main.netMode != NetmodeID.MultiplayerClient) {
-                                Vector2 laserVel = angle.ToRotationVector2() * 8f;
+                                Vector2 laserVel = rotatingAngle.ToRotationVector2() * 8f;
                                 Projectile.NewProjectile(NPC.GetSource_FromAI(), mouthPosP2, laserVel, ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>(), 160, 0f, Main.myPlayer);
                             }
                         }
                     }
                     else if (AttackTimer > 180 && AttackTimer <= 210) {
-                        NPC.velocity *= 0.8f;
+                        // Kecepatan muternya diperlambat bertahap pas mau ganti arah: dari kecepatan
+                        // penuh turun ke 0 lalu naik lagi ke arah kebalik (bukan diem total kayak
+                        // sebelumnya), jadi transisinya keliatan halus tapi tetep gak dash pindah posisi.
+                        float turnProgress = (AttackTimer - 180f) / 30f; // 0..1
+                        float angularSpeed = rotationStep * (1f - 2f * turnProgress); // +rotationStep -> -rotationStep
+                        rotatingAngle += angularSpeed;
+
+                        Vector2 targetOrbitPos = rotatingCenter + rotatingAngle.ToRotationVector2() * radius;
+                        NPC.velocity = Vector2.Lerp(NPC.velocity, (targetOrbitPos - NPC.Center) * 0.25f, 0.15f);
                     }
                     else if (AttackTimer > 210 && AttackTimer <= 390) {
-                        float angle = -(AttackTimer - 211f) * (MathHelper.TwoPi / 120f);
-                        Vector2 targetOrbitPos = rotatingCenter + angle.ToRotationVector2() * radius;
+                        // Lanjut dari rotatingAngle terakhir (bukan direset ke sudut 0), cuma arah
+                        // puterannya dibalik. Jadi boss langsung balik arah di tempat, gak dash pindah posisi dulu.
+                        rotatingAngle -= rotationStep;
+                        Vector2 targetOrbitPos = rotatingCenter + rotatingAngle.ToRotationVector2() * radius;
                         NPC.velocity = (targetOrbitPos - NPC.Center) * 0.25f;
 
                         if (AttackTimer % 15 == 0) {
                             if (Main.netMode != NetmodeID.MultiplayerClient) {
-                                Vector2 laserVel = angle.ToRotationVector2() * 8f;
+                                Vector2 laserVel = rotatingAngle.ToRotationVector2() * 8f;
                                 Projectile.NewProjectile(NPC.GetSource_FromAI(), mouthPosP2, laserVel, ModContent.ProjectileType<Projectiles.WhiteWhaleLaser>(), 100, 0f, Main.myPlayer);
                             }
                         }
@@ -687,6 +863,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                             }
                         }
                         rotatingCenter = Vector2.Zero; 
+                        rotatingAngle = 0f;
                         ChooseNextP2Attack();
                     }
                     break;
@@ -781,6 +958,13 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                         float opacity = cycleTimer / 45f;
                         spriteBatch.Draw(magicPixel, NPC.Center - screenPos, new Rectangle(0, 0, 1, 1), Color.Red * opacity * 0.7f, MathHelper.PiOver2, new Vector2(0, 0.5f), new Vector2(2400f, 130f), SpriteEffects.None, 0f);
                     }
+                }
+                else if ((P1Attacks)AttackState == P1Attacks.AbyssalLure && AttackTimer >= 166 && AttackTimer < 176) {
+                    // Telegraph super singkat pas reveal -- warnanya putih/pucat (bukan merah kayak
+                    // attack lain) biar kesannya "cahaya umpan yang tadi ketebak" itu sendiri yang
+                    // berubah jadi arah serangan, bukan indikator generik baru.
+                    float opacity = (AttackTimer - 166) / 10f;
+                    spriteBatch.Draw(magicPixel, NPC.Center - screenPos, new Rectangle(0, 0, 1, 1), Color.White * opacity * 0.8f, dashTelegraphRotation, new Vector2(0, 0.5f), new Vector2(2400f, 70f), SpriteEffects.None, 0f);
                 }
             }
             else if (State == BossState.Phase2_Active) {

@@ -20,9 +20,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
             set => NPC.ai[1] = value;
         }
         private float telegraphRotation = 0f;
+        private float cloneOrbitAngle = 0f; // sudut orbit RotatingLaserTriangle (tanpa offsetAngle), disimpen biar reversal-nya kontinu
 
         public override void SetStaticDefaults() {
-            Main.npcFrameCount[NPC.type] = 3; 
+            Main.npcFrameCount[NPC.type] = 9; 
             NPCID.Sets.NPCBestiaryDrawModifiers value = new NPCID.Sets.NPCBestiaryDrawModifiers() { Hide = true };
             NPCID.Sets.NPCBestiaryDrawOffset.Add(NPC.type, value); 
 
@@ -46,7 +47,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
         public override void FindFrame(int frameHeight) {
             NPC.spriteDirection = -NPC.direction;
-            bool useFrameThree = false;
+            // Sprite sheet baru: 9 frame total. Index 0-7 = animasi idle (loop),
+            // index 8 (frame ke-9) = frame dash/laser, ngikutin state parent boss.
+            bool useFrameNine = false;
 
             if (ParentIndex >= 0 && ParentIndex < Main.maxNPCs) {
                 NPC parent = Main.npc[ParentIndex];
@@ -55,20 +58,20 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                     float pTimer = parent.ai[3];
                     
                     if (pState <= (float)WhiteWhaleBoss.P2Attacks.Dash_Letter_H && pTimer > 50f && NPC.velocity.Length() > 8f) {
-                        useFrameThree = true;
+                        useFrameNine = true;
                     }
                     else if (pState == (float)WhiteWhaleBoss.P2Attacks.PredictiveSequentialDash && NPC.velocity.Length() > 8f) {
-                        useFrameThree = true;
+                        useFrameNine = true;
                     }
                     
                     if ((WhiteWhaleBoss.P2Attacks)pState == WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle) {
-                        useFrameThree = true;
+                        useFrameNine = true;
                     }
                 }
             }
 
-            if (useFrameThree) {
-                NPC.frame.Y = frameHeight * 2; 
+            if (useFrameNine) {
+                NPC.frame.Y = frameHeight * 8; 
                 NPC.frameCounter = 0;
             }
             else {
@@ -76,7 +79,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                 if (NPC.frameCounter >= 10) {
                     NPC.frameCounter = 0;
                     NPC.frame.Y += frameHeight;
-                    if (NPC.frame.Y >= frameHeight * 2) {
+                    if (NPC.frame.Y >= frameHeight * 8) {
                         NPC.frame.Y = 0; 
                     }
                 }
@@ -224,6 +227,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
                 case WhiteWhaleBoss.P2Attacks.RotatingLaserTriangle:
                     float radius = 500f;
+                    float rotationStep = MathHelper.TwoPi / 120f;
                     float offsetAngle = (CloneType == 1) ? MathHelper.TwoPi / 3f : 2f * MathHelper.TwoPi / 3f;
 
                     Vector2 centerPoint = target.Center;
@@ -233,8 +237,13 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
 
                     Vector2 mouthPos = NPC.Center + new Vector2(NPC.direction * 110f, 15f);
 
+                    if (parentAttackTimer == 1) {
+                        cloneOrbitAngle = 0f;
+                    }
+
                     if (parentAttackTimer >= 1 && parentAttackTimer <= 180) {
-                        float angle = (parentAttackTimer - 1f) * (MathHelper.TwoPi / 120f) + offsetAngle;
+                        cloneOrbitAngle += rotationStep;
+                        float angle = cloneOrbitAngle + offsetAngle;
                         Vector2 targetOrbitPos = centerPoint + angle.ToRotationVector2() * radius;
                         NPC.velocity = (targetOrbitPos - NPC.Center) * 0.25f;
 
@@ -244,10 +253,21 @@ namespace TheSanity.GlobalNPC.Bosses.WhiteWhale
                         }
                     }
                     else if (parentAttackTimer > 180 && parentAttackTimer <= 210) {
-                        NPC.velocity *= 0.8f;
+                        // Sama kayak boss: kecepatan muternya diperlambat bertahap pas mau ganti arah
+                        // (dari kecepatan penuh turun ke 0 lalu naik lagi ke arah kebalik), bukan diem total.
+                        float turnProgress = (parentAttackTimer - 180f) / 30f; // 0..1
+                        float angularSpeed = rotationStep * (1f - 2f * turnProgress); // +rotationStep -> -rotationStep
+                        cloneOrbitAngle += angularSpeed;
+
+                        float angle = cloneOrbitAngle + offsetAngle;
+                        Vector2 targetOrbitPos = centerPoint + angle.ToRotationVector2() * radius;
+                        NPC.velocity = Vector2.Lerp(NPC.velocity, (targetOrbitPos - NPC.Center) * 0.25f, 0.15f);
                     }
                     else if (parentAttackTimer > 210 && parentAttackTimer <= 390) {
-                        float angle = -(parentAttackTimer - 211f) * (MathHelper.TwoPi / 120f) + offsetAngle;
+                        // Lanjut dari cloneOrbitAngle terakhir (bukan direset ke sudut 0), cuma arah
+                        // puterannya dibalik. Jadi clone langsung balik arah di tempat, gak dash dulu.
+                        cloneOrbitAngle -= rotationStep;
+                        float angle = cloneOrbitAngle + offsetAngle;
                         Vector2 targetOrbitPos = centerPoint + angle.ToRotationVector2() * radius;
                         NPC.velocity = (targetOrbitPos - NPC.Center) * 0.25f;
 
