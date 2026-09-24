@@ -45,7 +45,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleOrbitingGridLock(Player target)
         {
-            aiTimer++;
+            // FIX: aiTimer already increments once per tick in WhoAmI.cs AI(), before the switch
+            // that dispatches here - a local aiTimer++ on top of that double-counted it, running
+            // the orbit/lock/barrage timeline at 2x speed (the orbit read as a frantic blur and the
+            // barrage lasted half as long as the tuning numbers below suggest).
             NPC.damage = 0;
 
             if (aiTimer == 1)
@@ -113,7 +116,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 Vector2 outsidePos = target.Center + Vector2.Normalize(NPC.Center - target.Center == Vector2.Zero ? -Vector2.UnitY : NPC.Center - target.Center) * (GridLockTriangleRadius + 300f);
                 outsidePos += GetSatSetBobOffset(1.5f, 20f); // never fully static while parked
 
-                EaseVelocityTowards((outsidePos - NPC.Center) * 0.3f, 1f, EasingCurves.Sine, EasingType.InOut);
+                // FIX ("kaku"): this was the one EaseVelocityTowards call in the whole pattern set
+                // with no strength argument (defaults to 1f = full replace every tick, no damping) -
+                // combined with outsidePos being re-derived from the boss's own live position, that
+                // read as a slightly twitchy, over-corrective hold instead of a settled orbit. 0.35
+                // brings it in line with every other "parked while attacking" pattern in this file set.
+                EaseVelocityTowards((outsidePos - NPC.Center) * 0.3f, 1f, EasingCurves.Sine, EasingType.InOut, 0.35f);
 
                 if ((aiTimer - GridLockLockTick) % 14 == 0 && gridLockBarrageShotsFired < 12)
                 {
@@ -123,7 +131,13 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
                     int dmg = isPhase2 ? 34 : 22;
                     int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, shootDir * (isPhase2 ? 15f : 12f), ProjectileID.PurpleLaser, dmg, 0f, proxySlot);
-                    if (p >= 0 && p < Main.maxProjectiles) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; }
+                    if (p >= 0 && p < Main.maxProjectiles)
+                    {
+                        Main.projectile[p].hostile = true;
+                        Main.projectile[p].friendly = false;
+                        ClampBossProjectileLifetime(p); // 30s hard cap - raw PurpleLaser spawn, no
+                        // explicit timeLeft was being set here before.
+                    }
 
                     Terraria.Audio.SoundEngine.PlaySound(SoundID.Item12, NPC.Center);
                     ScreenShakeSystem.StartShakeAtPoint(NPC.Center, 6f, 0.15f);

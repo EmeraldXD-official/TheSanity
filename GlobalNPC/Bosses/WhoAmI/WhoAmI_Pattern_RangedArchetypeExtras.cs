@@ -24,90 +24,96 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
     {
         // ============================================================================================
         // ATTACK 1: "VECTOR LASER GRID SYSTEM"
-        // Telegraphed laser-sight lines sweep into a grid over the player; after a 45-tick delay the
-        // grid solidifies into full damaging beams.
+        // REDESIGN: instead of a laser-sight grid, the boss lobs a handful of sprite "bombs" out
+        // around the player. Each bomb telegraphs briefly where it lands, then detonates into a
+        // burst of projectiles fired from whichever ranged weapon is currently being mimicked.
         // ============================================================================================
-        private readonly List<(Vector2 start, Vector2 end)> laserGridLines = new List<(Vector2, Vector2)>();
-        private bool laserGridSolidified = false;
-        private const int LaserGridTelegraphTicks = 45; // literal "45-tick delay" from the design brief
+        private readonly List<Vector2> laserGridBombPoints = new List<Vector2>();
+        private readonly List<int> laserGridBombFuse = new List<int>(); // tick (relative to spawn) each bomb detonates on
+        private bool laserGridBombsSpawned = false;
+        private const int LaserGridBombCount = 5;
+        private const int LaserGridBombTravelTicks = 30; // ticks the bomb spends arcing to its landing point before it's armed
+        private const int LaserGridBombFuseDelay = 20;   // extra ticks after landing before it actually detonates
 
         private void ResetVectorLaserGridState()
         {
-            laserGridLines.Clear();
-            laserGridSolidified = false;
+            laserGridBombPoints.Clear();
+            laserGridBombFuse.Clear();
+            laserGridBombsSpawned = false;
         }
 
         private void HandleVectorLaserGrid(Player target)
         {
-            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
-            // in the telegraph phase (aiTimer solidify/end checks never advance).
-            aiTimer++;
-
-            int solidifyDuration = isPhase2 ? 26 : 20;
-            int lineCount = isPhase2 ? 7 : 5;
-            float spacing = isPhase2 ? 90f : 110f;
-            const float lineHalfLength = 900f;
+            // aiTimer is already incremented once per tick, unconditionally, in WhoAmI.cs AI() (right
+            // before the `switch (aiState)` that dispatches into this method) - do NOT increment it
+            // again here (see the double-increment bug class documented on HandleHomingClusterComet
+            // below for what that does: the `aiTimer == 1` entry check never fires and nothing spawns).
+            int detonateInterval = isPhase2 ? 5 : 8; // stagger between each bomb's detonation
 
             NPC.damage = 0;
-            // BUGFIX: this used to be `NPC.velocity *= 0.9f` + a 0.04x bob offset, which converges to
-            // basically zero within a few ticks - the boss stood dead still for the whole 45+ tick
-            // telegraph (SAT SET rule 3 violation), which is also why the attack was hard to notice.
-            // Real slow hover-strafe around the player instead, so it stays clearly "alive" the whole time.
+            // Real slow hover-strafe around the player the whole time, instead of standing still while
+            // the bombs are out (SAT SET rule 3).
             float strafeAngle = Main.GlobalTimeWrappedHourly * (isPhase2 ? 1.1f : 0.8f);
             Vector2 hoverGoal = target.Center + new Vector2((float)Math.Cos(strafeAngle), (float)Math.Sin(strafeAngle) * 0.5f) * 300f;
             NPC.velocity = Vector2.Lerp(NPC.velocity, (hoverGoal - NPC.Center) * 0.05f, 0.12f);
 
-            if (laserGridLines.Count == 0 && aiTimer == 0)
+            if (!laserGridBombsSpawned && aiTimer == 1)
             {
-                // A sweeping grid: several lines parallel to the aim direction, spaced across the
-                // player, plus one perpendicular cross-line through their position.
-                Vector2 aim = target.Center - NPC.Center;
-                if (aim == Vector2.Zero) aim = new Vector2(NPC.direction, 0f);
-                aim.Normalize();
-                Vector2 perp = new Vector2(-aim.Y, aim.X);
-
-                for (int i = 0; i < lineCount; i++)
+                laserGridBombsSpawned = true;
+                for (int i = 0; i < LaserGridBombCount; i++)
                 {
-                    float offset = (i - (lineCount - 1) / 2f) * spacing;
-                    Vector2 center = target.Center + perp * offset;
-                    laserGridLines.Add((center - aim * lineHalfLength, center + aim * lineHalfLength));
+                    Vector2 landing = target.Center + Main.rand.NextVector2CircularEdge(220f, 220f);
+                    laserGridBombPoints.Add(landing);
+                    laserGridBombFuse.Add(LaserGridBombTravelTicks + LaserGridBombFuseDelay + i * detonateInterval);
                 }
-                laserGridLines.Add((target.Center - perp * lineHalfLength, target.Center + perp * lineHalfLength));
+                Terraria.Audio.SoundEngine.PlaySound(SoundID.Item9, NPC.Center);
                 NPC.netUpdate = true;
             }
 
-            if (aiTimer < LaserGridTelegraphTicks)
+            // Bomb sprites arc in and sit armed (blinking) at their landing point until their fuse runs out.
+            for (int i = 0; i < laserGridBombPoints.Count; i++)
             {
-                // Telegraphed laser sights - dim scanning particles walking along each line so the
-                // grid shape reads clearly before it solidifies.
-                if (aiTimer % 3 == 0)
+                int fuseTick = laserGridBombFuse[i];
+                if (aiTimer >= fuseTick) continue; // already detonated below
+
+                if (aiTimer < LaserGridBombTravelTicks)
                 {
-                    foreach (var line in laserGridLines)
+                    // Falling-in arc from the boss toward the landing point.
+                    float t = aiTimer / (float)LaserGridBombTravelTicks;
+                    Vector2 from = NPC.Center;
+                    Vector2 pos = Vector2.Lerp(from, laserGridBombPoints[i], t) - new Vector2(0f, (float)Math.Sin(t * MathHelper.Pi) * 140f);
+                    LuminanceUtilities.SpawnParticle(pos, Vector2.Zero, new Color(90, 230, 120), 10, 0.8f, ParticleType.Spark);
+                }
+                else
+                {
+                    // Armed and telegraphing at the landing point - blink faster as the fuse gets close.
+                    int ticksLeft = fuseTick - aiTimer;
+                    int blinkRate = ticksLeft < 15 ? 2 : 6;
+                    if (aiTimer % blinkRate == 0)
                     {
-                        Vector2 p = Vector2.Lerp(line.start, line.end, Main.rand.NextFloat());
-                        LuminanceUtilities.SpawnParticle(p, Vector2.Zero, new Color(90, 230, 120) * 0.5f, 12, 0.6f, ParticleType.Spark);
+                        for (int r = 0; r < 3; r++)
+                        {
+                            float a = MathHelper.TwoPi * r / 3f + Main.GlobalTimeWrappedHourly * 4f;
+                            Vector2 p = laserGridBombPoints[i] + new Vector2((float)Math.Cos(a), (float)Math.Sin(a)) * 20f;
+                            LuminanceUtilities.SpawnParticle(p, Vector2.Zero, Color.OrangeRed * 0.8f, 10, 0.7f, ParticleType.Spark);
+                        }
                     }
                 }
-                return;
             }
 
-            if (!laserGridSolidified)
+            // Detonate any bomb whose fuse has just run out.
+            for (int i = 0; i < laserGridBombPoints.Count; i++)
             {
-                laserGridSolidified = true;
-                int dmg = isPhase2 ? 85 : 60;
-                int segments = isPhase2 ? 14 : 10;
-                foreach (var line in laserGridLines)
-                    SpawnLaserSegmentLine(line.start, line.end, segments, dmg, solidifyDuration);
-
-                Terraria.Audio.SoundEngine.PlaySound(SoundID.Item29, NPC.Center);
-                ScreenShakeSystem.StartShakeAtPoint(target.Center, 5f, 0.2f);
-                NPC.netUpdate = true;
+                if (aiTimer != laserGridBombFuse[i]) continue;
+                DetonateLaserGridBomb(laserGridBombPoints[i], target);
             }
 
-            if (aiTimer > LaserGridTelegraphTicks + solidifyDuration + 10)
+            int lastFuse = laserGridBombFuse.Count > 0 ? laserGridBombFuse[laserGridBombFuse.Count - 1] : 0;
+            if (aiTimer > lastFuse + 15)
             {
-                laserGridLines.Clear();
-                laserGridSolidified = false;
+                laserGridBombPoints.Clear();
+                laserGridBombFuse.Clear();
+                laserGridBombsSpawned = false;
                 aiState = STATE_IDLE;
                 aiTimer = 0;
                 patternCooldown = isPhase2 ? 25 : 40;
@@ -115,34 +121,37 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
         }
 
-        // A "blinding, noise-textured" beam approximated as a line of overlapping short-lived
-        // hostile hitboxes (same discrete-hitbox-along-a-line convention SpawnMeleeSlash/the arc
-        // slash in the melee trio already use) rather than one stretched sprite - keeps it fully
-        // compatible with the shared neon/noise projectile shader without needing per-segment
-        // custom scaling logic.
-        private void SpawnLaserSegmentLine(Vector2 start, Vector2 end, int segments, int dmg, int lifeTicks)
+        // Detonates one bomb: a burst of projectiles fired from whatever ranged weapon is currently
+        // being mimicked ("projectile dari senjata ranger yang sedang dipakai"), fanned out in a ring
+        // rather than all aimed at one point.
+        private void DetonateLaserGridBomb(Vector2 point, Player target)
         {
-            Vector2 dir = end - start;
-            float rot = dir.ToRotation();
-            for (int i = 0; i <= segments; i++)
+            int shardCount = isPhase2 ? 10 : 7;
+            int dmg = isPhase2 ? 42 : 30;
+            float speed = isPhase2 ? 8.5f : 6.5f;
+            int projType = ResolveMimickedProjectileType();
+
+            for (int i = 0; i < shardCount; i++)
             {
-                Vector2 pos = Vector2.Lerp(start, end, i / (float)segments);
-                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), pos, Vector2.Zero, ProjectileID.EnchantedBeam, dmg, 0f, proxySlot);
+                float ang = MathHelper.TwoPi * i / shardCount + Main.rand.NextFloat(-0.1f, 0.1f);
+                Vector2 vel = new Vector2((float)Math.Cos(ang), (float)Math.Sin(ang)) * speed;
+                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), point, vel, projType, dmg, 0f, proxySlot);
                 if (p >= 0 && p < Main.maxProjectiles)
                 {
                     Projectile proj = Main.projectile[p];
                     proj.hostile = true;
                     proj.friendly = false;
                     proj.tileCollide = false;
-                    proj.aiStyle = 0;
-                    proj.timeLeft = lifeTicks;
-                    proj.rotation = rot;
-                    proj.scale = 1.6f;
-                    proj.penetrate = -1;
+                    proj.penetrate = 1;
+                    proj.timeLeft = 70;
+                    proj.scale = 1.1f;
                 }
-                if (i % 2 == 0)
-                    LuminanceUtilities.SpawnParticle(pos, Vector2.Zero, new Color(90, 230, 120), 14, 0.8f, ParticleType.Spark);
             }
+
+            ScreenShakeSystem.StartShakeAtPoint(point, 6f, 0.2f);
+            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item14, point);
+            for (int i = 0; i < 16; i++)
+                LuminanceUtilities.SpawnParticle(point, Main.rand.NextVector2Circular(4, 4), new Color(90, 230, 120), 20, 1.1f, ParticleType.Spark);
         }
 
         // ============================================================================================
@@ -168,10 +177,18 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleHomingClusterComet(Player target)
         {
-            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
-            // (fracture/homing-window checks that key off aiTimer would never advance).
-            aiTimer++;
-
+            // NOTE: aiTimer already increments once per tick in WhoAmI.cs AI(), before the switch
+            // that dispatches here - see the comment in HandleVectorLaserGrid above. This method
+            // used to double-increment it (via a stray aiTimer++ that used to be right here), which
+            // meant `aiTimer == 0` below was NEVER true on any tick this handler actually ran on.
+            // That's a much worse bug here than in the other two attacks in this file: the comet
+            // projectile (cometIndex) never got spawned, cometFractured never became true, and
+            // EVERY exit path in this method is gated behind cometFractured - so the boss got stuck
+            // in STATE_HOMING_CLUSTER_COMET permanently (just hovering/orbiting the player, doing
+            // nothing) any time the pattern RNG picked this attack for a Ranged-classified weapon.
+            // Removed the duplicate increment, and added the timeout below as a safety net so a
+            // failed/skipped spawn (e.g. NewProjectile running out of slots) can never soft-lock the
+            // fight like this again.
             int fractureTick = isPhase2 ? 45 : 60;
             int pelletCount = isPhase2 ? 28 : 18;
             int homingWindow = isPhase2 ? 55 : 40; // ticks after fracture the pellets keep actively homing
@@ -187,7 +204,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             Vector2 hoverPoint = target.Center + new Vector2((float)Math.Cos(hoverAngle), (float)Math.Sin(hoverAngle)) * 340f;
             NPC.velocity = Vector2.Lerp(NPC.velocity, (hoverPoint - NPC.Center) * 0.06f, 0.15f);
 
-            if (cometIndex == -1 && aiTimer == 0)
+            if (cometIndex == -1 && aiTimer == 1)
             {
                 int projType = ResolveMimickedProjectileType();
                 Vector2 aim = target.Center - NPC.Center;
@@ -209,6 +226,20 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 }
                 Terraria.Audio.SoundEngine.PlaySound(SoundID.Item42, NPC.Center);
                 NPC.netUpdate = true;
+            }
+
+            // SAFETY NET: if the comet still hasn't spawned a few ticks in (e.g. NewProjectile ran
+            // out of free projectile slots), don't sit in this state forever waiting for a fracture
+            // that can never happen - bail back to idle. This is what should have caught the
+            // double-increment bug described above too, and keeps this pattern from ever being able
+            // to soft-lock the fight again for any other reason that stops cometIndex from being set.
+            if (cometIndex == -1 && aiTimer > 5)
+            {
+                aiState = STATE_IDLE;
+                aiTimer = 0;
+                patternCooldown = 15;
+                NPC.netUpdate = true;
+                return;
             }
 
             // --- pre-fracture: steer the comet in an organic curving orbit toward the player ---
@@ -291,199 +322,165 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // Prefers the mimicked weapon's own projectile type ("resembling the player's ranged
         // projectile", per the brief) and falls back to a generic energy bolt if the weapon has no
         // valid shoot type for some reason.
+        //
+        // FIX ("boss nembak kotak ungu gajelas pas pake senjata ranged"): this was missing the exact
+        // placeholder guard that FireAttackProjectileAimed already has in WhoAmI_Helpers.cs. Almost
+        // every ammo-based gun (S.D.M.G., Chain Gun, Minishark, etc.) stores ProjectileID.
+        // PurificationPowder in Item.shoot as a meaningless placeholder - the real fired projectile
+        // normally comes from Player.PickAmmo(), which never runs for this boss's dummy owner.
+        // PurificationPowder IS a valid ID (> ProjectileID.None), so the old check let it straight
+        // through - every pattern that calls this (Vector Laser Grid bombs, Homing Cluster Comet,
+        // Ricochet Barrage, Starfall Convergence, plus the Magic-side extras) ended up spawning a
+        // REAL, hostile Clentaminator paint-powder blob instead of a bullet whenever the boss was
+        // mimicking an ammo-based gun. Layered under this pattern set's own tint VFX and often
+        // scaled way up (Homing Cluster Comet's "giant condensed projectile" is 2.1x-2.6x scale) or
+        // fired in a dense burst (Singularity Overdrive's 12-16 round ring, tinted dark purple), a
+        // pile of those blobs reads exactly as the reported "unclear purple box" instead of a shot.
         private int ResolveMimickedProjectileType()
         {
-            return activeWeapon != null && activeWeapon.shoot > ProjectileID.None ? activeWeapon.shoot : ProjectileID.EnchantedBeam;
+            if (activeWeapon == null)
+                return ProjectileID.EnchantedBeam;
+
+            int projType = activeWeapon.shoot;
+            if (projType <= ProjectileID.None || projType == ProjectileID.PurificationPowder)
+                projType = activeWeapon.CountsAsClass(DamageClass.Ranged) ? ProjectileID.BulletHighVelocity : ProjectileID.EnchantedBeam;
+
+            return projType;
         }
 
         // ============================================================================================
         // ATTACK 3: "SINGULARITY OVERDRIVE"
-        // An unstable gravitational orb settles near the player, continuously pulling them in while
-        // periodically emitting expanding, neon-outlined energy rings the player has to jump/dash
-        // over.
+        // REDESIGN: the boss snap-dashes straight into the player, then detonates into a ring of
+        // projectiles fired from whichever ranged weapon is currently being mimicked. This whole
+        // dash-then-detonate beat repeats 3 times in a row before the boss backs off.
         // ============================================================================================
-        private class SingularityRingWave
-        {
-            public readonly List<int> ProjectileIndices = new List<int>();
-            public int SpawnTick;
-            public float MaxRadius;
-            public Vector2 Anchor;
-        }
-
-        private int singularityOrbIndex = -1;
-        private bool singularitySettled = false;
-        private int singularityNextRingTick = -1;
-        private readonly List<SingularityRingWave> singularityRingWaves = new List<SingularityRingWave>();
-        private const int SingularityRingLifetime = 40;
+        private int singularityDashIndex = 0;
+        private int singularityCycleStartTick = 0;
+        private bool singularityDashLaunched = false;
+        private bool singularityExploded = false;
+        private Vector2 singularityDashTargetPoint = Vector2.Zero;
+        private const int SingularityDashCount = 3;
 
         private void ResetSingularityOverdriveState()
         {
-            if (singularityOrbIndex >= 0 && singularityOrbIndex < Main.maxProjectiles && Main.projectile[singularityOrbIndex].active)
-                Main.projectile[singularityOrbIndex].Kill();
-            foreach (var wave in singularityRingWaves)
-                foreach (int idx in wave.ProjectileIndices)
-                    if (idx >= 0 && idx < Main.maxProjectiles && Main.projectile[idx].active)
-                        Main.projectile[idx].Kill();
-            singularityRingWaves.Clear();
-            singularityOrbIndex = -1;
-            singularitySettled = false;
-            singularityNextRingTick = -1;
+            singularityDashIndex = 0;
+            singularityCycleStartTick = 0;
+            singularityDashLaunched = false;
+            singularityExploded = false;
+            singularityDashTargetPoint = Vector2.Zero;
         }
 
         private void HandleSingularityOverdrive(Player target)
         {
-            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
-            // (travel/ring-interval/active-duration checks that key off aiTimer would never advance).
-            aiTimer++;
-
-            const int travelTicks = 20;
-            int activeDuration = isPhase2 ? 130 : 100;
-            int ringInterval = isPhase2 ? 30 : 42;
-            float pullStrength = isPhase2 ? 0.22f : 0.15f;
-            float maxRingRadius = isPhase2 ? 340f : 280f;
-            int ringDamage = isPhase2 ? 55 : 40;
-            const int ringSegments = 16;
+            // aiTimer already increments once per tick in WhoAmI.cs AI(), before the switch that
+            // dispatches here - see the comment in HandleVectorLaserGrid above. Do not add a second
+            // increment here; every timing check below is relative to singularityCycleStartTick, which
+            // is reset to the CURRENT aiTimer each time a new dash cycle starts (see the bottom of this
+            // method) - the same "first real tick of a phase is always N+1, never N" convention used
+            // throughout this pattern set.
+            int windup = isPhase2 ? 10 : 14;
+            int dashDuration = isPhase2 ? 12 : 16;
+            float dashSpeed = isPhase2 ? 34f : 26f;
+            int recoverAfterExplode = isPhase2 ? 12 : 16;
+            int explosionCount = isPhase2 ? 16 : 12;
+            int explosionDamage = isPhase2 ? 42 : 30;
+            int dashContactDamage = isPhase2 ? 45 : 32;
 
             NPC.damage = 0;
+            int localTick = aiTimer - singularityCycleStartTick;
 
-            // BUGFIX: same SAT SET rule 3 gap as the comet attack above - this pattern never moved
-            // the boss's own body, so it stood dead still while the orb pulled/rang the whole time.
-            // Loose orbital crawl around the orb once it exists fixes that.
-            if (singularityOrbIndex >= 0 && singularityOrbIndex < Main.maxProjectiles && Main.projectile[singularityOrbIndex].active)
+            // --- WINDUP: telegraph the upcoming dash at the player's predicted position ---
+            if (!singularityDashLaunched && localTick < windup)
             {
-                Vector2 crawl = GetOrbitalCrawlPosition(Main.projectile[singularityOrbIndex].Center, 190f, Main.GlobalTimeWrappedHourly * 1.3f);
-                NPC.velocity = Vector2.Lerp(NPC.velocity, (crawl - NPC.Center) * 0.07f, 0.15f);
+                if (localTick == 1)
+                    singularityDashTargetPoint = GetPredictiveInterceptPoint(target, isPhase2 ? 20f : 14f);
+
+                // Never fully static during the windup (SAT SET rule 3) - a slight brake + bob instead
+                // of a hard freeze.
+                NPC.velocity *= 0.85f;
+                NPC.Center += GetSatSetBobOffset(1.5f, 8f) * 0.05f;
+
+                if (localTick % 3 == 0)
+                {
+                    Vector2 toTarget = singularityDashTargetPoint - NPC.Center;
+                    if (toTarget != Vector2.Zero) toTarget.Normalize();
+                    LuminanceUtilities.SpawnParticle(NPC.Center + toTarget * 40f, toTarget * 2f, new Color(150, 40, 220), 16, 1f, ParticleType.Spark);
+                }
+                return;
             }
 
-            if (singularityOrbIndex == -1 && aiTimer == 0)
+            // --- LAUNCH: snap-dash straight at the player's predicted position ---
+            if (!singularityDashLaunched)
             {
-                Vector2 dest = target.Center + Main.rand.NextVector2CircularEdge(60f, 60f);
-                Vector2 aim = dest - NPC.Center;
-                if (aim != Vector2.Zero) aim.Normalize(); else aim = new Vector2(NPC.direction, 0f);
-
-                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, aim * 14f, ProjectileID.EnchantedBeam, 0, 0f, proxySlot);
-                if (p >= 0 && p < Main.maxProjectiles)
-                {
-                    singularityOrbIndex = p;
-                    Projectile proj = Main.projectile[p];
-                    proj.hostile = true;
-                    proj.friendly = false;
-                    proj.tileCollide = false;
-                    proj.penetrate = -1;
-                    proj.scale = isPhase2 ? 2.4f : 2f;
-                    proj.timeLeft = travelTicks + activeDuration + 20;
-                }
+                singularityDashLaunched = true;
+                Vector2 dir = singularityDashTargetPoint - NPC.Center;
+                if (dir != Vector2.Zero) dir.Normalize(); else dir = new Vector2(NPC.direction, 0f);
+                ApplySnapDash(dir, dashSpeed);
                 Terraria.Audio.SoundEngine.PlaySound(SoundID.Item42, NPC.Center);
+                for (int i = 0; i < 14; i++)
+                    LuminanceUtilities.SpawnParticle(NPC.Center, Main.rand.NextVector2Circular(4, 4), new Color(150, 40, 220), 22, 1.3f, ParticleType.Spark);
                 NPC.netUpdate = true;
             }
 
-            if (singularityOrbIndex < 0 || singularityOrbIndex >= Main.maxProjectiles || !Main.projectile[singularityOrbIndex].active)
+            int dashTick = localTick - windup;
+            if (dashTick >= 0 && dashTick < dashDuration)
             {
-                ResetSingularityOverdriveState();
-                aiState = STATE_IDLE;
-                aiTimer = 0;
-                patternCooldown = 20;
-                NPC.netUpdate = true;
-                return;
-            }
-            Projectile orb = Main.projectile[singularityOrbIndex];
-
-            if (!singularitySettled)
-            {
-                if (aiTimer >= travelTicks)
-                {
-                    singularitySettled = true;
-                    orb.velocity = Vector2.Zero;
-                    singularityNextRingTick = aiTimer; // first ring fires immediately on settle
-                    for (int i = 0; i < 20; i++)
-                        LuminanceUtilities.SpawnParticle(orb.Center, Main.rand.NextVector2Circular(4, 4), new Color(90, 20, 140), 24, 1.4f, ParticleType.Spark);
-                    ScreenShakeSystem.StartShakeAtPoint(orb.Center, 6f, 0.25f);
-                }
+                NPC.damage = dashContactDamage; // contact damage while the dash itself is live
+                if (dashTick % 2 == 0)
+                    LuminanceUtilities.SpawnParticle(NPC.Center, -NPC.velocity * 0.1f, new Color(150, 40, 220), 24, 1.2f, ParticleType.Spark);
                 return;
             }
 
-            // --- ACTIVE: pull the player in, periodically emit expanding energy rings ---
-            Vector2 toOrb = orb.Center - target.Center;
-            float dist = toOrb.Length();
-            if (dist > 4f)
-                target.velocity += toOrb / dist * pullStrength;
-
-            if (Main.rand.NextBool(3))
+            // --- EXPLODE: detonate into a ring of projectiles from the mimicked ranged weapon ---
+            if (!singularityExploded)
             {
-                Vector2 inward = -toOrb.SafeNormalize(Vector2.Zero);
-                LuminanceUtilities.SpawnParticle(orb.Center + Main.rand.NextVector2Circular(30, 30), inward * 1.5f, new Color(140, 40, 200), 16, 1f, ParticleType.Spark);
-            }
+                singularityExploded = true;
+                NPC.damage = 0;
+                ApplyBrakingImpulse(0.4f);
 
-            if (aiTimer >= singularityNextRingTick && aiTimer < travelTicks + activeDuration)
-            {
-                SpawnSingularityRingWave(orb.Center, maxRingRadius, ringSegments, ringDamage);
-                singularityNextRingTick = aiTimer + ringInterval;
-            }
+                int projType = ResolveMimickedProjectileType();
+                for (int i = 0; i < explosionCount; i++)
+                {
+                    float ang = MathHelper.TwoPi * i / explosionCount;
+                    Vector2 vel = new Vector2((float)Math.Cos(ang), (float)Math.Sin(ang)) * (isPhase2 ? 8.5f : 6.5f);
+                    int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, vel, projType, explosionDamage, 0f, proxySlot);
+                    if (p >= 0 && p < Main.maxProjectiles)
+                    {
+                        Projectile proj = Main.projectile[p];
+                        proj.hostile = true;
+                        proj.friendly = false;
+                        proj.tileCollide = false;
+                        proj.penetrate = 1;
+                        proj.timeLeft = 70;
+                        proj.scale = 1.1f;
+                    }
+                }
 
-            UpdateSingularityRingWaves();
-
-            if (aiTimer >= travelTicks + activeDuration)
-            {
-                ResetSingularityOverdriveState();
-                aiState = STATE_IDLE;
-                aiTimer = 0;
-                patternCooldown = isPhase2 ? 25 : 40;
+                ScreenShakeSystem.StartShakeAtPoint(NPC.Center, 9f, 0.3f);
+                Terraria.Audio.SoundEngine.PlaySound(SoundID.Item14, NPC.Center);
+                for (int i = 0; i < 22; i++)
+                    LuminanceUtilities.SpawnParticle(NPC.Center, Main.rand.NextVector2Circular(5, 5), new Color(150, 40, 220), 24, 1.3f, ParticleType.Spark);
                 NPC.netUpdate = true;
             }
-        }
 
-        private void SpawnSingularityRingWave(Vector2 anchor, float maxRadius, int segments, int dmg)
-        {
-            var wave = new SingularityRingWave { SpawnTick = aiTimer, MaxRadius = maxRadius, Anchor = anchor };
-            for (int i = 0; i < segments; i++)
+            // --- RECOVER, then either line up the next dash or finish after the 3rd ---
+            ApplyBrakingImpulse(0.15f);
+            if (localTick >= windup + dashDuration + recoverAfterExplode)
             {
-                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), anchor, Vector2.Zero, ProjectileID.EnchantedBeam, dmg, 0f, proxySlot);
-                if (p >= 0 && p < Main.maxProjectiles)
+                singularityDashIndex++;
+                if (singularityDashIndex >= SingularityDashCount)
                 {
-                    Projectile proj = Main.projectile[p];
-                    proj.hostile = true;
-                    proj.friendly = false;
-                    proj.tileCollide = false;
-                    proj.aiStyle = 0;
-                    proj.penetrate = -1;
-                    proj.timeLeft = SingularityRingLifetime + 5;
-                    proj.scale = 0.8f;
-                    wave.ProjectileIndices.Add(p);
-                }
-            }
-            singularityRingWaves.Add(wave);
-        }
-
-        // Puppets each ring wave's projectiles outward from their anchor over SingularityRingLifetime
-        // ticks (same manual-tracked-indices convention as the melee trio's Sovereign Guard blade
-        // ring) so the ring reads as one continuous expanding shockwave rather than static points.
-        private void UpdateSingularityRingWaves()
-        {
-            for (int w = singularityRingWaves.Count - 1; w >= 0; w--)
-            {
-                SingularityRingWave wave = singularityRingWaves[w];
-                int age = aiTimer - wave.SpawnTick;
-                float t = MathHelper.Clamp(age / (float)SingularityRingLifetime, 0f, 1f);
-                float radius = MathHelper.Lerp(0f, wave.MaxRadius, t);
-                bool anyAlive = false;
-
-                for (int i = 0; i < wave.ProjectileIndices.Count; i++)
-                {
-                    int idx = wave.ProjectileIndices[i];
-                    if (idx < 0 || idx >= Main.maxProjectiles || !Main.projectile[idx].active) continue;
-                    anyAlive = true;
-
-                    float ang = MathHelper.TwoPi * i / wave.ProjectileIndices.Count;
-                    Vector2 pos = wave.Anchor + new Vector2((float)Math.Cos(ang), (float)Math.Sin(ang)) * radius;
-                    Main.projectile[idx].Center = pos;
-
-                    if (i % 3 == 0)
-                        LuminanceUtilities.SpawnParticle(pos, Vector2.Zero, new Color(140, 40, 220), 10, 0.8f, ParticleType.Spark);
-
-                    if (t >= 1f) Main.projectile[idx].Kill();
+                    aiState = STATE_IDLE;
+                    aiTimer = 0;
+                    patternCooldown = isPhase2 ? 25 : 40;
+                    NPC.netUpdate = true;
+                    return;
                 }
 
-                if (!anyAlive) singularityRingWaves.RemoveAt(w);
+                singularityCycleStartTick = aiTimer;
+                singularityDashLaunched = false;
+                singularityExploded = false;
+                NPC.netUpdate = true;
             }
         }
     }

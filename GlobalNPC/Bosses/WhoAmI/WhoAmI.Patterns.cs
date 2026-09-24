@@ -29,22 +29,31 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     // index 5 = Abyssal Cleave & Fractured Space (STATE_ABYSSAL_CLEAVE)
                     // index 6 = Orbiting Blade Ring / Sovereign Guard (STATE_ORBITING_BLADE_RING)
                     // index 7 = Dimensional Pierce / Flash Strike (STATE_DIMENSIONAL_PIERCE)
-                    validPatterns = new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 };
+                    // index 8 = Warped Mirror Waltz (STATE_MELEE_MIRROR_WALTZ)
+                    // index 9 = Fractured Persona Onslaught (STATE_MELEE_FRACTURED_ONSLAUGHT)
+                    // index 10 = Riposte Cascade (STATE_MELEE_RIPOSTE_CASCADE)
+                    validPatterns = new List<int> { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
                     break;
                 case WeaponArchetype.ProjMelee:
                     // index 4 = Blink & Echo Combo (STATE_BLINK_ECHO_COMBO)
                     // index 5-7 = same melee archetype trio as TrueMelee (see above) - these read
                     // the player's weapon type for the mimicked slash/blade art but don't require
                     // a projectile, so they stay available even when !hasProjectile.
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 } : new List<int> { 1, 5, 6, 7 };
+                    // index 8-10 = second melee trio (see above) - same convention, also available
+                    // without a projectile (Mirror Waltz/Fractured Onslaught/Riposte Cascade all use
+                    // contact slashes + puppeted blade props, not a fire-and-forget projectile).
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 } : new List<int> { 1, 5, 6, 7, 8, 9, 10 };
                     break;
                 case WeaponArchetype.Ranged:
                     // index 4 = Orbiting Grid Lock (STATE_ORBIT_GRID_LOCK)
                     // index 5 = Vector Laser Grid System (STATE_VECTOR_LASER_GRID)
                     // index 6 = Homing Cluster Comet (STATE_HOMING_CLUSTER_COMET)
                     // index 7 = Singularity Overdrive (STATE_SINGULARITY_OVERDRIVE)
-                    // All 3 need a real ranged projectile to mimic, same as the rest of this pool.
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 } : new List<int> { 3 };
+                    // index 8 = Parallax Volley (STATE_RANGED_PARALLAX_VOLLEY)
+                    // index 9 = Mirror Ricochet (STATE_RANGED_MIRROR_RICOCHET)
+                    // index 10 = Starfall Convergence (STATE_RANGED_STARFALL_CONVERGENCE)
+                    // All need a real ranged projectile to mimic, same as the rest of this pool.
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 } : new List<int> { 3 };
                     break;
                 case WeaponArchetype.Magic:
                     // index 4 = existing Phantom Mirage Cascade (STATE_MAGIC_SPIRAL_RIFT)
@@ -52,23 +61,38 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     // index 6 = Aureola Signet Rain (STATE_AUREOLA_SIGNET_RAIN)
                     // index 7 = Double Helix Sweep (STATE_DOUBLE_HELIX_SWEEP)
                     // index 8 = Quantum Glitch Phasing (STATE_QUANTUM_GLITCH_PHASING)
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7, 8 } : new List<int> { 3 };
+                    // index 9 = Fracture Bloom (STATE_MAGIC_FRACTURE_BLOOM)
+                    // index 10 = Umbral Duality (STATE_MAGIC_UMBRAL_DUALITY)
+                    // index 11 = Paradox Mirror Volley (STATE_MAGIC_PARADOX_MIRROR)
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 } : new List<int> { 3 };
                     break;
                 case WeaponArchetype.Summon:
                     // index 4 = new Spectral Rift Swarm (STATE_SUMMON_RIFT_SWARM)
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4 } : new List<int> { 1 };
+                    // index 5 = Wraith Convergence (STATE_SUMMON_WRAITH_CONVERGENCE)
+                    // index 6 = Soul Tether Bind (STATE_SUMMON_SOUL_TETHER)
+                    // index 7 = Spectral Carousel (STATE_SUMMON_SPECTRAL_CAROUSEL)
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 } : new List<int> { 1 };
                     break;
                 case WeaponArchetype.Whip:
                     // index 4 = new Lash Cage (STATE_WHIP_LASH_CAGE)
-                    validPatterns = new List<int> { 0, 1, 2, 3, 4 };
+                    // index 5 = Serpent's Coil (STATE_WHIP_SERPENTS_COIL)
+                    // index 6 = Cracked Fan Lash (STATE_WHIP_FAN_LASH)
+                    // index 7 = Puppeteer's Snap (STATE_WHIP_PUPPETEER_SNAP)
+                    validPatterns = new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 };
                     break;
                 case WeaponArchetype.Yoyo:
                     // index 4 = new Tether Storm (STATE_YOYO_TETHER_STORM)
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4 } : new List<int> { 3 };
+                    // index 5 = Pendulum Reckoning (STATE_YOYO_PENDULUM_RECKONING)
+                    // index 6 = Binary Orbit Snare (STATE_YOYO_BINARY_SNARE)
+                    // index 7 = Cascade Unravel (STATE_YOYO_CASCADE_UNRAVEL)
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 } : new List<int> { 3 };
                     break;
                 case WeaponArchetype.Boomerang:
                     // index 4 = new Crossfire (STATE_BOOMERANG_CROSSFIRE)
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4 } : new List<int> { 0 };
+                    // index 5 = Windmill Barrage (STATE_BOOMERANG_WINDMILL_BARRAGE)
+                    // index 6 = Ricochet Triangle (STATE_BOOMERANG_RICOCHET_TRIANGLE)
+                    // index 7 = Curving Return Barrage (STATE_BOOMERANG_CURVING_RETURN)
+                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 } : new List<int> { 0 };
                     break;
                 default:
                     validPatterns = new List<int> { 0 };
@@ -93,7 +117,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             else
                 preferredPattern = validPatterns[GetDeterministicRandom(0, validPatterns.Count)];
 
-            if (playerAggressive && isClose && parryCooldownTimer == 0 && GetDeterministicRandom(0, 100) < 35)
+            // FIX ("projectile dari senjatanya ilang pas ganti pattern"): this function gets called
+            // again on every tick that patternCooldown <= 0 (see the STATE_IDLE case in WhoAmI.cs),
+            // which for the "inline" patterns below (index 0-3 - the ones that stay parked in
+            // STATE_IDLE for their whole run instead of switching to a dedicated state, sometimes
+            // up to 150 ticks) is true for almost their entire runtime, not just once at the start.
+            // Without also checking archetypePatternTimer (which stays > 0 for the full committed
+            // duration of the current pattern "session"), this roll could fire mid-barrage/mid-combo
+            // and yank the boss into STATE_PARRY_STANCE, abandoning whatever projectile/combo it had
+            // just fired - same root cause as the Mirror Mirage/Mirror Lance fix in WhoAmI.cs and the
+            // weapon-carousel fix in WhoAmI_Helpers.cs (see those comments for the full explanation).
+            if (archetypePatternTimer <= 0 && playerAggressive && isClose && parryCooldownTimer == 0 && GetDeterministicRandom(0, 100) < 35)
             {
                 aiState = STATE_PARRY_STANCE;
                 aiTimer = 0;
@@ -105,16 +139,59 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             if (archetypePatternTimer <= 0)
             {
+                // Let a pattern repeat back-to-back for a few "sessions" - reads like the boss
+                // committing to a combo - instead of forcing a different index every single time.
+                // archetypePatternStreak counts how many sessions in a row the CURRENT index has
+                // run; once it hits archetypePatternStreakLimit (rolled fresh to 3 or 4 whenever the
+                // pattern actually changes), only THEN do we force a reroll away from it. Below that
+                // limit, preferredPattern is allowed through as-is, same-index-as-before included.
                 int newPattern = preferredPattern;
-                int attempts = 0;
-                while (newPattern == archetypePatternIndex && attempts < 5 && validPatterns.Count > 1)
+                bool mustSwitch = archetypePatternStreak >= archetypePatternStreakLimit && validPatterns.Count > 1;
+
+                if (mustSwitch)
                 {
-                    newPattern = validPatterns[GetDeterministicRandom(0, validPatterns.Count)];
-                    attempts++;
+                    int attempts = 0;
+                    while (newPattern == archetypePatternIndex && attempts < 5)
+                    {
+                        newPattern = validPatterns[GetDeterministicRandom(0, validPatterns.Count)];
+                        attempts++;
+                    }
                 }
-                archetypePatternIndex = newPattern;
+
+                if (newPattern == archetypePatternIndex)
+                {
+                    archetypePatternStreak++;
+                }
+                else
+                {
+                    archetypePatternIndex = newPattern;
+                    archetypePatternStreak = 1;
+                    archetypePatternStreakLimit = GetDeterministicRandom(3, 5); // rolls 3 or 4
+                }
+
                 archetypePatternTimer = isPhase2 ? 100 : 150;
                 patternCooldown = isPhase2 ? 25 : 45;
+                // FIX ("pattern lawas suka keluar aneh/instan-abis"): the "legacy" inline patterns
+                // (the ones that never switch aiState away from STATE_IDLE - e.g. pattern index 2/3
+                // on nearly every archetype below, sometimes 0/1/2 too) time themselves purely off
+                // aiTimer (aiTimer==0 teleport-in checks, aiTimer % N burst cadence, aiTimer > M exit)
+                // as if it were "ticks since THIS pattern started". It isn't: aiTimer is a single
+                // shared counter that only gets reset to 0 by a dedicated state's own entry code (see
+                // e.g. HandleBlinkEchoCombo) or when returning to STATE_IDLE - NOT when this function
+                // picks a new archetypePatternIndex while staying in STATE_IDLE the whole time.
+                // archetypePatternTimer keeps counting down in the background even while a totally
+                // unrelated dedicated-state pattern is running (WhoAmI.cs ticks it unconditionally),
+                // so by the time a fresh index lands here aiTimer is almost always already large and
+                // unrelated to this pattern's own timeline - its `aiTimer == 0` teleport-in openers
+                // silently never fire (skipping straight into the mid-pattern branches instead), its
+                // `aiTimer % N` bursts land on whatever phase aiTimer happens to be at instead of a
+                // clean cadence, and its `aiTimer > exitTick` cutoff can trip almost immediately,
+                // ending the "attack" after a couple of frames. Resetting aiTimer here - once, exactly
+                // when a genuinely new pattern index is chosen - gives every archetype's Execute*Pattern
+                // switch the same clean "aiTimer starts at 0 this tick" guarantee the newer dedicated-
+                // state patterns already get from their own `aiState != STATE_X` entry checks (which
+                // still set aiTimer = 0 themselves right after this, redundantly but harmlessly).
+                aiTimer = 0;
                 NPC.netUpdate = true;
             }
 
@@ -284,6 +361,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 8:
+                        // NEW WAVE 2: Warped Mirror Waltz - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_MIRROR_WALTZ)
+                        {
+                            aiState = STATE_MELEE_MIRROR_WALTZ;
+                            aiTimer = 0;
+                            ResetMeleeMirrorWaltzState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 9:
+                        // NEW WAVE 2: Fractured Persona Onslaught - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_FRACTURED_ONSLAUGHT)
+                        {
+                            aiState = STATE_MELEE_FRACTURED_ONSLAUGHT;
+                            aiTimer = 0;
+                            ResetMeleeFracturedOnslaughtState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 10:
+                        // NEW WAVE 2: Riposte Cascade - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_RIPOSTE_CASCADE)
+                        {
+                            aiState = STATE_MELEE_RIPOSTE_CASCADE;
+                            aiTimer = 0;
+                            ResetMeleeRiposteCascadeState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -414,6 +521,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 8:
+                        // NEW WAVE 2: Warped Mirror Waltz - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_MIRROR_WALTZ)
+                        {
+                            aiState = STATE_MELEE_MIRROR_WALTZ;
+                            aiTimer = 0;
+                            ResetMeleeMirrorWaltzState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 9:
+                        // NEW WAVE 2: Fractured Persona Onslaught - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_FRACTURED_ONSLAUGHT)
+                        {
+                            aiState = STATE_MELEE_FRACTURED_ONSLAUGHT;
+                            aiTimer = 0;
+                            ResetMeleeFracturedOnslaughtState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 10:
+                        // NEW WAVE 2: Riposte Cascade - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_RIPOSTE_CASCADE)
+                        {
+                            aiState = STATE_MELEE_RIPOSTE_CASCADE;
+                            aiTimer = 0;
+                            ResetMeleeRiposteCascadeState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
         }
@@ -534,6 +671,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 8:
+                        // NEW WAVE 2: Warped Mirror Waltz - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_MIRROR_WALTZ)
+                        {
+                            aiState = STATE_MELEE_MIRROR_WALTZ;
+                            aiTimer = 0;
+                            ResetMeleeMirrorWaltzState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 9:
+                        // NEW WAVE 2: Fractured Persona Onslaught - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_FRACTURED_ONSLAUGHT)
+                        {
+                            aiState = STATE_MELEE_FRACTURED_ONSLAUGHT;
+                            aiTimer = 0;
+                            ResetMeleeFracturedOnslaughtState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 10:
+                        // NEW WAVE 2: Riposte Cascade - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_RIPOSTE_CASCADE)
+                        {
+                            aiState = STATE_MELEE_RIPOSTE_CASCADE;
+                            aiTimer = 0;
+                            ResetMeleeRiposteCascadeState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -648,6 +815,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 8:
+                        // NEW WAVE 2: Warped Mirror Waltz - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_MIRROR_WALTZ)
+                        {
+                            aiState = STATE_MELEE_MIRROR_WALTZ;
+                            aiTimer = 0;
+                            ResetMeleeMirrorWaltzState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 9:
+                        // NEW WAVE 2: Fractured Persona Onslaught - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_FRACTURED_ONSLAUGHT)
+                        {
+                            aiState = STATE_MELEE_FRACTURED_ONSLAUGHT;
+                            aiTimer = 0;
+                            ResetMeleeFracturedOnslaughtState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 10:
+                        // NEW WAVE 2: Riposte Cascade - see WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+                        if (aiState != STATE_MELEE_RIPOSTE_CASCADE)
+                        {
+                            aiState = STATE_MELEE_RIPOSTE_CASCADE;
+                            aiTimer = 0;
+                            ResetMeleeRiposteCascadeState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
         }
@@ -656,7 +853,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private void ExecuteRangedPattern(Player target, int pattern)
         {
             bool hasProjectile = WeaponHasProjectile(activeWeapon);
-            if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+            // FIX: pattern index 3 is the exact fallback SelectAndExecuteArchetypePattern picks when
+            // !hasProjectile (validPatterns collapses to just {3} - see that method), and it's safe to
+            // run without a "real" item.shoot because it only calls FireAttackProjectile, which already
+            // has its own bullet-type fallback when weapon.shoot <= 0. The old blanket guard below
+            // returned to STATE_IDLE before pattern 3 ever got a chance to run, so ANY ammo-based ranged
+            // weapon (most vanilla bows/guns never set item.shoot at all - they fire via ammo) made
+            // this whole archetype dead-end back to idle every single tick, which is why the boss would
+            // often just circle the player and only start attacking again once something else (a
+            // carousel weapon swap, a dodge, etc.) happened to change the situation. Exempting pattern 3
+            // here mirrors the same fix already in place in ExecuteMagicPattern (`pattern != 3`).
+            if (!hasProjectile && pattern != 3) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
 
             if (isPhase2)
             {
@@ -751,6 +958,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             aiState = STATE_SINGULARITY_OVERDRIVE;
                             aiTimer = 0;
                             ResetSingularityOverdriveState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 8:
+                        // NEW WAVE 2: Parallax Volley - see WhoAmI_Pattern_RangedArchetypeExtras2.cs
+                        if (aiState != STATE_RANGED_PARALLAX_VOLLEY)
+                        {
+                            aiState = STATE_RANGED_PARALLAX_VOLLEY;
+                            aiTimer = 0;
+                            ResetRangedParallaxVolleyState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 9:
+                        // NEW WAVE 2: Mirror Ricochet - see WhoAmI_Pattern_RangedArchetypeExtras2.cs
+                        if (aiState != STATE_RANGED_MIRROR_RICOCHET)
+                        {
+                            aiState = STATE_RANGED_MIRROR_RICOCHET;
+                            aiTimer = 0;
+                            ResetRangedMirrorRicochetState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 10:
+                        // NEW WAVE 2: Starfall Convergence - see WhoAmI_Pattern_RangedArchetypeExtras2.cs
+                        if (aiState != STATE_RANGED_STARFALL_CONVERGENCE)
+                        {
+                            aiState = STATE_RANGED_STARFALL_CONVERGENCE;
+                            aiTimer = 0;
+                            ResetRangedStarfallConvergenceState();
                             NPC.netUpdate = true;
                         }
                         break;
@@ -852,6 +1089,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 8:
+                        // NEW WAVE 2: Parallax Volley - see WhoAmI_Pattern_RangedArchetypeExtras2.cs
+                        if (aiState != STATE_RANGED_PARALLAX_VOLLEY)
+                        {
+                            aiState = STATE_RANGED_PARALLAX_VOLLEY;
+                            aiTimer = 0;
+                            ResetRangedParallaxVolleyState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 9:
+                        // NEW WAVE 2: Mirror Ricochet - see WhoAmI_Pattern_RangedArchetypeExtras2.cs
+                        if (aiState != STATE_RANGED_MIRROR_RICOCHET)
+                        {
+                            aiState = STATE_RANGED_MIRROR_RICOCHET;
+                            aiTimer = 0;
+                            ResetRangedMirrorRicochetState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 10:
+                        // NEW WAVE 2: Starfall Convergence - see WhoAmI_Pattern_RangedArchetypeExtras2.cs
+                        if (aiState != STATE_RANGED_STARFALL_CONVERGENCE)
+                        {
+                            aiState = STATE_RANGED_STARFALL_CONVERGENCE;
+                            aiTimer = 0;
+                            ResetRangedStarfallConvergenceState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
         }
@@ -876,40 +1143,30 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         }
                         else
                         {
-                            // FIX: "Index was outside the bounds of the array" crashes + projectiles
-                            // silently vanishing whenever the boss channels a Magic weapon. This used
-                            // to write target.Center.X/Y straight into p.ai[0]/p.ai[1] every tick,
-                            // assuming EVERY magic projectile type stores a "homing target world
-                            // position" there. That's only true for a handful of vanilla types -
-                            // for most, ai[0]/ai[1] mean something else entirely (frame/stage
-                            // counters, charge level), and for vanilla's actual homing-style AIs
-                            // ai[0] specifically holds the TARGET'S NPC ARRAY INDEX (an int like
-                            // 0-199), not a coordinate. Dumping a raw world-space X (often in the
-                            // thousands) into that slot made vanilla's own AI do something like
-                            // Main.npc[(int)projectile.ai[0]] with a wildly out-of-range index ->
-                            // IndexOutOfRangeException, killing the projectile mid-update (hence it
-                            // "disappearing") right as the crash happened.
-                            // Fix: don't touch ai[] at all (its layout isn't ours to assume) - steer
-                            // velocity directly toward the target instead, which gives the same
-                            // "tracks the player while channeled" feel and is safe for any projectile
-                            // type regardless of its internal AI.
-                            for (int i = 0; i < Main.maxProjectiles; i++)
-                            {
-                                Projectile p = Main.projectile[i];
-                                if (p.active && p.owner == proxySlot && p.type == activeWeapon.shoot)
-                                {
-                                    Vector2 toTarget = target.Center - p.Center;
-                                    if (toTarget != Vector2.Zero)
-                                    {
-                                        float speed = p.velocity.Length();
-                                        if (speed < 0.01f) speed = activeWeapon.shootSpeed > 0 ? activeWeapon.shootSpeed : 11f;
-                                        toTarget.Normalize();
-                                        p.velocity = Vector2.Lerp(p.velocity, toTarget * speed, 0.08f);
-                                        p.rotation = p.velocity.ToRotation();
-                                    }
-                                }
-                            }
-                            if (aiTimer > 60) { isCurrentlyChanneling = false; aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
+                            // FIX ("projectile dari senjata boss kadang semi-homing padahal senjata
+                            // aslinya nggak homing"): step sebelumnya (yang nyelamatin dari crash
+                            // "Index was outside the bounds of the array") emang udah bener soal ai[]
+                            // - tapi solusinya OVER-CORRECTED: nge-Lerp velocity SEMUA proyektil aktif
+                            // (p.type == activeWeapon.shoot) ke arah target TIAP TICK selama channel
+                            // berlangsung (sampai 60-90 tick) itu SENDIRI adalah homing buatan yang
+                            // dipaksakan ke SEMUA senjata magic tanpa peduli senjata aslinya di vanilla
+                            // homing atau nggak. Water Bolt/Golden Shower/Crystal Storm/Diamond Staff
+                            // dsb yang di tangan player jalan LURUS TOTAL jadi keliatan "nempel ngejar"
+                            // player kalau boss lagi channeling weapon itu - persis laporan bug ini,
+                            // dan "kadang" karena cuma kejadian pas pattern 0 (channeling) yang kepilih
+                            // dari beberapa pattern magic yang ada.
+                            //
+                            // Fix: jangan re-steer proyektil yang UDAH ditembak sama sekali - biarin
+                            // dia terbang sesuai AI aslinya (lurus buat senjata non-homing, atau
+                            // homing sendiri kalau memang vanilla-nya homing - itu urusan AI vanilla
+                            // proyektilnya, bukan urusan kita maksa dari sini). "Channeling" sekarang
+                            // cukup nembak ULANG shot baru tiap beberapa tick yang di-aim ke posisi
+                            // target SAAT itu - itu udah cukup buat kesan "boss lagi nembakin target
+                            // terus-terusan sambil channel", tanpa proyektil manapun berbelok
+                            // supranatural di tengah jalan.
+                            if (aiTimer % 12 == 0 && aiTimer < 84)
+                                FireAttackProjectile(target);
+                            if (aiTimer > 90) { isCurrentlyChanneling = false; aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
                         }
                         break;
                     case 1:
@@ -1005,6 +1262,39 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 9:
+                        // NEW WAVE 2: Fracture Bloom - see WhoAmI_Pattern_MagicArchetypeExtras2.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_MAGIC_FRACTURE_BLOOM)
+                        {
+                            aiState = STATE_MAGIC_FRACTURE_BLOOM;
+                            aiTimer = 0;
+                            ResetMagicFractureBloomState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 10:
+                        // NEW WAVE 2: Umbral Duality - see WhoAmI_Pattern_MagicArchetypeExtras2.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_MAGIC_UMBRAL_DUALITY)
+                        {
+                            aiState = STATE_MAGIC_UMBRAL_DUALITY;
+                            aiTimer = 0;
+                            ResetMagicUmbralDualityState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 11:
+                        // NEW WAVE 2: Paradox Mirror Volley - see WhoAmI_Pattern_MagicArchetypeExtras2.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_MAGIC_PARADOX_MIRROR)
+                        {
+                            aiState = STATE_MAGIC_PARADOX_MIRROR;
+                            aiTimer = 0;
+                            ResetMagicParadoxMirrorState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -1023,28 +1313,13 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         else
                         {
                             // Same fix as the Phase 2 case 0 branch above (see the full explanation
-                            // there): don't clobber p.ai[0]/ai[1] with raw world coordinates, since
-                            // that field means something else for most magic projectile types and,
-                            // for vanilla homing AIs specifically, holds an NPC array index - writing
-                            // a coordinate there caused IndexOutOfRangeException crashes and the
-                            // projectile dying (disappearing) the instant it happened. Steer velocity
-                            // toward the target instead - safe for any projectile type.
-                            for (int i = 0; i < Main.maxProjectiles; i++)
-                            {
-                                Projectile p = Main.projectile[i];
-                                if (p.active && p.owner == proxySlot && p.type == activeWeapon.shoot)
-                                {
-                                    Vector2 toTarget = target.Center - p.Center;
-                                    if (toTarget != Vector2.Zero)
-                                    {
-                                        float speed = p.velocity.Length();
-                                        if (speed < 0.01f) speed = activeWeapon.shootSpeed > 0 ? activeWeapon.shootSpeed : 11f;
-                                        toTarget.Normalize();
-                                        p.velocity = Vector2.Lerp(p.velocity, toTarget * speed, 0.08f);
-                                        p.rotation = p.velocity.ToRotation();
-                                    }
-                                }
-                            }
+                            // there): re-steering every already-fired projectile of this weapon type
+                            // toward the target every tick made ALL magic weapons look semi-homing
+                            // while channeling, even ones that are dead straight in vanilla. Don't
+                            // touch already-spawned projectiles at all - just keep firing fresh aimed
+                            // shots at the target's current position while channeling is active.
+                            if (aiTimer % 15 == 0 && aiTimer < 105)
+                                FireAttackProjectile(target);
                             if (aiTimer > 90) { isCurrentlyChanneling = false; aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
                         }
                         break;
@@ -1141,6 +1416,39 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 9:
+                        // NEW WAVE 2: Fracture Bloom - see WhoAmI_Pattern_MagicArchetypeExtras2.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_MAGIC_FRACTURE_BLOOM)
+                        {
+                            aiState = STATE_MAGIC_FRACTURE_BLOOM;
+                            aiTimer = 0;
+                            ResetMagicFractureBloomState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 10:
+                        // NEW WAVE 2: Umbral Duality - see WhoAmI_Pattern_MagicArchetypeExtras2.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_MAGIC_UMBRAL_DUALITY)
+                        {
+                            aiState = STATE_MAGIC_UMBRAL_DUALITY;
+                            aiTimer = 0;
+                            ResetMagicUmbralDualityState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 11:
+                        // NEW WAVE 2: Paradox Mirror Volley - see WhoAmI_Pattern_MagicArchetypeExtras2.cs
+                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+                        if (aiState != STATE_MAGIC_PARADOX_MIRROR)
+                        {
+                            aiState = STATE_MAGIC_PARADOX_MIRROR;
+                            aiTimer = 0;
+                            ResetMagicParadoxMirrorState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
         }
@@ -1213,6 +1521,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 5:
+                        // NEW WAVE 2: Wraith Convergence - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_SUMMON_WRAITH_CONVERGENCE)
+                        {
+                            aiState = STATE_SUMMON_WRAITH_CONVERGENCE;
+                            aiTimer = 0;
+                            ResetSummonWraithConvergenceState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW WAVE 2: Soul Tether Bind - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_SUMMON_SOUL_TETHER)
+                        {
+                            aiState = STATE_SUMMON_SOUL_TETHER;
+                            aiTimer = 0;
+                            ResetSummonSoulTetherState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW WAVE 2: Spectral Carousel - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_SUMMON_SPECTRAL_CAROUSEL)
+                        {
+                            aiState = STATE_SUMMON_SPECTRAL_CAROUSEL;
+                            aiTimer = 0;
+                            ResetSummonSpectralCarouselState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -1275,6 +1613,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         {
                             aiState = STATE_SUMMON_RIFT_SWARM;
                             aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW WAVE 2: Wraith Convergence - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_SUMMON_WRAITH_CONVERGENCE)
+                        {
+                            aiState = STATE_SUMMON_WRAITH_CONVERGENCE;
+                            aiTimer = 0;
+                            ResetSummonWraithConvergenceState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW WAVE 2: Soul Tether Bind - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_SUMMON_SOUL_TETHER)
+                        {
+                            aiState = STATE_SUMMON_SOUL_TETHER;
+                            aiTimer = 0;
+                            ResetSummonSoulTetherState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW WAVE 2: Spectral Carousel - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_SUMMON_SPECTRAL_CAROUSEL)
+                        {
+                            aiState = STATE_SUMMON_SPECTRAL_CAROUSEL;
+                            aiTimer = 0;
+                            ResetSummonSpectralCarouselState();
                             NPC.netUpdate = true;
                         }
                         break;
@@ -1344,6 +1712,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 5:
+                        // NEW WAVE 2: Serpent's Coil - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_WHIP_SERPENTS_COIL)
+                        {
+                            aiState = STATE_WHIP_SERPENTS_COIL;
+                            aiTimer = 0;
+                            ResetWhipSerpentsCoilState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW WAVE 2: Cracked Fan Lash - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_WHIP_FAN_LASH)
+                        {
+                            aiState = STATE_WHIP_FAN_LASH;
+                            aiTimer = 0;
+                            ResetWhipFanLashState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW WAVE 2: Puppeteer's Snap - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_WHIP_PUPPETEER_SNAP)
+                        {
+                            aiState = STATE_WHIP_PUPPETEER_SNAP;
+                            aiTimer = 0;
+                            ResetWhipPuppeteerSnapState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
             else
@@ -1404,6 +1802,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 5:
+                        // NEW WAVE 2: Serpent's Coil - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_WHIP_SERPENTS_COIL)
+                        {
+                            aiState = STATE_WHIP_SERPENTS_COIL;
+                            aiTimer = 0;
+                            ResetWhipSerpentsCoilState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW WAVE 2: Cracked Fan Lash - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_WHIP_FAN_LASH)
+                        {
+                            aiState = STATE_WHIP_FAN_LASH;
+                            aiTimer = 0;
+                            ResetWhipFanLashState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW WAVE 2: Puppeteer's Snap - see WhoAmI_Pattern_SummonWhipExtras2.cs
+                        if (aiState != STATE_WHIP_PUPPETEER_SNAP)
+                        {
+                            aiState = STATE_WHIP_PUPPETEER_SNAP;
+                            aiTimer = 0;
+                            ResetWhipPuppeteerSnapState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
         }
@@ -1412,7 +1840,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private void ExecuteYoyoPattern(Player target, int pattern)
         {
             bool hasProjectile = WeaponHasProjectile(activeWeapon);
-            if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+            // FIX: same issue and same fix as ExecuteRangedPattern above - pattern 3 is the fallback
+            // SelectAndExecuteArchetypePattern deliberately picks when !hasProjectile (validPatterns
+            // collapses to {3}), and it only calls FireAttackProjectile (which has its own fallback), so
+            // it must be exempted from this guard instead of being blocked by it.
+            if (!hasProjectile && pattern != 3) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
 
             if (isPhase2)
             {
@@ -1460,6 +1892,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         {
                             aiState = STATE_YOYO_TETHER_STORM;
                             aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW WAVE 2: Pendulum Reckoning - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_YOYO_PENDULUM_RECKONING)
+                        {
+                            aiState = STATE_YOYO_PENDULUM_RECKONING;
+                            aiTimer = 0;
+                            ResetYoyoPendulumReckoningState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW WAVE 2: Binary Orbit Snare - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_YOYO_BINARY_SNARE)
+                        {
+                            aiState = STATE_YOYO_BINARY_SNARE;
+                            aiTimer = 0;
+                            ResetYoyoBinarySnareState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW WAVE 2: Cascade Unravel - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_YOYO_CASCADE_UNRAVEL)
+                        {
+                            aiState = STATE_YOYO_CASCADE_UNRAVEL;
+                            aiTimer = 0;
+                            ResetYoyoCascadeUnravelState();
                             NPC.netUpdate = true;
                         }
                         break;
@@ -1516,6 +1978,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
+                    case 5:
+                        // NEW WAVE 2: Pendulum Reckoning - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_YOYO_PENDULUM_RECKONING)
+                        {
+                            aiState = STATE_YOYO_PENDULUM_RECKONING;
+                            aiTimer = 0;
+                            ResetYoyoPendulumReckoningState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW WAVE 2: Binary Orbit Snare - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_YOYO_BINARY_SNARE)
+                        {
+                            aiState = STATE_YOYO_BINARY_SNARE;
+                            aiTimer = 0;
+                            ResetYoyoBinarySnareState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW WAVE 2: Cascade Unravel - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_YOYO_CASCADE_UNRAVEL)
+                        {
+                            aiState = STATE_YOYO_CASCADE_UNRAVEL;
+                            aiTimer = 0;
+                            ResetYoyoCascadeUnravelState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
                 }
             }
         }
@@ -1524,7 +2016,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private void ExecuteBoomerangPattern(Player target, int pattern)
         {
             bool hasProjectile = WeaponHasProjectile(activeWeapon);
-            if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
+            // FIX: same issue as ExecuteRangedPattern/ExecuteYoyoPattern above, but here the fallback
+            // SelectAndExecuteArchetypePattern picks for !hasProjectile is pattern index 0 (validPatterns
+            // collapses to {0} for Boomerang), so that's the index exempted here.
+            if (!hasProjectile && pattern != 0) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
 
             if (isPhase2)
             {
@@ -1577,6 +2072,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         {
                             aiState = STATE_BOOMERANG_CROSSFIRE;
                             aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW WAVE 2: Windmill Barrage - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_BOOMERANG_WINDMILL_BARRAGE)
+                        {
+                            aiState = STATE_BOOMERANG_WINDMILL_BARRAGE;
+                            aiTimer = 0;
+                            ResetBoomerangWindmillBarrageState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW WAVE 2: Ricochet Triangle - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_BOOMERANG_RICOCHET_TRIANGLE)
+                        {
+                            aiState = STATE_BOOMERANG_RICOCHET_TRIANGLE;
+                            aiTimer = 0;
+                            ResetBoomerangRicochetTriangleState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW WAVE 2: Curving Return Barrage - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_BOOMERANG_CURVING_RETURN)
+                        {
+                            aiState = STATE_BOOMERANG_CURVING_RETURN;
+                            aiTimer = 0;
+                            ResetBoomerangCurvingReturnState();
                             NPC.netUpdate = true;
                         }
                         break;
@@ -1633,6 +2158,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         {
                             aiState = STATE_BOOMERANG_CROSSFIRE;
                             aiTimer = 0;
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 5:
+                        // NEW WAVE 2: Windmill Barrage - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_BOOMERANG_WINDMILL_BARRAGE)
+                        {
+                            aiState = STATE_BOOMERANG_WINDMILL_BARRAGE;
+                            aiTimer = 0;
+                            ResetBoomerangWindmillBarrageState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 6:
+                        // NEW WAVE 2: Ricochet Triangle - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_BOOMERANG_RICOCHET_TRIANGLE)
+                        {
+                            aiState = STATE_BOOMERANG_RICOCHET_TRIANGLE;
+                            aiTimer = 0;
+                            ResetBoomerangRicochetTriangleState();
+                            NPC.netUpdate = true;
+                        }
+                        break;
+                    case 7:
+                        // NEW WAVE 2: Curving Return Barrage - see WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+                        if (aiState != STATE_BOOMERANG_CURVING_RETURN)
+                        {
+                            aiState = STATE_BOOMERANG_CURVING_RETURN;
+                            aiTimer = 0;
+                            ResetBoomerangCurvingReturnState();
                             NPC.netUpdate = true;
                         }
                         break;

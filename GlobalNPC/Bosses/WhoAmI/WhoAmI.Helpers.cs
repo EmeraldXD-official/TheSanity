@@ -179,17 +179,55 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             return weapon.shoot > 0 && weapon.shoot != ProjectileID.None;
         }
 
+        // Hard 30-second safety cap on every hostile projectile this boss spawns, across every
+        // archetype pattern. Most patterns already set their own short timeLeft (30-999 ticks) tuned
+        // to that specific attack's window, and those are left untouched below. The gap this closes
+        // is patterns that spawn via GetWeaponProjectileType(activeWeapon) or a raw vanilla type
+        // (e.g. ProjectileID.PurpleLaser) WITHOUT setting timeLeft explicitly - those inherit whatever
+        // default that projectile type's own SetDefaults/AI gives it, which for GetWeaponProjectileType
+        // in particular can be almost anything (activeWeapon can be ANY item in the game, and some
+        // weapons' projectiles have very long or effectively-open-ended default lifespans). Call this
+        // right after every Projectile.NewProjectile(...) + hostile/friendly assignment so NOTHING
+        // this boss fires can ever outlive 30 real seconds, regardless of what it's mimicking.
+        private const int BossProjectileMaxTimeLeft = 1800; // 30 seconds at 60 ticks/sec
+
+        private void ClampBossProjectileLifetime(int projIndex)
+        {
+            if (projIndex < 0 || projIndex >= Main.maxProjectiles) return;
+            Projectile proj = Main.projectile[projIndex];
+            if (!proj.active) return;
+            if (proj.timeLeft <= 0 || proj.timeLeft > BossProjectileMaxTimeLeft)
+                proj.timeLeft = BossProjectileMaxTimeLeft;
+        }
+
         private int GetWeaponProjectileType(Item weapon)
         {
             if (weapon == null || weapon.IsAir)
                 return ProjectileID.TerraBeam;
 
             int projType = weapon.shoot > 0 ? weapon.shoot : ContentSamples.ItemsByType[weapon.type].shoot;
-            if (projType <= 0 || projType == ProjectileID.None)
-                projType = ProjectileID.TerraBeam;
 
-            if (projType == ProjectileID.PurificationPowder)
-                projType = weapon.CountsAsClass(DamageClass.Ranged) ? ProjectileID.Bullet : ProjectileID.BulletHighVelocity;
+            // FIX ("proyektil senjata ranger yang ammonya bullet ngebug jadi kilatan pink/magenta
+            // segede kite"): urutan pengecekan di sini sebelumnya KEBALIK dari FireAttackProjectileAimed
+            // (fungsi kembar di bawah, yang sudah bener). Versi lama:
+            //   1. projType <= 0/None -> langsung dilempar ke ProjectileID.TerraBeam (blade cahaya
+            //      RAKSASA punya True Excalibur/Terra Blade - itu sumber "kite" pink terang di
+            //      screenshot, BUKAN bug shader/missing-texture kayak laporan sebelumnya).
+            //   2. BARU SETELAH ITU dicek projType == PurificationPowder buat dikonversi ke
+            //      Bullet/BulletHighVelocity - tapi checkpoint ini TIDAK PERNAH kesampaian buat
+            //      senjata ammo-based (guns), karena projType-nya udah keburu diubah jadi TerraBeam
+            //      di langkah 1 (shoot mentahnya emang 0 buat hampir semua gun ammo-based, PickAmmo
+            //      nggak pernah jalan buat dummy owner ini - lihat catatan FireAttackProjectileAimed).
+            //   Hasilnya: SETIAP senjata ranged yang pakai ammo bullet (shoot == 0, bukan
+            //   PurificationPowder) selalu nembak TerraBeam - blade cahaya raksasa - bukan proyektil
+            //   peluru kecil kayak seharusnya.
+            // Fix: gabungin kedua kondisi jadi SATU pengecekan (persis logic FireAttackProjectileAimed
+            // yang sudah benar) - projType <=0/None DAN PurificationPowder SAMA-SAMA jatuh ke
+            // Bullet/BulletHighVelocity, bukan TerraBeam. TerraBeam sekarang cuma keluar dari 3
+            // override eksplisit TerraBlade/TrueNightsEdge/TrueExcalibur di bawah, sesuai niat
+            // aslinya - bukan lagi jadi fallback generik buat "shoot kosong".
+            if (projType <= 0 || projType == ProjectileID.None || projType == ProjectileID.PurificationPowder)
+                projType = weapon.CountsAsClass(DamageClass.Ranged) ? ProjectileID.BulletHighVelocity : ProjectileID.Bullet;
 
             if (weapon.type == ItemID.TerraBlade)
                 projType = ProjectileID.TerraBeam;
@@ -228,7 +266,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     idealDistance = 500f;
                     break;
             }
-            if (isPhase2) idealDistance *= 0.8f;
+            // FIX ("boss nempel banget ke player pas phase 2"): ini dulu `*= 0.8f` - NGECILIN jarak
+            // ideal 20% pas phase 2, kebalikan dari intent-nya. Ini function yang dipakai SEMUA
+            // archetype buat positioning tiap kali boss lagi STATE_IDLE (di antara pattern), jadi
+            // efeknya kerasa terus di sepanjang fight phase 2 - bukan cuma pas 1 pattern doang.
+            // Hampir semua pattern lain di codebase ini (GravityWellTorrent, OrbitingGridLock,
+            // MeleeArchetypeExtras, dst - lihat WhoAmI_SatSetPhysics.cs & file2 Pattern_*) udah
+            // konsisten bikin jarak standoff-nya LEBIH JAUH di phase 2, bukan lebih deket - baris ini
+            // yang nyimpang sendirian dan jadi biang utama kesan "nempel". Sekarang di-GEDEIN 30%
+            // biar boss jaga jarak lebih lega pas phase 2 (dikombinasiin sama speed 1.4x di bawah,
+            // boss jadi kerasa lebih lincah "hit-and-run" dari jarak aman, bukan numpuk di muka player).
+            if (isPhase2) idealDistance *= 1.3f;
 
             // "SAT SET" RULE 1 - PREDICTIVE INTERCEPTION: steer toward where the player is GOING
             // (their current velocity projected forward), not their raw current coordinate. Blended
@@ -372,7 +420,25 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleReactiveDodging(Player target)
         {
-            if (dodgeCooldownTimer > 0 || aiState == STATE_DODGE || aiState == STATE_DASH_ATTACK || aiState == STATE_PREDICTIVE_DODGE) return;
+            // FIX: this used to only exclude its own 3 dodge-related states, so ANY other in-progress
+            // pattern (GravityWellTorrent, OrbitGridLock, MirrorMirage, AbyssalCleave, etc.) could get
+            // hijacked mid-execution the instant a friendly projectile drifted within 180px - the boss
+            // would abandon a half-finished attack and snap into STATE_DODGE. Reactive dodging is only
+            // meant to fire while the boss has nothing else committed, so gate on STATE_IDLE instead -
+            // that already implies "not DODGE/DASH_ATTACK/PREDICTIVE_DODGE" too, since none of those are IDLE.
+            //
+            // FURTHER FIX ("projectile senjatanya ilang pas ganti pattern"): STATE_IDLE alone still
+            // isn't enough. The "inline" archetype patterns (index 0-3 on every weapon type - Ranged
+            // Barrage, Magic channel, Melee combo loop, etc.) NEVER leave STATE_IDLE for their entire
+            // run (up to 150 ticks - see ExecuteRangedPattern/ExecuteMagicPattern/etc. in
+            // WhoAmI_Patterns.cs), so the old check here still read them as "nothing committed" and
+            // let a nearby friendly projectile snap the boss into STATE_DODGE mid-barrage/mid-channel -
+            // abandoning whatever it had just fired (no longer tracked/steered, visual weapon pose
+            // switches immediately) right as the dodge took over. archetypePatternTimer stays > 0 for
+            // as long as the current pattern "session" is committed (set once per fresh pattern pick,
+            // decremented every tick - see SelectAndExecuteArchetypePattern), so require that to have
+            // run out too before a reactive dodge is allowed to take over.
+            if (dodgeCooldownTimer > 0 || aiState != STATE_IDLE || archetypePatternTimer > 0) return;
 
             for (int i = 0; i < Main.maxProjectiles; i++)
             {
@@ -595,7 +661,45 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 float dist = Vector2.Distance(NPC.Center, player.Center);
                 bool preferClose = dist < 500f;
 
-                if (weaponCarouselTimer >= weaponSwapThreshold || activeWeapon == null)
+                // ================== FIX: senjata ke-swap DI TENGAH satu sesi serangan ==================
+                // ScanAndSelectWeapon() dipanggil TIAP TICK tanpa syarat (lihat WhoAmI.cs AI(), sebelum
+                // switch(aiState)), termasuk selagi boss lagi windup / channeling / di tengah pattern
+                // multi-tick (Ranged Barrage, Magic Spiral Rift, ProjMelee combo, dst yang nembak
+                // berkali-kali dalam satu sesi). weaponCarouselTimer sendiri jalan terus nggak peduli
+                // aiState, jadi kalau reroll-nya kebetulan jatuh persis di tengah sesi serangan yang
+                // belum kelar, activeWeapon (dan currentArchetype) berubah DI TENGAH JALAN - padahal
+                // visual (UpdateProxyPlayerVisuals) dan projectile (FireAttackProjectile) dua2nya baca
+                // activeWeapon live tiap tick. Hasilnya: 1 sesi serangan yang animasinya masih "nempel"
+                // ke pose senjata lama sebentar, sementara tembakan berikutnya dalam sesi yang sama udah
+                // pakai senjata lain - kelihatan kayak boss ga ganti-ganti item padahal projectile-nya
+                // udah beda senjata.
+                //
+                // FIX: reroll cuma boleh EKSEKUSI pas boss lagi STATE_IDLE (antar-serangan). Timer tetap
+                // jalan terus kayak biasa; kalau ambang kepenuhi selagi masih nyerang, reroll-nya
+                // ditahan (BUKAN dibuang - weaponCarouselTimer nggak direset) sampai boss balik idle,
+                // baru reroll dieksekusi. Jadi satu sesi serangan (windup -> tembak -> animasi ->
+                // pattern multi-tick manapun) dijamin pakai SATU senjata yang sama dari awal sampai
+                // akhir; senjata cuma boleh ganti di antara serangan, bukan di tengahnya.
+                //
+                // FURTHER FIX (root cause of "projectile dari senjatanya ilang pas ganti pattern"):
+                // `aiState != STATE_IDLE` on its own does NOT reliably mean "mid-attack". The
+                // "inline" archetype patterns (index 0-3 on every weapon type - Ranged Barrage,
+                // Magic channel, Melee combo loop, etc. - see ExecuteRangedPattern/ExecuteMagicPattern
+                // /etc. in WhoAmI_Patterns.cs) NEVER transition to a dedicated aiState - they run
+                // their whole multi-tick timeline (up to 150 ticks) while aiState just stays
+                // STATE_IDLE. That means this guard was blind to the exact multi-shot sessions its
+                // own comment above is describing: the carousel could still reroll activeWeapon
+                // mid-barrage/mid-channel, so the NEXT shot in that same still-running session (and
+                // any already-airborne projectile a channel/homing pattern was still tracking by
+                // matching `p.type == activeWeapon.shoot`) suddenly no longer matched the weapon that
+                // fired it - the old projectile drops out of tracking and the boss's held-item visual
+                // jumps to the new weapon, which reads exactly like "the projectile from its weapon
+                // disappeared". archetypePatternTimer stays > 0 for the full committed duration of
+                // the current pattern "session" regardless of whether that session happens to run
+                // through a dedicated state or stays parked in STATE_IDLE, so add it to the guard.
+                bool midAttack = activeWeapon != null && (aiState != STATE_IDLE || archetypePatternTimer > 0);
+
+                if (!midAttack && (weaponCarouselTimer >= weaponSwapThreshold || activeWeapon == null))
                 {
                     weaponCarouselTimer = 0;
                     weaponSwapThreshold = GetDeterministicRandom(180, 301);
@@ -677,7 +781,18 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             isTrueMelee = false;
             if (activeWeapon != null && !activeWeapon.IsAir && activeWeapon.type != ItemID.None)
             {
-                currentArchetype = ResolveArchetypeForItem(activeWeapon);
+                WeaponArchetype resolved = ResolveArchetypeForItem(activeWeapon);
+                if (resolved != currentArchetype)
+                {
+                    // Archetype actually changed (weapon carousel swap) - the streak/limit counted
+                    // sessions of a pattern index from a completely different validPatterns pool in
+                    // SelectAndExecuteArchetypePattern, so carrying it over could force an immediate
+                    // forced-switch reroll (if streak already >= the old limit) or just be comparing
+                    // against a stale, unrelated index. Reset so the new archetype's first pattern
+                    // pick always gets a full fresh 3-4 streak run.
+                    archetypePatternStreak = 0;
+                }
+                currentArchetype = resolved;
                 isTrueMelee = currentArchetype == WeaponArchetype.TrueMelee;
             }
         }
@@ -876,7 +991,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 // makes a Clentaminator-style powder ball that immediately bursts into dust -
                 // that's the "shatters instead of firing" bug, and it hits every gun, not just
                 // S.D.M.G./Chain Gun. Give ammo-based guns a real bullet instead.
-                projType = activeWeapon.CountsAsClass(DamageClass.Ranged) ? ProjectileID.Bullet : ProjectileID.BulletHighVelocity;
+                // FIX: this was backwards - only Ranged (bullet-ammo) guns ever have shoot resolve to
+                // PurificationPowder in the first place, and plain ProjectileID.Bullet was the one
+                // rendering as the giant magenta/black "missing texture" checkerboard in-game.
+                // BulletHighVelocity is the correct stand-in for these; Bullet is kept only as the
+                // fallback for the (effectively unreachable) non-Ranged case.
+                projType = activeWeapon.CountsAsClass(DamageClass.Ranged) ? ProjectileID.BulletHighVelocity : ProjectileID.Bullet;
             }
 
             if (activeWeapon.type == ItemID.TerraBlade || activeWeapon.type == ItemID.TrueNightsEdge || activeWeapon.type == ItemID.TrueExcalibur)
@@ -941,7 +1061,25 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 {
                     Main.projectile[p].hostile = true;
                     Main.projectile[p].friendly = false;
-                    if (Main.projectile[p].timeLeft == 0 || Main.projectile[p].timeLeft > 600) Main.projectile[p].timeLeft = 600;
+
+                    // FIX ("proyektil ranger/mage kadang hancur duluan"): jalur generic ini gak pernah
+                    // nge-set tileCollide = false seperti pattern Ranged/Magic lain (RangedArchetypeExtras,
+                    // MagicArchetypeExtras, dst) yang udah eksplisit nangani ini - jadi proyektil yang
+                    // lewat sini (dipanggil dari WhoAmI_Pattern_ArchetypeExtras.cs) masih bisa nyenggol
+                    // tembok/lantai dan mati kepotong sistem vanilla, KADANG doang tergantung medan.
+                    // Ranged & Magic sekarang dipaksa tileCollide = false + timeLeft tetap 1200 tick
+                    // (20 detik) biar proyektilnya selalu nongol utuh sepanjang durasi itu, gak
+                    // tergantung medan tempurnya kayak apa.
+                    if (currentArchetype == WeaponArchetype.Ranged || currentArchetype == WeaponArchetype.Magic)
+                    {
+                        Main.projectile[p].tileCollide = false;
+                        Main.projectile[p].timeLeft = 1200;
+                    }
+                    else if (Main.projectile[p].timeLeft == 0 || Main.projectile[p].timeLeft > 600)
+                    {
+                        Main.projectile[p].timeLeft = 600;
+                    }
+
                     for (int j = 0; j < 3; j++)
                     {
                         Vector2 pos = Main.projectile[p].Center + Main.rand.NextVector2Circular(20, 20);

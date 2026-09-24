@@ -50,7 +50,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleSummonRiftSwarm(Player target)
         {
-            aiTimer++;
+            // FIX: aiTimer is already incremented once per tick, unconditionally, in WhoAmI.cs AI()
+            // right before the switch(aiState) that dispatches here - a local aiTimer++ on top of
+            // that double-counted it (the state ran at 2x its intended speed, and the `aiTimer == 1`
+            // one-time-init check below never actually fired, since the value this method saw was
+            // always 2, 4, 6... - see the matching fix note in HandleVectorLaserGrid,
+            // WhoAmI_Pattern_RangedArchetypeExtras.cs, which caught the same bug once already).
             NPC.damage = 0;
             bool hasProjectile = WeaponHasProjectile(activeWeapon);
             if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
@@ -139,7 +144,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleWhipLashCage(Player target)
         {
-            aiTimer++;
+            // FIX: same double-increment bug as HandleSummonRiftSwarm above (see its comment) -
+            // aiTimer already advances once per tick in WhoAmI.cs AI() before this is ever called.
             NPC.damage = 0;
 
             if (aiTimer == 1)
@@ -217,7 +223,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleYoyoTetherStorm(Player target)
         {
-            aiTimer++;
+            // FIX: same double-increment bug as HandleSummonRiftSwarm above (see its comment).
             NPC.damage = 0;
             bool hasProjectile = WeaponHasProjectile(activeWeapon);
             if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
@@ -276,7 +282,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleBoomerangCrossfire(Player target)
         {
-            aiTimer++;
+            // FIX: same double-increment bug as HandleSummonRiftSwarm above (see its comment).
             NPC.damage = 0;
             bool hasProjectile = WeaponHasProjectile(activeWeapon);
             if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }

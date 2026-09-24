@@ -79,10 +79,14 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // ─────────────────────────────────────────────────────────────────────────────────────────
         private void HandleMagicSpiralRift(Player target)
         {
-            // BUGFIX: aiTimer was never incremented in this handler, so every check below
-            // (aiTimer == 1, aiTimer < PmcOrbitEnd, etc.) would stay stuck at its initial value
-            // forever - the boss would freeze in this state permanently the first time it fired.
-            aiTimer++;
+            // FIX: the premise of the old comment here was backwards - aiTimer is NOT left
+            // un-incremented; it already advances once per tick, unconditionally, in WhoAmI.cs
+            // AI() right before the switch(aiState) that dispatches into this method. The
+            // aiTimer++ that used to sit here double-counted it instead: the whole lemniscate ->
+            // salvo -> sweep timeline ran at 2x its intended speed, and the "aiTimer == 1" capture
+            // below (see sub-phase A) never actually fired, since the value this method ever saw
+            // was 2, 4, 6... - so vortexAnchor/lemniscate-origin kept using whatever was left over
+            // from the previous activation instead of the current encounter.
 
             // Safety exits — should never trigger mid-fight, but keeps things crash-free.
             if (target == null || !target.active || target.dead)
@@ -314,7 +318,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
                 float flipDeg  = GetDeterministicRandom(140, 175);
                 Vector2 destDir = fromPlayer.RotatedBy(MathHelper.ToRadians(flipDeg));
-                float   destDist = isPhase2 ? 330f : 400f;
+                // FIX ("phase 2 dia agak jauhan dari player"): ini dulu kebalik (330 phase2 / 400
+                // phase1) - malah NGEDEKETIN boss ke player pas phase 2, nyimpang dari standoff
+                // phase-2 yang lebih lega di semua pattern lain (lihat WhoAmI_Helpers.cs). Ditukar.
+                float   destDist = isPhase2 ? 400f : 330f;
                 Vector2 dest    = target.Center + destDir * destDist + new Vector2(0f, -75f);
 
                 // World-boundary clamp (identical margins to ExecuteGlitchTeleport).
@@ -352,7 +359,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 Vector2 fwd      = dist > 0f ? toTarget / dist : new Vector2(NPC.direction, 0f);
                 Vector2 perp     = new Vector2(-fwd.Y, fwd.X); // 90° lateral of forward
 
-                float idealDist  = isPhase2 ? 480f : 550f;
+                // Same fix as destDist above - swapped so phase 2 keeps MORE range, not less.
+                float idealDist  = isPhase2 ? 550f : 480f;
                 float weaveAmp   = isPhase2 ? 265f  : 215f;
                 float weaveFreq  = isPhase2 ? 0.20f : 0.15f;
 

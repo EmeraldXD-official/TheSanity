@@ -81,7 +81,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // ---------------------------------------------------------------------------------------
         private void HandleMirrorMirage(Player target)
         {
-            aiTimer++;
+            // FIX: aiTimer already increments once per tick in WhoAmI.cs AI(), before the switch
+            // that dispatches here - a local aiTimer++ on top of that double-counted it, running
+            // the split/orbit/lock/channel timeline at 2x speed and making the `aiTimer == 1` entry
+            // check below never actually fire.
             NPC.damage = 0;
 
             // If a hit already broke the channel this tick, resolve immediately regardless of phase.
@@ -119,7 +122,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             // ---- B/C) LOCK-IN + CHANNEL WINDUP ----
             Vector2 lockedPos = mirageLayoutPositions[mirageRealPositionIndex];
-            EaseVelocityTowards((lockedPos - NPC.Center) * 0.6f, 1f, EasingCurves.Cubic, EasingType.Out);
+            // FIX ("kaku" snap into the lock-in slot): same bug class already fixed in
+            // HandleOrbitingGridLock (WhoAmI_Pattern_OrbitingGridLock.cs) - progress01 is a constant
+            // 1f here (not a ramp) and no strength arg means it defaults to 1f (full replace, no
+            // damping against the boss's existing velocity), called every tick for the entire ~105-
+            // tick lock-in+channel window. Right at the instant orbit hands off to lock-in, the boss
+            // can be well over 100px from lockedPos, so the very first tick here computes a raw
+            // "distance * 0.6" velocity in the hundreds of px/tick and applies it outright - the boss
+            // visibly snaps/yanks into the slot instead of gliding in, before settling.  0.4 strength
+            // blends that raw target in gradually like every other "hold position" call in this file
+            // set, so the approach reads as a smooth glide rather than a stiff teleport-snap.
+            EaseVelocityTowards((lockedPos - NPC.Center) * 0.6f, 1f, EasingCurves.Cubic, EasingType.Out, 0.4f);
 
             float channelProgress = (aiTimer - MirageLockTick) / (float)(MirageChannelEnd - MirageLockTick);
             if (channelProgress >= 0f)
@@ -206,7 +219,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     float angle = MathHelper.TwoPi / shardCount * i;
                     Vector2 vel = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)) * 9f;
                     int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, vel, ProjectileID.PurpleLaser, isPhase2 ? 28 : 18, 0f, proxySlot);
-                    if (p >= 0 && p < Main.maxProjectiles) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; }
+                    if (p >= 0 && p < Main.maxProjectiles) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; ClampBossProjectileLifetime(p); }
                 }
             }
 
@@ -302,7 +315,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 float angle = MathHelper.TwoPi / shardCount * i + Main.rand.NextFloat(-0.2f, 0.2f);
                 Vector2 vel = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)) * 7f;
                 int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, vel, ProjectileID.PurpleLaser, 16, 0f, proxySlot);
-                if (p >= 0 && p < Main.maxProjectiles) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; }
+                if (p >= 0 && p < Main.maxProjectiles) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; ClampBossProjectileLifetime(p); }
             }
 
             for (int i = 0; i < 25; i++)

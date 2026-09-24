@@ -47,9 +47,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleAbyssalCleave(Player target)
         {
-            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
-            // in the windup phase (aiTimer < windup never becomes false).
-            aiTimer++;
+            // FIX: the premise of the old comment was backwards - aiTimer already increments once
+            // per tick, unconditionally, in WhoAmI.cs AI() right before the switch that dispatches
+            // here. The aiTimer++ that used to sit here double-counted it, running the whole
+            // windup/dash/shard timeline at 2x its intended speed.
 
             int windup = isPhase2 ? 12 : 18;
             int dashDuration = isPhase2 ? 16 : 20;
@@ -91,7 +92,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             int dashTick = aiTimer - windup;
             if (dashTick >= 0 && dashTick < dashDuration)
             {
-                NPC.damage = isPhase2 ? 130 : 90; // contact damage while the dash itself is live
+                // BALANCE ("sakit banget"): dash-through + arc slash (below) itungannya combo 2-hit -
+                // dulu 90/130 disini + 110/150 di slash = worst case 200/280 (44%/62% dari HP
+                // referensi 450) kalau dua2nya kena. Diturunin biar totalnya ~27-35%, sama budget
+                // yang dipakai combo lain (lihat Riposte Cascade/Dimensional Pierce).
+                NPC.damage = isPhase2 ? 75 : 55; // contact damage while the dash itself is live
                 // "lingering, noise-distorted spatial tear" trail sampled along the dash path
                 if (dashTick % 2 == 0)
                 {
@@ -107,7 +112,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 abyssalArcSlashed = true;
                 abyssalDashEnd = NPC.Center;
                 ApplyBrakingImpulse(0.12f);
-                NPC.damage = isPhase2 ? 150 : 110;
+                // Pairs with the dash damage above - total worst-case (both hits) now 55+65=120
+                // (26.7%) phase1, 75+85=160 (35.6%) phase2.
+                NPC.damage = isPhase2 ? 85 : 65;
 
                 int slashCount = isPhase2 ? 9 : 7;
                 float arcWidth = MathHelper.ToRadians(isPhase2 ? 150f : 120f);
@@ -170,7 +177,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private void SpawnFracturedSpaceShardBurst(Vector2 point)
         {
             int shardCount = isPhase2 ? 6 : 4;
-            int dmg = isPhase2 ? 60 : 45;
+            // Trimmed alongside the dash+slash rebalance above - this shard burst is a 3rd potential
+            // hit source on the same Abyssal Cleave cast (outward-spread, so usually only 0-1 shard
+            // realistically lands), kept modest so an unlucky "hit by everything" cast still stays
+            // survivable rather than stacking on top of the already-rebalanced dash+slash total.
+            int dmg = isPhase2 ? 34 : 24;
             for (int i = 0; i < shardCount; i++)
             {
                 float ang = MathHelper.TwoPi * i / shardCount + Main.rand.NextFloat(-0.2f, 0.2f);
@@ -191,148 +202,238 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         // ============================================================================================
         // ATTACK 2: "ORBITING BLADE RING (SOVEREIGN GUARD)"
-        // 6 giant glowing copies of the mimicked melee weapon are summoned in a ring, rotate rapidly
-        // while the boss keeps drifting (no static idle), then fire off one-by-one toward the
-        // player's predicted vector - each successive blade leading further than the last, fanning
-        // the volley across the player's likely dodge path instead of all converging on one point.
+        // REDESIGN: the boss summons a single clone of itself. The clone takes up a post well out to
+        // the player's LEFT, while the real body crosses over to the player's RIGHT - a pincer setup.
+        // Once both are in position, the clone and the real body alternate throwing a giant glowing
+        // copy of the mimicked melee weapon at the player, taking turns, for 10 throws total (clone
+        // opens the exchange, then real body, then clone again, ...). Each thrown weapon spins
+        // continuously in flight (puppeted rotation, tracked below) instead of holding a fixed angle.
+        // The clone itself never attacks independently - the REAL body's Handle method below drives
+        // both throws, using the clone only as a puppeted stand-in position/visual (see
+        // isSovereignGuardClone in WhoAmI.cs and RunSovereignGuardCloneAI below), so there's only ever
+        // one "brain" running this pattern.
         // ============================================================================================
-        private readonly List<int> bladeRingProjectileIndices = new List<int>();
-        private float bladeRingBaseAngle = 0f;
-        private int bladeRingFireIndex = 0;
-        private int bladeRingFireTimer = 0;
-        private Vector2 bladeRingAnchor = Vector2.Zero;
-        private const int BladeRingCount = 6;
-        private const float BladeRingRadius = 150f;
+        private int sovereignGuardCloneWho = -1; // NPC.whoAmI of the summoned clone, or -1 if none/dead
+        private int sovereignGuardThrowsCompleted = 0;
+        private readonly List<int> sovereignGuardThrownProjectiles = new List<int>(); // tracked purely to puppet their spin each tick
+        private const int SovereignGuardThrowCount = 10;
+        private const float SovereignCloneOffsetX = 480f; // clone's post: well out to the player's left ("agak jauh")
+        private const float SovereignRealOffsetX = 300f;  // real body's post: mirrored to the player's right
+        private const int SovereignPositionDuration = 40; // ticks spent gliding into the left/right pincer
+        private const float SovereignSpinSpeed = 0.5f; // radians/tick each thrown weapon spins while flying
 
         private void ResetOrbitingBladeRingState()
         {
-            KillTrackedBladeRingProjectiles();
-            bladeRingProjectileIndices.Clear();
-            bladeRingBaseAngle = Main.rand.NextFloat(MathHelper.TwoPi);
-            bladeRingFireIndex = 0;
-            bladeRingFireTimer = 0;
-            bladeRingAnchor = NPC.Center;
+            DismissSovereignGuardCloneIfAny();
+            sovereignGuardCloneWho = -1;
+            sovereignGuardThrowsCompleted = 0;
+            sovereignGuardThrownProjectiles.Clear();
         }
 
-        private void KillTrackedBladeRingProjectiles()
+        private void DismissSovereignGuardCloneIfAny()
         {
-            foreach (int idx in bladeRingProjectileIndices)
-                if (idx >= 0 && idx < Main.maxProjectiles && Main.projectile[idx].active)
-                    Main.projectile[idx].Kill();
+            if (sovereignGuardCloneWho >= 0 && sovereignGuardCloneWho < Main.maxNPCs)
+            {
+                NPC cloneNpc = Main.npc[sovereignGuardCloneWho];
+                if (cloneNpc.active && cloneNpc.ModNPC is WhoAmI clone && clone.isSovereignGuardClone)
+                    clone.DismissSovereignGuardCloneQuietly();
+            }
+            sovereignGuardCloneWho = -1;
         }
 
         private void HandleOrbitingBladeRing(Player target)
         {
-            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
-            // right after spawning the blade ring (aiTimer >= channelDuration never becomes true).
-            aiTimer++;
-
-            int channelDuration = isPhase2 ? 55 : 75;
-            float rotSpeed = isPhase2 ? 0.05f : 0.03f;
-            int fireInterval = isPhase2 ? 5 : 8;
+            // aiTimer already increments once per tick, unconditionally, in WhoAmI.cs AI() right
+            // before the switch that dispatches here - do NOT add a second aiTimer++ in this method
+            // (see the header comment on this file / the fix notes elsewhere in this file for what
+            // that class of bug does: it makes the `aiTimer == 1` entry check below never fire, so
+            // the clone would never actually get spawned).
+            int throwInterval = isPhase2 ? 14 : 20;
 
             NPC.damage = 0;
 
-            if (aiTimer == 0)
+            if (aiTimer == 1)
             {
-                for (int i = 0; i < BladeRingCount; i++)
+                Vector2 clonePos = target.Center + new Vector2(-SovereignCloneOffsetX, 0f);
+                int npcIndex = NPC.NewNPC(NPC.GetSource_FromAI(), (int)clonePos.X, (int)clonePos.Y, ModContent.NPCType<WhoAmI>());
+                if (npcIndex >= 0 && npcIndex < Main.maxNPCs && Main.npc[npcIndex].ModNPC is WhoAmI clone)
                 {
-                    float ang = bladeRingBaseAngle + MathHelper.TwoPi * i / BladeRingCount;
-                    Vector2 pos = bladeRingAnchor + new Vector2((float)Math.Cos(ang), (float)Math.Sin(ang)) * BladeRingRadius;
-                    int idx = SpawnSovereignBlade(pos, ang, isPhase2 ? 2.5f : 2.2f, 0);
-                    bladeRingProjectileIndices.Add(idx);
+                    clone.isSovereignGuardClone = true;
+                    clone.sovereignGuardCloneOwner = NPC.whoAmI;
+                    clone.dummyPlayer = dummyPlayer; // share the same proxy visuals - see WhoAmI.cs header comment
+                    clone.aiState = STATE_IDLE;
+                    clone.aiTimer = 0;
+
+                    // Unhittable/harmless "prop" stand-in, same convention as the Mirror Mirage decoys -
+                    // this clone is here to sell the pincer visual and hold a throw position, not to be
+                    // a second real target.
+                    Main.npc[npcIndex].dontTakeDamage = true;
+                    Main.npc[npcIndex].life = 1;
+                    Main.npc[npcIndex].lifeMax = 1;
+                    Main.npc[npcIndex].damage = 0;
+                    Main.npc[npcIndex].netUpdate = true;
+
+                    sovereignGuardCloneWho = Main.npc[npcIndex].whoAmI;
                 }
                 Terraria.Audio.SoundEngine.PlaySound(SoundID.Item29, NPC.Center);
                 NPC.netUpdate = true;
             }
 
-            if (aiTimer < channelDuration)
-            {
-                // No static idle: the boss itself keeps a tight orbital crawl near the ring's anchor
-                // while "parked" channeling, per WhoAmI_SatSetPhysics.cs rule 3.
-                // BUGFIX: 30px radius at a slow 0.1 blend read as nearly static - widened + faster
-                // blend so the "no static idle" drift is actually visible during the channel window.
-                Vector2 crawl = GetOrbitalCrawlPosition(bladeRingAnchor, 70f, Main.GlobalTimeWrappedHourly * 1.2f);
-                NPC.velocity = Vector2.Lerp(NPC.velocity, (crawl - NPC.Center) * 0.18f, 0.2f);
-
-                for (int i = 0; i < bladeRingProjectileIndices.Count; i++)
-                {
-                    int idx = bladeRingProjectileIndices[i];
-                    if (idx < 0 || idx >= Main.maxProjectiles || !Main.projectile[idx].active) continue;
-                    float ang = bladeRingBaseAngle + MathHelper.TwoPi * i / BladeRingCount + rotSpeed * aiTimer;
-                    Vector2 pos = bladeRingAnchor + new Vector2((float)Math.Cos(ang), (float)Math.Sin(ang)) * BladeRingRadius;
-                    Main.projectile[idx].velocity = pos - Main.projectile[idx].Center;
-                    Main.projectile[idx].Center = pos;
-                    Main.projectile[idx].rotation = ang + MathHelper.PiOver2;
-                }
-                return;
-            }
-
-            // --- FIRE SEQUENTIALLY toward the player's predicted vector ---
-            bladeRingFireTimer++;
-            if (bladeRingFireTimer >= fireInterval && bladeRingFireIndex < bladeRingProjectileIndices.Count)
-            {
-                bladeRingFireTimer = 0;
-                int idx = bladeRingProjectileIndices[bladeRingFireIndex];
-                if (idx >= 0 && idx < Main.maxProjectiles && Main.projectile[idx].active)
-                {
-                    // Multi-angle prediction: each successive blade leads the player further than
-                    // the last, per the Phase 2 escalation brief ("multi-angle prediction").
-                    float leadTicks = (isPhase2 ? 22f : 16f) + bladeRingFireIndex * (isPhase2 ? 4f : 3f);
-                    Vector2 intercept = GetPredictiveInterceptPoint(target, leadTicks);
-                    Vector2 dir = intercept - Main.projectile[idx].Center;
-                    if (dir != Vector2.Zero) dir.Normalize(); else dir = new Vector2(NPC.direction, 0f);
-                    float speed = isPhase2 ? 15f : 11f;
-                    Main.projectile[idx].velocity = dir * speed;
-                    Main.projectile[idx].rotation = dir.ToRotation();
-                    Main.projectile[idx].timeLeft = 45;
-                    Main.projectile[idx].damage = isPhase2 ? 95 : 65;
-                    Terraria.Audio.SoundEngine.PlaySound(SoundID.Item1, Main.projectile[idx].Center);
-                    for (int p = 0; p < 6; p++)
-                        LuminanceUtilities.SpawnParticle(Main.projectile[idx].Center, dir * 2f, new Color(210, 230, 255), 16, 1f, ParticleType.Spark);
-                }
-                bladeRingProjectileIndices[bladeRingFireIndex] = -1; // handed off to vanilla flight now, stop puppeting it
-                bladeRingFireIndex++;
-            }
-
-            if (bladeRingFireIndex >= bladeRingProjectileIndices.Count && aiTimer > channelDuration + BladeRingCount * fireInterval + 20)
+            // Safety net: if the clone never spawned (e.g. NewNPC ran out of slots) or got cleaned up
+            // some other way mid-attack, don't stall in this state forever waiting for a partner that
+            // no longer exists.
+            bool cloneAlive = sovereignGuardCloneWho >= 0 && sovereignGuardCloneWho < Main.maxNPCs
+                && Main.npc[sovereignGuardCloneWho].active && Main.npc[sovereignGuardCloneWho].ModNPC is WhoAmI cloneRef && cloneRef.isSovereignGuardClone;
+            if (!cloneAlive)
             {
                 aiState = STATE_IDLE;
                 aiTimer = 0;
+                patternCooldown = 20;
+                NPC.netUpdate = true;
+                return;
+            }
+
+            // Real body glides to its RIGHT-side post - no static idle while the clone settles in
+            // (SAT SET rule 3).
+            Vector2 realGoal = target.Center + new Vector2(SovereignRealOffsetX, 0f);
+            EaseVelocityTowards((realGoal - NPC.Center) * 0.3f, Math.Min(aiTimer / (float)SovereignPositionDuration, 1f), EasingCurves.Sine, EasingType.InOut, 0.35f);
+
+            // Keep every thrown weapon spinning in flight for as long as it stays active, regardless
+            // of which phase of the attack we're currently in (a throw from earlier can still be
+            // mid-flight while the next one is being lined up).
+            for (int i = sovereignGuardThrownProjectiles.Count - 1; i >= 0; i--)
+            {
+                int idx = sovereignGuardThrownProjectiles[i];
+                if (idx < 0 || idx >= Main.maxProjectiles || !Main.projectile[idx].active)
+                {
+                    sovereignGuardThrownProjectiles.RemoveAt(i);
+                    continue;
+                }
+                Main.projectile[idx].rotation += SovereignSpinSpeed;
+            }
+
+            if (aiTimer < SovereignPositionDuration)
+                return; // still taking up the pincer positions
+
+            // --- ALTERNATING THROWS: clone opens (even count), real body follows (odd count), 10 total ---
+            int throwTick = aiTimer - SovereignPositionDuration;
+            if (sovereignGuardThrowsCompleted < SovereignGuardThrowCount && throwTick % throwInterval == 0)
+            {
+                bool cloneThrowsThisTime = sovereignGuardThrowsCompleted % 2 == 0;
+                Vector2 throwerPos = cloneThrowsThisTime ? Main.npc[sovereignGuardCloneWho].Center : NPC.Center;
+                ThrowSovereignGuardWeapon(throwerPos, target);
+                sovereignGuardThrowsCompleted++;
+                NPC.netUpdate = true;
+            }
+
+            if (sovereignGuardThrowsCompleted >= SovereignGuardThrowCount && throwTick > throwInterval + 15)
+            {
+                DismissSovereignGuardCloneIfAny();
+                aiState = STATE_IDLE;
+                aiTimer = 0;
                 patternCooldown = isPhase2 ? 20 : 35;
-                bladeRingProjectileIndices.Clear();
                 NPC.netUpdate = true;
             }
         }
 
-        // Giant glowing melee-weapon copy used for the Sovereign Guard ring. Reuses
-        // the boss's current weapon projectile type at a large scale (same reuse convention as
-        // SpawnMeleeSlash), rather than a hardcoded proxy projectile, since this is a boss-owned "blade prop"
-        // that gets puppeted by hand every tick, not a fire-and-forget mimicked shot (that's
-        // FireAttackProjectile's job). damage == 0 while parked/channeling means it can't friendly-
-        // -fire the player mid-orbit; HandleOrbitingBladeRing sets the real damage the instant it's
-        // launched.
-        private int SpawnSovereignBlade(Vector2 position, float rotation, float scale, int damage)
+        // Fires one giant glowing copy of the mimicked melee weapon from fromPos toward the player -
+        // reuses GetWeaponProjectileType(activeWeapon) the same way the old ring-blade prop did, just
+        // as a straightforward fire-and-forget thrown shot instead of a hand-puppeted orbiting prop.
+        // The index is handed off to sovereignGuardThrownProjectiles so HandleOrbitingBladeRing can
+        // keep spinning it every tick while it's in flight ("sambil muter-muter").
+        private void ThrowSovereignGuardWeapon(Vector2 fromPos, Player target)
         {
-            int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), position, Vector2.Zero, GetWeaponProjectileType(activeWeapon), damage, 0f, proxySlot);
-            if (p < 0 || p >= Main.maxProjectiles) return -1;
+            int dmg = isPhase2 ? 70 : 50;
+            float speed = isPhase2 ? 15f : 11f;
+            float scale = isPhase2 ? 2.3f : 2f;
 
-            Projectile proj = Main.projectile[p];
-            proj.hostile = true;
-            proj.friendly = false;
-            proj.tileCollide = false;
-            proj.penetrate = -1;
-            proj.aiStyle = 0;
-            proj.timeLeft = 999; // puppeted manually every tick while parked; overwritten the moment it fires
-            proj.scale = scale;
-            proj.rotation = rotation;
-            proj.width = proj.height = (int)(80 * scale);
-            proj.Center = position;
+            Vector2 dir = target.Center - fromPos;
+            if (dir != Vector2.Zero) dir.Normalize(); else dir = new Vector2(NPC.direction, 0f);
 
-            for (int i = 0; i < 4; i++)
-                LuminanceUtilities.SpawnParticle(position, Vector2.Zero, new Color(210, 230, 255), 14, 0.8f, ParticleType.Spark);
+            int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), fromPos, dir * speed, GetWeaponProjectileType(activeWeapon), dmg, 0f, proxySlot);
+            if (p >= 0 && p < Main.maxProjectiles)
+            {
+                Projectile proj = Main.projectile[p];
+                proj.hostile = true;
+                proj.friendly = false;
+                proj.tileCollide = false;
+                proj.aiStyle = 0;
+                proj.penetrate = -1;
+                proj.timeLeft = 60;
+                proj.scale = scale;
+                proj.rotation = dir.ToRotation(); // starting angle - HandleOrbitingBladeRing spins it from here every tick
+                sovereignGuardThrownProjectiles.Add(p);
+            }
 
-            return p;
+            for (int i = 0; i < 8; i++)
+                LuminanceUtilities.SpawnParticle(fromPos, dir * 2f, new Color(210, 230, 255), 16, 1f, ParticleType.Spark);
+            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item1, fromPos);
+            ScreenShakeSystem.StartShakeAtPoint(fromPos, 5f, 0.15f);
+        }
+
+        // ---------------------------------------------------------------------------------------
+        // CLONE-SIDE LOGIC (runs on the Sovereign Guard clone instance only - see the
+        // isSovereignGuardClone short-circuit at the top of AI() in WhoAmI.cs)
+        // ---------------------------------------------------------------------------------------
+        private int sovereignGuardCloneLifetime = 0;
+        private bool sovereignGuardCloneDismissed = false;
+
+        private void RunSovereignGuardCloneAI()
+        {
+            // Holds its flank and just bobs slightly - "no static idle" - while the real body drives
+            // the alternating throws. All of the actual attack logic lives on the real boss instance
+            // in HandleOrbitingBladeRing above; this clone never acts on its own.
+            NPC.velocity *= 0.9f;
+            NPC.damage = 0;
+            sovereignGuardCloneLifetime++;
+
+            Vector2 bob = GetSatSetBobOffset(1.3f, 6f);
+            NPC.Center += bob * 0.05f;
+
+            if (Main.rand.NextBool(3))
+                LuminanceUtilities.SpawnParticle(NPC.Center, Main.rand.NextVector2Circular(1, 1), new Color(210, 230, 255), 10, 0.7f, ParticleType.Spark);
+
+            // Safety net: if the owner boss vanishes/desyncs without cleaning up, or the pattern has
+            // simply ended, the clone self-dismisses after a generous timeout instead of lingering.
+            bool ownerStillRunningPattern = sovereignGuardCloneOwner >= 0 && sovereignGuardCloneOwner < Main.maxNPCs && Main.npc[sovereignGuardCloneOwner].active
+                && Main.npc[sovereignGuardCloneOwner].ModNPC is WhoAmI owner && owner.aiState == STATE_ORBITING_BLADE_RING;
+            if (!ownerStillRunningPattern || sovereignGuardCloneLifetime > 400)
+                DismissSovereignGuardCloneQuietly();
+        }
+
+        // Removes this clone without any death effect (orderly cleanup, not a "kill").
+        public void DismissSovereignGuardCloneQuietly()
+        {
+            if (sovereignGuardCloneDismissed) return;
+            sovereignGuardCloneDismissed = true;
+
+            for (int i = 0; i < 10; i++)
+                LuminanceUtilities.SpawnParticle(NPC.Center, Main.rand.NextVector2Circular(2, 2), new Color(210, 230, 255) * 0.5f, 14, 0.8f, ParticleType.Spark);
+
+            NPC.life = 0;
+            NPC.active = false;
+            NPC.netUpdate = true;
+        }
+
+        // Called from OnKill() (see the isSovereignGuardClone branch in WhoAmI.cs). The clone is
+        // normally unhittable (CanBeHitByProjectile/CanBeHitByItem in WhoAmI.cs both return false for
+        // it), so this is a belt-and-suspenders safety net only, mirroring OnMirageDecoyKilled.
+        private void OnSovereignGuardCloneKilled()
+        {
+            if (sovereignGuardCloneDismissed) return;
+            sovereignGuardCloneDismissed = true;
+
+            ScreenShakeSystem.StartShakeAtPoint(NPC.Center, 10f, 0.3f);
+            Terraria.Audio.SoundEngine.PlaySound(SoundID.Shatter, NPC.Center);
+
+            int shardCount = 8;
+            for (int i = 0; i < shardCount; i++)
+            {
+                float angle = MathHelper.TwoPi / shardCount * i + Main.rand.NextFloat(-0.2f, 0.2f);
+                Vector2 vel = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)) * 7f;
+                int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), NPC.Center, vel, ProjectileID.PurpleLaser, 16, 0f, proxySlot);
+                if (p >= 0 && p < Main.maxProjectiles) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; ClampBossProjectileLifetime(p); }
+            }
         }
 
         // ============================================================================================
@@ -358,17 +459,23 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleDimensionalPierce(Player target)
         {
-            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
-            // (blink/lunge timing checks that key off aiTimer would never advance).
-            aiTimer++;
-
+            // FIX: the premise of the old comment was backwards - aiTimer already increments once
+            // per tick, unconditionally, in WhoAmI.cs AI() right before the switch that dispatches
+            // here. The aiTimer++ that used to sit here double-counted it, running the blink/lunge
+            // timing at 2x its intended speed.
             NPC.damage = 0;
             float triangleRadius = isPhase2 ? 420f : 340f;
             int blinkInterval = isPhase2 ? 11 : 15;
             int lungeDelayAfterLastBlink = isPhase2 ? 16 : 22;
             int lungeStagger = isPhase2 ? 6 : 9;
             float lungeSpeed = isPhase2 ? 40f : 30f;
-            int lungeDamage = isPhase2 ? 160 : 120;
+            // BALANCE ("sakit banget"): 3 TERPISAH projectile lunge, masing2 dulu 120/160 dmg - kalau
+            // ketiganya kena itu 360 (80% dari HP referensi 450) phase1, atau 480 (107%!, lebih dari
+            // full HP) phase2 - bisa literally one-shot dari HP penuh. Diturunin biar worst-case
+            // ketiga-tiganya kena ada di ~30-35% HP referensi (3x45=135=30% phase1, 3x52=156=~35%
+            // phase2), konsisten sama budget combo yang sama dipakai di Riposte Cascade/Abyssal
+            // Cleave/Mirror Waltz.
+            int lungeDamage = isPhase2 ? 52 : 45;
 
             if (dimensionalBlinkIndex == -1)
             {

@@ -47,7 +47,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleGravityWellTorrent(Player target)
         {
-            aiTimer++;
+            // FIX: aiTimer already increments once per tick in WhoAmI.cs AI(), before the switch
+            // that dispatches here - a local aiTimer++ on top of that double-counted it, running
+            // this whole channel at 2x speed and making the `aiTimer == 1` init check below never
+            // actually fire (gravityWellFloatSpot/boltsFired/spiralAngle never got reset on entry).
             NPC.damage = 0;
 
             if (aiTimer == 1)
@@ -131,6 +134,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             // ai[0] carries a spiral-curl rate that WhoAmIProjectileGuard style code could
                             // read to keep curving post-launch; left at 0 here (straight-line curl-on-exit)
                             // to avoid coupling this file to the projectile guard's internals.
+                            ClampBossProjectileLifetime(p); // 30s hard cap - this was spawned via raw
+                            // ProjectileID.PurpleLaser with no explicit timeLeft, so it would otherwise
+                            // rely on that type's own default lifespan.
                         }
                     }
 

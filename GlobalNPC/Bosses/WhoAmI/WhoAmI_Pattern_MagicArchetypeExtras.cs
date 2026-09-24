@@ -30,20 +30,25 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // then each one rains down a dense torrent of spiraling magic projectiles.
         // ============================================================================================
         private readonly List<Vector2> signetPoints = new List<Vector2>();
+        private readonly List<float> signetOffsetsX = new List<float>();
         private bool signetChannelStarted = false;
 
         private void ResetAureolaSignetRainState()
         {
             signetPoints.Clear();
+            signetOffsetsX.Clear();
             signetChannelStarted = false;
         }
 
         private void HandleAureolaSignetRain(Player target)
         {
-            // BUGFIX: aiTimer was never incremented here, so this attack would freeze permanently
-            // in the channel phase (aiTimer < channelDuration never becomes false).
-            aiTimer++;
-
+            // FIX (2 stacked bugs, same class as HandleOrbitingBladeRing in
+            // WhoAmI_Pattern_MeleeArchetypeExtras.cs - see its comment for the full explanation):
+            // 1) aiTimer already increments once per tick in WhoAmI.cs AI() before dispatch here -
+            //    the local aiTimer++ that used to be here double-counted it.
+            // 2) The entry check below compared against `aiTimer == 0`, which - because of that
+            //    global pre-increment - is a value this method never actually sees (first tick is
+            //    always 1). The signets never spawned.
             int signetCount = isPhase2 ? 5 : 3;
             int channelDuration = isPhase2 ? 40 : 55;
             int rainDuration = isPhase2 ? 90 : 70;
@@ -57,15 +62,30 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             Vector2 driftGoal = target.Center + new Vector2((float)Math.Cos(driftAngle) * 260f, -140f + (float)Math.Sin(driftAngle) * 60f);
             NPC.velocity = Vector2.Lerp(NPC.velocity, (driftGoal - NPC.Center) * 0.05f, 0.12f);
 
-            if (signetPoints.Count == 0 && aiTimer == 0)
+            if (signetPoints.Count == 0 && aiTimer == 1)
             {
                 float baseY = target.Center.Y - 480f;
                 for (int i = 0; i < signetCount; i++)
                 {
                     float offset = (i - (signetCount - 1) / 2f) * spacing;
+                    signetOffsetsX.Add(offset);
                     signetPoints.Add(new Vector2(target.Center.X + offset, baseY));
                 }
                 NPC.netUpdate = true;
+            }
+
+            // BALANCE ("terlalu gampang dihindar"): signets used to be stamped ONCE at aiTimer==1 and
+            // then stay frozen there for the whole channel+rain window (~110-145 ticks combined) - the
+            // player only had to step out from under them once, during the generous channel telegraph,
+            // and the entire rest of the attack (the actual "rain") could never reach them again. Now
+            // the ring loosely re-centers on the player's live X position the whole time (slow enough
+            // that the telegraph is still fully readable - it's a drift, not a snap), so relocating
+            // once during the channel is no longer a permanent full dodge of the rain that follows.
+            // Y stays fixed (still visibly "raining from above the arena", not chasing vertically).
+            for (int i = 0; i < signetPoints.Count && i < signetOffsetsX.Count; i++)
+            {
+                Vector2 trackedPos = new Vector2(target.Center.X + signetOffsetsX[i], signetPoints[i].Y);
+                signetPoints[i] = Vector2.Lerp(signetPoints[i], trackedPos, 0.02f);
             }
 
             if (aiTimer < channelDuration)
@@ -112,7 +132,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         float spiralAngle = rainTick * 0.3f;
                         Vector2 spiralOffset = new Vector2((float)Math.Cos(spiralAngle), (float)Math.Sin(spiralAngle)) * 30f;
                         Vector2 spawnPos = signet + spiralOffset;
-                        Vector2 vel = new Vector2((float)Math.Cos(spiralAngle) * 1.5f, isPhase2 ? 8.5f : 6.5f);
+                        // BALANCE: phase-1 fall speed bumped from 6.5f -> 8f (phase-2 stays 8.5f) so the
+                        // rain reads as noticeably faster/more threatening than before - tune this single
+                        // number up/down if it ends up too fast or still too slow to dodge.
+                        Vector2 vel = new Vector2((float)Math.Cos(spiralAngle) * 1.5f, isPhase2 ? 8.5f : 8f);
 
                         int p = Projectile.NewProjectile(NPC.GetSource_FromAI(), spawnPos, vel, projType, dmg, 0f, proxySlot);
                         if (p >= 0 && p < Main.maxProjectiles)
@@ -162,9 +185,13 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleDoubleHelixSweep(Player target)
         {
-            // BUGFIX: aiTimer was never incremented here, so the sweep would freeze permanently
-            // at its start position (aiTimer >= sweepDuration never becomes true).
-            aiTimer++;
+            // FIX (2 stacked bugs, same class as HandleOrbitingBladeRing in
+            // WhoAmI_Pattern_MeleeArchetypeExtras.cs - see its comment for the full explanation):
+            // 1) aiTimer already increments once per tick in WhoAmI.cs AI() before dispatch here -
+            //    the local aiTimer++ that used to be here double-counted it.
+            // 2) The entry check below compared against `aiTimer == 0`, a value this method never
+            //    actually sees (the global pre-increment means the first tick is always 1) - so the
+            //    two helix arms never got initialized.
 
             int sweepDuration = isPhase2 ? 100 : 130;
             float halfWidth = isPhase2 ? 900f : 750f;
@@ -174,7 +201,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             NPC.damage = 0;
 
-            if (helixArmAIndex == -1 && aiTimer == 0)
+            if (helixArmAIndex == -1 && aiTimer == 1)
             {
                 helixSweepStartX = target.Center.X - halfWidth;
                 helixSweepEndX = target.Center.X + halfWidth;
@@ -262,11 +289,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleQuantumGlitchPhasing(Player target)
         {
-            // BUGFIX: aiTimer was never incremented here, so the orb ring would freeze permanently
-            // (aiTimer >= activeDuration never becomes true, and it would keep re-spawning orbs
-            // every tick since "glitchOrbIndices.Count == 0 && aiTimer == 0" never stops matching
-            // once cleared).
-            aiTimer++;
+            // FIX (2 stacked bugs, same class as HandleOrbitingBladeRing in
+            // WhoAmI_Pattern_MeleeArchetypeExtras.cs - see its comment for the full explanation):
+            // 1) aiTimer already increments once per tick in WhoAmI.cs AI() before dispatch here -
+            //    the local aiTimer++ that used to be here double-counted it.
+            // 2) The entry check below compared against `aiTimer == 0`, a value this method never
+            //    actually sees (the global pre-increment means the first tick is always 1) - the old
+            //    comment's fear of it re-matching "every tick forever" was the right instinct but the
+            //    wrong diagnosis: with `== 0` it in fact never matched at all, on any tick, so the
+            //    orb ring never spawned in the first place, let alone re-spawned in a loop.
 
             int orbCount = isPhase2 ? 7 : 5;
             int activeDuration = isPhase2 ? 140 : 110;
@@ -281,7 +312,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             Vector2 hoverGoal = target.Center + new Vector2((float)Math.Cos(Main.GlobalTimeWrappedHourly * 1.4f), (float)Math.Sin(Main.GlobalTimeWrappedHourly * 1.4f)) * (ringRadius + 120f);
             NPC.velocity = Vector2.Lerp(NPC.velocity, (hoverGoal - NPC.Center) * 0.05f, 0.12f);
 
-            if (glitchOrbIndices.Count == 0 && aiTimer == 0)
+            if (glitchOrbIndices.Count == 0 && aiTimer == 1)
             {
                 int projType = ResolveMimickedProjectileType();
                 for (int i = 0; i < orbCount; i++)

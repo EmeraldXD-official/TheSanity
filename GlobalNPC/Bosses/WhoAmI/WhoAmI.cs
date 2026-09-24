@@ -20,11 +20,35 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
     {
         public override string Texture => "TheSanity/GlobalNPC/Bosses/WhoAmI/WhoAmI";
 
-        private static readonly int[] BannedWeapons = new int[] { ItemID.PiercingStarlight, ItemID.Celeb2, ItemID.Phantasm, ItemID.LastPrism };
+        private static readonly int[] BannedWeapons = new int[]
+        {
+            ItemID.PiercingStarlight,
+            ItemID.Celeb2,
+            ItemID.Phantasm,
+            ItemID.LastPrism,
+            ItemID.ChargedBlasterCannon,
+            ModContent.ItemType<BloodBagItem>(),
+            ModContent.ItemType<EmptyBloodBagItem>()
+        };
 
         public static bool IsCutsceneActive = false;
         public static Vector2 CutsceneCameraTarget = Vector2.Zero;
         public static float CutsceneShakeIntensity = 0f;
+
+        // ================== MUSIC SYNC: DICABUT (BUG - fight nyangkut diem abis dialog) ==================
+        // Dulu ada MusicSyncStartTick/MusicSyncTargetTicks di sini buat nahan transisi cutscene -> fight
+        // (aiState 101 di bawah) sampai lagu boss "nyampe detik ke-25", dengan asumsi lagunya udah mulai
+        // muter dari titik blood bag ditekan (BeginAbsorption, WhoAmI_MirrorAbsorption.cs).
+        //
+        // Waktu itu asumsinya udah nggak berlaku (musiknya lagi di-set SENYAP total selama absorpsi &
+        // intro), jadi "nunggu sampai lagu nyampe detik ke-25" jadi nunggu 25 detik KOSONG - begitu
+        // dialog kelar duluan dari itu, boss freeze diem tanpa alasan. Logic penahan ini DIHAPUS total.
+        //
+        // SEKARANG (lihat WhoAmISceneEffect.Music, WhoAmISceneEffect.cs): musiknya justru balik muter
+        // dari titik blood bag dipakai ke cermin lagi (nyambung terus sampai fight, gak pernah senyap
+        // di antaranya) - TAPI itu murni soal kapan MUSIK-nya bunyi, terpisah total dari kapan FIGHT-nya
+        // mulai. Timing transisi cutscene -> fight sekarang cuma diatur lewat aiTimer di aiState 101 di
+        // bawah (lihat komentar TIMING di situ) - nggak nunggu/nyinkron ke musik apapun lagi.
 
         // ================== PERFECT MIRROR SUMMON HOOK ==================
         // Diisi oleh WhoAmIMirrorPaintingTile.TrySummon() SEBELUM NPC.NewNPC dipanggil, supaya
@@ -47,8 +71,35 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // ambang waktu tertentu, despawn manual & senyap (gak ngedrop loot, sama kayak pola
         // EndFromDefeatMenu) alih-alih ngandelin EncourageDespawn yang emang gak jalan buat NPC
         // ber-flag boss.
-        private const int NoValidTargetDespawnDelay = 120; // ~2 detik grace sebelum despawn paksa
+        //
+        // BUG (kenapa boss sering despawn padahal player-nya GA MATI beneran/masih main): boss ini
+        // 550k HP (lihat SetDefaults) - jelas konten super late-game, di mana respawn timer vanilla
+        // di progression segini bisa ~25-30+ detik (lebih lama lagi di beberapa seed/setting).
+        // NoValidTargetDespawnDelay = 120 tick (~2 DETIK) sebelumnya ngitung "gak ada target valid"
+        // naik terus SELAMA player masih berstatus dead/nunggu respawn - jadi begitu player mati
+        // SEKALI aja di tengah fight (kena boss, atau sebab lain yang gak ada hubungannya - jatuh,
+        // lava, dsb), boss ini udah force-despawn ~2 detik kemudian, JAUH sebelum player-nya sendiri
+        // sempat respawn. Dari sudut pandang player: mereka respawn beberapa detik kemudian, masih
+        // hidup/lagi main, terus lihat boss-nya udah lenyap - kelihatan kayak despawn random padahal
+        // mereka gak pernah "beneran mati dan pergi".
+        //
+        // FIX: pisahkan dua kondisi yang sebelumnya digabung jadi satu counter:
+        //   1. BENERAN gak ada player yang connect/aktif sama sekali di server (semua disconnect) -
+        //      situasi ini yang layak despawn cepat, gak ada yang nonton lagi. Tetap pakai delay
+        //      pendek (NoValidTargetDespawnDelay) buat ini.
+        //   2. ADA player aktif tapi lagi dead DAN player.respawnTimer > 0 (beneran lagi ngitung
+        //      mundur ke respawn) - ini BUKAN "target ilang buat selamanya", cuma nunggu. Selama
+        //      kondisi ini noValidTargetTimer TIDAK numpuk sama sekali (nunggu tanpa batas waktu
+        //      pendek, gak peduli respawnTimer-nya berapa lama - ini yang bikin fix v2 robust ke
+        //      SEMUA tingkat progression/difficulty, bukan cuma nebak angka detik yang "cukup
+        //      panjang"). Begitu respawnTimer abis (harusnya udah balik hidup) tapi masih -1 juga,
+        //      baru dikasih jendela pendek (RespawnWaitGraceDelay) sebelum timer despawn boleh mulai
+        //      jalan - buat nutup celah 1 tick pas transisi respawn, atau kasus mereka kabur/logout
+        //      persis pas respawn.
+        private const int NoValidTargetDespawnDelay = 120; // ~2 detik grace kalau semua player gak aktif/disconnect
+        private const int RespawnWaitGraceDelay = 60; // ~1 detik jendela SETELAH respawnTimer abis, sebelum mulai despawn countdown
         private int noValidTargetTimer = 0;
+        private int respawnWaitGraceTimer = 0;
 
         // ================== BALANCING: damage senjata boss dikurangi bertingkat ==================
         // Threshold ini nentuin seberapa besar damage MENTAH satu serangan (kontak NPC.damage atau
@@ -128,6 +179,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private int archetypePatternTimer = 0;
         private bool patternRequiresProjectile = false;
 
+        // Consecutive-repeat tracking: lets a pattern be reused back-to-back for a few "sessions"
+        // (feels like a real combo the boss is committing to) instead of forcibly switching every
+        // single time archetypePatternTimer runs out. archetypePatternStreak counts how many times
+        // in a row archetypePatternIndex has just been re-picked (starts at 1 the first time a given
+        // index is chosen); archetypePatternStreakLimit is the randomly-rolled 3-4 cap for the CURRENT
+        // index - once streak reaches the limit, SelectAndExecuteArchetypePattern forces a different
+        // pattern and rerolls a fresh 3-4 limit for whatever comes next. See SelectAndExecuteArchetypePattern
+        // in WhoAmI_Patterns.cs for where this is actually consumed.
+        private int archetypePatternStreak = 0;
+        private int archetypePatternStreakLimit = 3;
+
         // Shared scratch fields for the extended pattern set (patterns 4-9, all archetypes)
         private Vector2 flickerFlankStart = Vector2.Zero;
         private Vector2 flickerFlankGoal = Vector2.Zero;
@@ -204,12 +266,93 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private const int STATE_DOUBLE_HELIX_SWEEP = 26;     // "Double Helix Sweep"
         private const int STATE_QUANTUM_GLITCH_PHASING = 27; // "Quantum Glitch Phasing"
 
+        // ================== NEW: MIRROR LANCE RUPTURE (archetype-agnostic, .fx-driven) ==================
+        // Sama kayak STATE_MIRROR_MIRAGE, pattern ini BUKAN bagian dari pool per-weaponArchetype -
+        // di-roll independen dari STATE_IDLE (lihat TryStartMirrorLanceRupture di
+        // WhoAmI_Pattern_MirrorLance.cs) jadi jalan berapa pun senjata yang lagi di-mimic. Beda dari
+        // pattern lain di file ini, VFX utamanya (charge-up + beam corridor) digambar lewat shader
+        // .fx asli (WhoAmIMirrorLanceBeam.fx, lihat WhoAmI_Pattern_MirrorLance.cs), bukan cuma
+        // tumpukan sprite additive kayak DrawAttackPatternVFX di WhoAmI_VFX_Attacks.cs.
+        private const int STATE_MIRROR_LANCE_RUPTURE = 28; // "Mirror Lance Rupture" - lihat WhoAmI_Pattern_MirrorLance.cs
+
+        // ================================================================================================
+        // SECOND WAVE: +3 NEW PATTERNS PER WEAPON CLASS ("kelas" = WeaponArchetype) — request: "tambahin
+        // 3 patern baru di setiap class, bikin lebih unik/tidak kaku/epic fight, + pattern marker baru".
+        // ================================================================================================
+        // Same convention as the first trio round (STATE_ABYSSAL_CLEAVE..STATE_QUANTUM_GLITCH_PHASING
+        // above): every weapon class in `enum WeaponArchetype` gets exactly 3 new indices appended to its
+        // existing validPatterns pool in SelectAndExecuteArchetypePattern (WhoAmI_Patterns.cs). TrueMelee
+        // and ProjMelee again SHARE one trio (see the melee trio comment there), the same way they already
+        // share STATE_ABYSSAL_CLEAVE/ORBITING_BLADE_RING/DIMENSIONAL_PIERCE.
+        //
+        // Design throughline for "lebih unik, tidak kaku" across all 7 new trios (see each Handle* method
+        // for specifics): every one of these leans on a genuinely non-linear motion primitive - a curved
+        // bezier-ish path, live re-aiming against the player's CURRENT position instead of a fixed
+        // choreography, staggered/organic timing instead of synced beats, or true small-physics simulation
+        // (pendulum swing, follow-the-leader chain, bounce reflection) - rather than another straight
+        // dash/orbit/ring, so the fight's later moveset reads as more alive than the earlier one.
+        //   - MELEE:           WhoAmI_Pattern_MeleeArchetypeExtras2.cs
+        //   - RANGED:          WhoAmI_Pattern_RangedArchetypeExtras2.cs
+        //   - MAGIC:           WhoAmI_Pattern_MagicArchetypeExtras2.cs
+        //   - SUMMON/WHIP:     WhoAmI_Pattern_SummonWhipExtras2.cs
+        //   - YOYO/BOOMERANG:  WhoAmI_Pattern_YoyoBoomerangExtras2.cs
+        // ================================================================================================
+        private const int STATE_MELEE_MIRROR_WALTZ = 29;         // "Warped Mirror Waltz" - curved multi-slash sweep
+        private const int STATE_MELEE_FRACTURED_ONSLAUGHT = 30;  // "Fractured Persona Onslaught" - staggered illusion converge
+        private const int STATE_MELEE_RIPOSTE_CASCADE = 31;      // "Riposte Cascade" - adaptive re-aimed combo
+
+        private const int STATE_RANGED_PARALLAX_VOLLEY = 32;       // "Parallax Volley" - blink-fire from shifting vantage points
+        private const int STATE_RANGED_MIRROR_RICOCHET = 33;       // "Mirror Ricochet" - shots rebound off a virtual mirror-line
+        private const int STATE_RANGED_STARFALL_CONVERGENCE = 34;  // "Starfall Convergence" - staggered sky-strike telegraphs
+
+        private const int STATE_MAGIC_FRACTURE_BLOOM = 35;   // "Fracture Bloom" - curling petal bolts that bloom then home
+        private const int STATE_MAGIC_UMBRAL_DUALITY = 36;   // "Umbral Duality" - twin light/dark motes in binary orbit
+        private const int STATE_MAGIC_PARADOX_MIRROR = 37;   // "Paradox Mirror Volley" - mirrored illusion pincer volley
+
+        private const int STATE_SUMMON_WRAITH_CONVERGENCE = 38;  // "Wraith Convergence" - closing arc of minions
+        private const int STATE_SUMMON_SOUL_TETHER = 39;         // "Soul Tether Bind" - tether-linked pulsing minions
+        private const int STATE_SUMMON_SPECTRAL_CAROUSEL = 40;   // "Spectral Carousel" - accelerating ring of firing minions
+
+        private const int STATE_WHIP_SERPENTS_COIL = 41;     // "Serpent's Coil" - tightening coil snap
+        private const int STATE_WHIP_FAN_LASH = 42;          // "Cracked Fan Lash" - wide anchored multi-crack arc
+        private const int STATE_WHIP_PUPPETEER_SNAP = 43;    // "Puppeteer's Snap" - lagging chain-link crack along an S-curve
+
+        private const int STATE_YOYO_PENDULUM_RECKONING = 44;  // "Pendulum Reckoning" - building pendulum swing + smash
+        private const int STATE_YOYO_BINARY_SNARE = 45;        // "Binary Orbit Snare" - twin yoyos in binary orbit
+        private const int STATE_YOYO_CASCADE_UNRAVEL = 46;     // "Cascade Unravel" - sine-wave sweep of thrown yoyos
+
+        private const int STATE_BOOMERANG_WINDMILL_BARRAGE = 47;   // "Windmill Barrage" - anchored spin-up throwing fan
+        private const int STATE_BOOMERANG_RICOCHET_TRIANGLE = 48;  // "Ricochet Triangle" - single blade redirected 3x
+        private const int STATE_BOOMERANG_CURVING_RETURN = 49;     // "Curving Return Barrage" - bezier out-and-back throws
+
         private const int STATE_DESPERATION_CUTSCENE = 103;
 
         // Intro baru: boss muncul (fade in) tepat di depan lukisan WhoAmIMirrorPaintingTile, bukan
         // jatuh dari langit di atas player kayak intro lama. States 100/101 lama DIPAKAI ULANG
         // (bukan dihapus) buat urutan dialog ini - lihat HandleCutscenes - biar nggak perlu ubah
         // semua tempat lain yang masih ngecek `aiState == 100 || aiState == 101` (music fade, dsb).
+        //
+        // ================== "SIAPA KAMU?" CONFRONTATION SEQUENCE ==================
+        // v2 (request): dulu boss cuma diem di tempat spawn sambil ngomong beberapa baris. Sekarang
+        // ada BLOCKING kecil: muncul -> jalan mendekat ke player -> "Who are you?" -> muter
+        // membelakangi player sambil mundur selangkah -> "Hmm, why do you look like me?" -> muter
+        // lagi menghadap player -> "Did you summon me to defeat me?" -> terbang naik dari tempatnya
+        // berdiri -> "Then prepare yourself!" -> fight mulai. Sub-stage-nya dilacak lewat introStage
+        // di bawah (terpisah dari aiState 100/101 itu sendiri, yang cuma nandain "lagi di part 1
+        // atau part 2 dari confrontation ini" - lihat HandleCutscenes buat pembagian persisnya).
+        // Direset ke 0 di akhir sequence walau intro ini emang cuma jalan SEKALI per boss (lihat
+        // aiState==100/101 assignment - nggak pernah di-set ulang di tempat lain), semata-mata biar
+        // gak ninggalin state basi nyangkut di instance yang udah lewat fase ini.
+        private int introStage = 0;
+
+        // Timer buat gesture tangan pas ngomong (dipicu tiap ShowBossDialogue selama confrontation
+        // ini - lihat TriggerIntroGesture & pemakaiannya di UpdateProxyPlayerVisuals). Angka > 0
+        // berarti lagi dalam proses gesture (lengan ngangkat pelan terus turun lagi, kayak orang
+        // nunjuk/nekanin omongan), 0 = lengan netral/ngikutin animasi jalan normal.
+        private int introGestureTimer = 0;
+        private const int IntroGestureDuration = 40;
+        private float introIdleBreatheTimer = 0f; // idle "breathing" bob timer, ticks while confrontation intro is active
+        private float introIdleBobOffset = 0f;    // computed each tick in UpdateProxyPlayerVisuals, applied at draw time only
 
         // ================== DESPERATION CUTSCENE FIELDS ==================
         private bool desperationStarted = false;
@@ -306,12 +449,26 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         public bool isMirageDecoy = false;
         public int mirageOwnerWhoAmI = -1; // NPC.whoAmI of the real boss that spawned this decoy
 
+        // ================================================================================================
+        // ORBITING BLADE RING (SOVEREIGN GUARD) — clone support fields
+        // ================================================================================================
+        // Same "spawn another instance of THIS NPC type, flag it, share the proxy visuals" trick as the
+        // Mirror Mirage decoys above, but its OWN independent flag/lifecycle - the clone here is a real
+        // stand-in combatant (it holds a flank and gets puppeted through a weapon-throw), not a shell-game
+        // decoy, so it's kept fully separate from isMirageDecoy rather than reusing it.
+        public bool isSovereignGuardClone = false;
+        public int sovereignGuardCloneOwner = -1; // NPC.whoAmI of the real boss that spawned this clone
+
         // Only meaningful on the REAL boss instance while STATE_MIRROR_MIRAGE is active.
         private int[] mirageDecoySlots = new int[2] { -1, -1 }; // NPC.whoAmI of the two decoys
         private int mirageRealPositionIndex = 0; // which of the 3 layout slots (0=Left,1=Right,2=Top) is real
         private Vector2[] mirageLayoutPositions = new Vector2[3];
         private bool mirageChannelBroken = false;
         private int mirrorMirageCooldownTimer = 0;
+
+        // Cooldown buat STATE_MIRROR_LANCE_RUPTURE - pola timer & roll-independen-dari-STATE_IDLE-nya
+        // SENGAJA disamain kayak mirrorMirageCooldownTimer di atas (lihat WhoAmI_Pattern_MirrorLance.cs).
+        private int mirrorLanceCooldownTimer = 0;
 
         // Finds the REAL WhoAmI boss NPC index, ignoring any mirage decoys. Other files (SceneEffect,
         // CutscenePlayer, DefeatMenuSystem) should call this instead of NPC.FindFirstNPC when they need
@@ -321,7 +478,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             for (int i = 0; i < Main.maxNPCs; i++)
             {
                 NPC npc = Main.npc[i];
-                if (npc.active && npc.type == ModContent.NPCType<WhoAmI>() && npc.ModNPC is WhoAmI w && !w.isMirageDecoy)
+                if (npc.active && npc.type == ModContent.NPCType<WhoAmI>() && npc.ModNPC is WhoAmI w && !w.isMirageDecoy && !w.isSovereignGuardClone)
                     return i;
             }
             return -1;
@@ -342,7 +499,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             NPC.height = 46;
             NPC.damage = 0;
             NPC.defense = 32;
-            NPC.lifeMax = 180000;
+            NPC.lifeMax = 550000;
             NPC.HitSound = SoundID.NPCHit1;
             NPC.DeathSound = SoundID.NPCDeath1;
             NPC.knockBackResist = 0f;
@@ -375,6 +532,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             writer.Write(qteFailed);
             writer.Write(executionDone);
             writer.Write(cutsceneStage);
+            writer.Write(introStage);
             writer.Write(stageTimer);
             writer.Write(swordScale);
             writer.Write(swingProgress);
@@ -405,6 +563,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             qteFailed = reader.ReadBoolean();
             executionDone = reader.ReadBoolean();
             cutsceneStage = reader.ReadInt32();
+            introStage = reader.ReadInt32();
             stageTimer = reader.ReadSingle();
             swordScale = reader.ReadSingle();
             swingProgress = reader.ReadSingle();
@@ -421,6 +580,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             // (which stops the boss's OWN projectiles from hitting itself) was. Decoys are an illusion
             // to be picked apart by eye, not a target you're allowed to damage - see SpawnMirageDecoys.
             if (isMirageDecoy) return false;
+            if (isSovereignGuardClone) return false; // clone stands in a flank but was never really "there" to be hit
             if (projectile.owner == proxySlot) return false;
             return null;
         }
@@ -429,6 +589,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         {
             // Same fix as CanBeHitByProjectile above, for melee/item hits.
             if (isMirageDecoy) return false;
+            if (isSovereignGuardClone) return false;
             return null;
         }
 
@@ -455,6 +616,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             // death to the owning boss in OnKill (below) instead of ever entering the desperation
             // sequence, which is exclusively a REAL-boss-at-0-HP thing.
             if (isMirageDecoy) return true;
+            if (isSovereignGuardClone) return true;
 
             if (aiState != STATE_DESPERATION_CUTSCENE && aiState != 102)
             {
@@ -476,7 +638,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             {
                 CombatText.NewText(NPC.getRect(), Color.LightCyan, "Evade!", true);
                 Terraria.Audio.SoundEngine.PlaySound(SoundID.Item66, NPC.Center);
-                if (NPC.target != -1)
+
+                // FIX: this used to force aiState = STATE_DODGE / call ExecuteGlitchTeleport regardless
+                // of what the boss was doing, so a hit landing mid-pattern (e.g. mid-channel on
+                // GravityWellTorrent, mid-charge on MirrorLance) could still hijack the state machine
+                // and abandon a half-finished attack - on top of HandleReactiveDodging's own version of
+                // the same bug. The accessory still negates the hit's damage either way (that's the
+                // `return true` below, used by the SetMaxDamage(0) callers) - it just only repositions
+                // the boss when it's actually idle, so an in-progress pattern is never derailed.
+                if (NPC.target != -1 && aiState == STATE_IDLE)
                 {
                     if (!isTrueMelee)
                         ExecuteGlitchTeleport(Main.player[NPC.target]);
@@ -502,6 +672,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             // so this shouldn't normally even be reached for them - but zero the damage anyway instead
             // of just returning, in case some non-standard damage source ever bypasses CanBeHitBy*.
             if (isMirageDecoy) { modifiers.SetMaxDamage(0); return; }
+            if (isSovereignGuardClone) { modifiers.SetMaxDamage(0); return; }
 
             if (aiState == STATE_MIRROR_MIRAGE && !mirageChannelBroken)
             {
@@ -539,6 +710,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         public override void ModifyHitPlayer(Player target, ref Player.HurtModifiers modifiers)
         {
             modifiers.FinalDamage *= GetWeaponDamageReductionMultiplier(NPC.damage);
+
+            // Padanan "senjata ini kena musuh" versi boss buat senjata modded yang gimmick-nya
+            // nempel di ModItem.OnHitNPC() (misal EclipsaBlade), bukan di Shoot() - lihat
+            // CustomWeaponHitOverrides & TryFireCustomWeaponHitOverride di
+            // WhoAmI_ModdedWeaponOverrides.cs. Cuma jalan kalau kontak damage-nya beneran nonzero
+            // (NPC.damage == 0 dipakai banyak pattern non-attack, misal ExecuteRangedBarrage /
+            // ExecuteParryStance, buat matiin contact damage sementara).
+            if (NPC.damage > 0)
+                TryFireCustomWeaponHitOverride(this, target);
         }
 
         public override void ModifyHitByItem(Player player, Item item, ref NPC.HitModifiers modifiers)
@@ -547,6 +727,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             // this shouldn't normally even be reached for them - but zero the damage anyway instead of
             // just returning, in case some non-standard damage source ever bypasses CanBeHitBy*.
             if (isMirageDecoy) { modifiers.SetMaxDamage(0); return; }
+            if (isSovereignGuardClone) { modifiers.SetMaxDamage(0); return; }
 
             if (aiState == STATE_MIRROR_MIRAGE && !mirageChannelBroken)
             {
@@ -588,6 +769,16 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 return;
             }
 
+            // Sovereign Guard clones (see WhoAmI_Pattern_MeleeArchetypeExtras.cs) are the same kind of
+            // tiny, self-contained side-instance as mirage decoys above - they just hold a flank and get
+            // puppeted through a weapon throw by the real boss's own Handle method, so their own AI has
+            // nothing to do but idle in place.
+            if (isSovereignGuardClone)
+            {
+                RunSovereignGuardCloneAI();
+                return;
+            }
+
             // Phase 3 gauntlet clones run their own trimmed combat loop instead of the full boss
             // brain below - see WhoAmI_Phase3Galaxy.cs (RunPhase3CloneAI). Deliberately NOT the full
             // AI() body: clones skip the weapon carousel, phase transitions, cutscenes, and mirror
@@ -603,29 +794,95 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 NPC.velocity.Y -= 0.6f;
                 NPC.velocity.X *= 0.95f;
 
-                // NPC.EncourageDespawn(10) sengaja gak dipakai lagi di sini - no-op buat NPC
-                // ber-flag boss (lihat komentar di deklarasi noValidTargetTimer). Timer manual di
-                // bawah ini yang beneran nentuin kapan boss-nya hilang.
-                noValidTargetTimer++;
-                if (noValidTargetTimer >= NoValidTargetDespawnDelay)
+                // FIX v2: even the 15-second grace above (RespawnWaitGraceDelay) turned out to be a
+                // guess, and a 550k-HP, post-everything boss can push vanilla respawn time well past
+                // that (Master Mode / certain seeds push it into the 30-40+ second range). ANY fixed
+                // guess is just a smaller version of the original bug. Read the connected player's
+                // ACTUAL Player.respawnTimer instead of guessing - that's the ground truth for "how
+                // much longer until they're back", regardless of difficulty/seed/progression. While
+                // any connected, currently-dead player still has respawnTimer > 0, the despawn timer
+                // does not move AT ALL. Only once every connected dead player's respawnTimer has hit
+                // 0 (meaning they SHOULD already be back) do we start a short grace before concluding
+                // the target is genuinely, permanently gone.
+                bool anyPlayerConnected = false;
+                bool anyDeadPlayerStillRespawning = false;
+                for (int i = 0; i < Main.maxPlayers; i++)
                 {
-                    ForceDespawnNoValidTarget();
-                    return;
+                    if (i == proxySlot) continue;
+                    Player p = Main.player[i];
+                    if (p == null || !p.active) continue;
+                    anyPlayerConnected = true;
+                    if (p.dead && p.respawnTimer > 0) anyDeadPlayerStillRespawning = true;
                 }
 
-                if (IsCutsceneActive) IsCutsceneActive = false;
+                if (!anyPlayerConnected)
+                {
+                    // Nobody left connected at all - nobody to come back to. Despawn quickly, same
+                    // as before.
+                    respawnWaitGraceTimer = 0;
+                    noValidTargetTimer++;
+                    if (noValidTargetTimer >= NoValidTargetDespawnDelay)
+                    {
+                        ForceDespawnNoValidTarget();
+                        return;
+                    }
+                }
+                else if (anyDeadPlayerStillRespawning)
+                {
+                    // Someone's connected and actively counting down to respawn - just wait, no timer
+                    // moves at all, no matter how long that countdown actually is.
+                    noValidTargetTimer = 0;
+                    respawnWaitGraceTimer = 0;
+                }
+                else
+                {
+                    // Connected players exist and none of them are mid-respawn-countdown anymore (so
+                    // they should already be back), but we still don't have a valid target this tick -
+                    // could just be a one-tick gap right as they finish respawning, or a genuinely
+                    // stuck/edge case. Give a short, generous grace window before falling back to the
+                    // normal despawn countdown, instead of despawning instantly.
+                    respawnWaitGraceTimer++;
+                    if (respawnWaitGraceTimer >= RespawnWaitGraceDelay)
+                    {
+                        noValidTargetTimer++;
+                        if (noValidTargetTimer >= NoValidTargetDespawnDelay)
+                        {
+                            ForceDespawnNoValidTarget();
+                            return;
+                        }
+                    }
+                }
+
+                if (IsCutsceneActive) { IsCutsceneActive = false; cutsceneCameraInitialized = false; }
                 return;
             }
             noValidTargetTimer = 0;
+            respawnWaitGraceTimer = 0;
 
             Player player = Main.player[NPC.target];
             NPC.netAlways = true;
             NPC.timeLeft = 3600;
 
-            if (aiState == 100 || aiState == 101 || aiState == 102 || aiState == 2)
+            // MUSIC SYNC FIX: baris ini dulu nge-force musicFade = 0 ("mute paksa") tiap tick
+            // SELAMA aiState 100/101/102/2 - itu yang bikin WhoAmITheme kedengeran KECIL/nyaris
+            // ilang begitu boss-nya nongol (padahal WhoAmISceneEffect.Music udah muterin dari fase
+            // absorpsi), soalnya tiap tick langsung di-mute ulang paksa di sini, jadi cuma sempet
+            // "ngintip" volume sebentar sebelum di-nol-in lagi tiap frame - baru mulai kedengeran
+            // wajar lagi pas ngelewatin state ini & vanilla fade-nya ngejar naik pelan-pelan.
+            // Sekarang cuma aiState 102 & 2 (phase2 transition cutscene, di luar cakupan sinkronisasi
+            // detik ke-25) yang tetap dipaksa mute - 100/101 (mirror-shrine intro) DIBIARIN lanjut
+            // di volume normal biar lagunya kedengeran gede & konsisten dari awal sampai fight mulai.
+            if (aiState == 102 || aiState == 2)
             {
                 if (Main.curMusic >= 0 && Main.curMusic < Main.musicFade.Length)
                     Main.musicFade[Main.curMusic] = 0f;
+            }
+            else if (Main.curMusic >= 0 && Main.curMusic < Main.musicFade.Length)
+            {
+                // Paksa full volume INSTAN (bukan nunggu vanilla fade-in yang pelan-pelan naik) -
+                // biar WhoAmITheme kedengeran GEDE dari tick pertama dia jadi track aktif, bukan
+                // cuma "ngintip" pelan sebelum akhirnya nyampe volume normal beberapa detik kemudian.
+                Main.musicFade[Main.curMusic] = 1f;
             }
 
             if (!initializedCutscene)
@@ -633,6 +890,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 initializedCutscene = true;
                 aiState = 100;
                 aiTimer = 0;
+                introStage = 0;
 
                 if (PendingMirrorSpawnPoint.HasValue)
                 {
@@ -642,6 +900,31 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     NPC.direction = PendingMirrorFacingDirection;
                     NPC.spriteDirection = NPC.direction;
                     PendingMirrorSpawnPoint = null;
+
+                    // Snap ke lantai/block terdekat di bawah titik spawn (kalau ada dalam jangkauan
+                    // wajar) - biar boss keliatan BENERAN BERDIRI di atas block selama confrontation
+                    // intro jalan (WhoAmI_MirrorPainting.cs cuma naruh Y-nya persis di depan lukisan,
+                    // bukan di atas lantai - lukisannya kan bisa aja ditaruh tinggi di tembok). Kalau
+                    // nggak ketemu lantai dalam jangkauan scan, biarin apa adanya (fallback - ngambang
+                    // di posisi depan lukisan kayak sebelumnya, TIDAK crash/nyangkut).
+                    float? introGroundY = FindGroundYBelow(NPC.Center, 320f);
+                    if (introGroundY.HasValue) NPC.Center = new Vector2(NPC.Center.X, introGroundY.Value - NPC.height / 2f);
+
+                    // FIX (kamera "balik ke player dulu, baru ke boss lagi" pas boss keluar dari
+                    // cermin): WhoAmIMirrorAbsorptionSystem udah nge-drive CutsceneCameraTarget dari
+                    // player -> mirror sepanjang animasi serap (dan udah full ngunci ke mirror pas
+                    // fase Flash-nya, lihat WhoAmI_MirrorAbsorption.cs), TAPI cutsceneCameraInitialized
+                    // di NPC instance baru ini masih false secara default - jadi tick pertama
+                    // HandleCutscenes() di bawah bakal masuk cabang "belum pernah di-init" dan nge-SNAP
+                    // CutsceneCameraTarget balik ke player.Center dulu, sebelum ngerayap lagi ke
+                    // NPC.Center. Itu yang bikin kamera keliatan lompat balik ke player pas boss baru
+                    // nongol, padahal detik sebelumnya udah di mirror.
+                    // Fix: kalau spawn-nya emang lewat mirror (IsCutsceneActive udah true, artinya
+                    // absorption system yang lagi pegang kendali kamera), anggap kamera cutscene-nya
+                    // UDAH ke-init dari awal - biar HandleCutscenes langsung masuk cabang lerp
+                    // (nerusin dari posisi mirror terakhir menuju NPC.Center pelan-pelan), bukan snap
+                    // ke player dulu.
+                    if (IsCutsceneActive) cutsceneCameraInitialized = true;
                 }
                 else
                 {
@@ -663,11 +946,19 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 NPC.netUpdate = true;
             }
 
-            // PHASE 3 GALAXY GAUNTLET trigger - see WhoAmI_Phase3Galaxy.cs. Same threshold-check
+            // PHASE 3 CARTESIAN GAUNTLET trigger - see WhoAmI_Phase3Cartesian.cs. Same threshold-check
             // convention as the Phase 2 trigger above, gated one tier lower and behind isPhase2 so it
             // can never fire before Phase 2 has already happened, and behind the same cutscene-state
             // exclusion list so it can't interrupt an active cutscene/desperation sequence.
-            // Phase 3 (Galaxy gauntlet) has been removed/disabled. No transition occurs here.
+            // Threshold diturunin dari 35% -> 10% (request) - Phase3DamagePerWave di
+            // WhoAmI_Phase3Cartesian.cs udah disesuaikan bareng ini biar jumlah wave sebelum
+            // gauntlet-nya kelar tetap senada kayak sebelumnya (bukan langsung kelar di wave
+            // pertama gara-gara budget HP-nya sekarang jauh lebih kecil).
+            if (isPhase2 && !phase3Triggered && NPC.life < NPC.lifeMax * 0.10f && aiState != 100 && aiState != 101 && aiState != 102 && aiState != 2 && aiState != STATE_DESPERATION_CUTSCENE && aiState != STATE_PHASE3_TRANSITION && aiState != STATE_PHASE3_ARENA)
+            {
+                TriggerPhase3Start(player);
+                return; // TriggerPhase3Start already sets aiState/aiTimer for the new sequence - don't fall through into the normal tick below on the same frame.
+            }
 
             aiTimer++;
             tacticalDecisionTimer++;
@@ -693,6 +984,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             if (aiState == STATE_DESPERATION_CUTSCENE)
             {
                 HandleDesperationCutscene(player);
+                return;
+            }
+
+            if (aiState == STATE_PHASE3_TRANSITION || aiState == STATE_PHASE3_ARENA)
+            {
+                HandlePhase3(player);
                 return;
             }
 
@@ -745,10 +1042,15 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             CalculateTacticalPosition(player);
             HandleReactiveDodging(player);
             HandleProjectileSideStep(player); // "sat set" rule 2.5: perpendicular micro-dash + counter window
+            EnforceMinimumCastingDistance(player); // safety-net repel so ranged/magic patterns never end up nempel on the player
+            EnforceNoStaticIdle(); // "sat set" rule 7: gentle drift whenever velocity has fully stalled, so older stand-and-fire patterns never freeze solid
 
             if (mirrorMirageCooldownTimer > 0) mirrorMirageCooldownTimer--;
+            if (mirrorLanceCooldownTimer > 0) mirrorLanceCooldownTimer--;
             TickSatSetTimers();
             UpdateAmbientBossVFX(player); // aura mote/light "napas" tema-warna, jalan tiap tick selama fight aktif (WhoAmI_VFX.cs)
+            TickHitFlash(); // deteksi kehilangan HP tiap tick -> trigger flash/impact VFX (WhoAmI_VFX_HitFlash.cs)
+            TickPatternAmbience(); // partikel "flavor" per kategori pattern + intensity-glitch trigger (WhoAmI_VFX_PatternFlavor.cs)
 
             switch (aiState)
             {
@@ -759,7 +1061,31 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     // Mirror Mirage is archetype-agnostic (works the same regardless of what the player
                     // is holding) and gets progressively more frequent in phase 2 / desperation, so it's
                     // rolled independently of the normal weapon-archetype pattern loop below.
-                    if (mirrorMirageCooldownTimer <= 0 && patternCooldown <= 0 && TryStartMirrorMirage(player))
+                    // FIX ("projectile senjatanya ilang pas ganti pattern"): patternCooldown
+                    // (cuma 25-45 tick) HABIS jauh lebih cepet daripada durasi asli pattern
+                    // "inline" manapun (index 0-3 tiap archetype - Ranged Barrage, Magic channel,
+                    // Melee combo loop, dst) yang BISA jalan sampai 150 tick sambil tetep di
+                    // aiState == STATE_IDLE (pattern2 lama ini emang gak pernah pindah ke state
+                    // khusus - lihat ExecuteRangedPattern/ExecuteMagicPattern/dst). Begitu
+                    // patternCooldown nyampe 0 (jauh sebelum pattern-nya beneran kelar),
+                    // Mirror Mirage/Mirror Lance bisa nge-roll dan LANGSUNG bajak aiState di
+                    // TENGAH barrage/channel yang masih jalan - proyektil yang udah ditembak
+                    // jadi "yatim" (gak di-steer/di-track lagi sama pattern-nya, dan visual
+                    // senjata di tangan boss langsung ganti pose Mirror Mirage) - itu yang
+                    // kebaca kayak "senjatanya ilang". archetypePatternTimer (100-150 tick,
+                    // di-reset SETIAP kali archetypePatternIndex baru dipilih - lihat
+                    // SelectAndExecuteArchetypePattern di WhoAmI_Patterns.cs) jauh lebih deket
+                    // ke durasi asli 1 sesi pattern, jadi dipakai sebagai syarat TAMBAHAN (bukan
+                    // pengganti) - hijack cuma boleh kejadian pas boss BENERAN lagi di antara dua
+                    // sesi pattern, bukan di tengah salah satu yang masih jalan.
+                    if (mirrorMirageCooldownTimer <= 0 && patternCooldown <= 0 && archetypePatternTimer <= 0 && TryStartMirrorMirage(player))
+                        break;
+
+                    // Sama filosofinya kayak Mirror Mirage di atas: archetype-agnostic, di-roll
+                    // independen dari weapon-archetype pool supaya pattern ini bisa muncul nyelip di
+                    // antara pattern manapun yang lagi jalan, bukan cuma jatah 1 archetype tertentu.
+                    // Same archetypePatternTimer fix as Mirror Mirage right above - see that comment.
+                    if (mirrorLanceCooldownTimer <= 0 && patternCooldown <= 0 && archetypePatternTimer <= 0 && TryStartMirrorLanceRupture(player))
                         break;
 
                     if (patternCooldown <= 0)
@@ -878,6 +1204,95 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     HandleQuantumGlitchPhasing(player);
                     break;
 
+                case STATE_MIRROR_LANCE_RUPTURE:
+                    HandleMirrorLanceRupture(player);
+                    break;
+
+                // ---------------- SECOND WAVE TRIOS (see the constants block above) ----------------
+                case STATE_MELEE_MIRROR_WALTZ:
+                    HandleMeleeMirrorWaltz(player);
+                    break;
+
+                case STATE_MELEE_FRACTURED_ONSLAUGHT:
+                    HandleMeleeFracturedOnslaught(player);
+                    break;
+
+                case STATE_MELEE_RIPOSTE_CASCADE:
+                    HandleMeleeRiposteCascade(player);
+                    break;
+
+                case STATE_RANGED_PARALLAX_VOLLEY:
+                    HandleRangedParallaxVolley(player);
+                    break;
+
+                case STATE_RANGED_MIRROR_RICOCHET:
+                    HandleRangedMirrorRicochet(player);
+                    break;
+
+                case STATE_RANGED_STARFALL_CONVERGENCE:
+                    HandleRangedStarfallConvergence(player);
+                    break;
+
+                case STATE_MAGIC_FRACTURE_BLOOM:
+                    HandleMagicFractureBloom(player);
+                    break;
+
+                case STATE_MAGIC_UMBRAL_DUALITY:
+                    HandleMagicUmbralDuality(player);
+                    break;
+
+                case STATE_MAGIC_PARADOX_MIRROR:
+                    HandleMagicParadoxMirror(player);
+                    break;
+
+                case STATE_SUMMON_WRAITH_CONVERGENCE:
+                    HandleSummonWraithConvergence(player);
+                    break;
+
+                case STATE_SUMMON_SOUL_TETHER:
+                    HandleSummonSoulTether(player);
+                    break;
+
+                case STATE_SUMMON_SPECTRAL_CAROUSEL:
+                    HandleSummonSpectralCarousel(player);
+                    break;
+
+                case STATE_WHIP_SERPENTS_COIL:
+                    HandleWhipSerpentsCoil(player);
+                    break;
+
+                case STATE_WHIP_FAN_LASH:
+                    HandleWhipFanLash(player);
+                    break;
+
+                case STATE_WHIP_PUPPETEER_SNAP:
+                    HandleWhipPuppeteerSnap(player);
+                    break;
+
+                case STATE_YOYO_PENDULUM_RECKONING:
+                    HandleYoyoPendulumReckoning(player);
+                    break;
+
+                case STATE_YOYO_BINARY_SNARE:
+                    HandleYoyoBinarySnare(player);
+                    break;
+
+                case STATE_YOYO_CASCADE_UNRAVEL:
+                    HandleYoyoCascadeUnravel(player);
+                    break;
+
+                case STATE_BOOMERANG_WINDMILL_BARRAGE:
+                    HandleBoomerangWindmillBarrage(player);
+                    break;
+
+                case STATE_BOOMERANG_RICOCHET_TRIANGLE:
+                    HandleBoomerangRicochetTriangle(player);
+                    break;
+
+                case STATE_BOOMERANG_CURVING_RETURN:
+                    HandleBoomerangCurvingReturn(player);
+                    break;
+
                 // Phase 3 handlers removed
 
                 default:
@@ -905,13 +1320,29 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             // peduli state, padahal ExecuteDashAttack sengaja ngebut sampai 32px/tick (phase 2)
             // nembus lewat player, yang gampang kelewat 1500px di TENGAH animasi dash. Begitu
             // kelewat, boss langsung di-snap instan balik ke jarak 1500 - kelihatannya kayak
-            // teleport/glitch acak persis pas lagi dash. Sekarang clamp jarak-ke-player ini
-            // di-skip selama STATE_DASH_ATTACK (durasinya cuma ~35 tick jadi tetap aman); batas
-            // dunia (world bounds) di bawah tetap jalan di semua state buat jaga-jaga terakhir.
-            // STATE_BLINK_ECHO_COMBO also gets exempted here for the same reason as STATE_DASH_ATTACK:
-            // its blink/echo movement (see WhoAmI_Pattern_BlinkEchoCombo.cs) deliberately repositions the
-            // boss in a single tick and would otherwise get snap-clamped mid-telegraph.
-            if (aiState != STATE_DASH_ATTACK && aiState != STATE_BLINK_ECHO_COMBO)
+            // teleport/glitch acak persis pas lagi dash.
+            //
+            // FIX 2 ("kadang ada pattern yang ngeglitch-glitch gajelas kayak ngebug"): baris di atas
+            // awalnya cuma exempt DASH_ATTACK & BLINK_ECHO_COMBO satu-satu. Dari situ codebase udah
+            // nambah ~40 state dash/lunge/flank lain (AbyssalCleave, MeleeMirrorWaltz,
+            // MirrorLanceRupture, WhipLashCage, BoomerangCrossfire, dst) yang SAMA PERSIS rentannya -
+            // masing-masing dash ratusan px dalam beberapa tick, dan kalau player kebetulan lagi
+            // gerak (kabur/kiting/pakai wings) pas boss commit ke dash-nya, jarak boss-ke-player
+            // gampang nembus 900px DI TENGAH animasi walau dash-nya sendiri nggak niat "kabur".
+            // Begitu nembus, clamp ini nge-snap INSTAN boss balik ke radius 900 pas lagi di tengah
+            // dash/lunge/telegraph - persis kelihatan kayak teleport glitch yang random/kadang-kadang.
+            // Nambahin tiap state dash baru ke exemption list satu-satu bakal kejadian ulang terus tiap
+            // ada pattern baru - ini PERSIS masalah yang sama yang udah diaudit & dibenerin di
+            // HandleProjectileSideStep (lihat WhoAmI_SatSetPhysics.cs, komentar "AUDIT FIX"). Jadi
+            // di-flip ke pola yang sama: klem keras ini sekarang CUMA jalan pas STATE_IDLE - satu2nya
+            // state yang beneran "cuma ngambang" dan nggak lagi di tengah attack sequence berdurasi
+            // pasti. Semua attack state lain balik ke STATE_IDLE begitu selesai (lihat tiap Handle*
+            // di file2 Pattern_*), dan begitu balik situ ExecuteSmoothMovement (WhoAmI_Helpers.cs)
+            // udah otomatis narik boss balik ke jarak wajar secara smooth - jadi overshoot SESAAT pas
+            // dash/lunge tetap aman dibiarkan, nggak perlu di-snap paksa tiap tick. Batas dunia
+            // (world bounds) di bawah tetap jalan di SEMUA state tanpa terkecuali, jadi boss tetap
+            // nggak mungkin nyasar ke void di luar map walau lagi di tengah attack state manapun.
+            if (aiState == STATE_IDLE)
             {
                 Vector2 diff = NPC.Center - target.Center;
                 if (diff.Length() > maxDistanceFromPlayer)
@@ -942,45 +1373,358 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         }
 
         // ======================== CUTSCENES ========================
+        // Tracks whether the previous tick was already inside a cutscene, purely so we know when
+        // to snap CutsceneCameraTarget for the FIRST time vs. ease it smoothly afterward.
+        private bool cutsceneCameraInitialized = false;
+
         private void HandleCutscenes(Player player)
         {
             IsCutsceneActive = true;
-            CutsceneCameraTarget = NPC.Center;
+
+            // FIX (kamera masih "teleport" di frame pertama cutscene): the previous fix stopped the
+            // camera from snapping EVERY tick, but still hard-set CutsceneCameraTarget = NPC.Center on
+            // the very first frame - and since normal (non-cutscene) gameplay keeps the camera
+            // centered on the PLAYER, not the boss, that first-frame snap was itself a visible jump
+            // straight to the boss the instant the cutscene began, before any easing kicked in.
+            // Now the very first frame seeds CutsceneCameraTarget from the PLAYER's position instead
+            // (continuous with wherever the normal camera already was, so there's no jump at all at
+            // the moment the cutscene starts), and every frame after that eases it toward the boss -
+            // so what you actually see is the camera panning smoothly from the player over to the
+            // boss, not a hard cut followed by smoothing.
+            if (!cutsceneCameraInitialized)
+            {
+                CutsceneCameraTarget = player.Center;
+                cutsceneCameraInitialized = true;
+            }
+            else
+            {
+                CutsceneCameraTarget = Vector2.Lerp(CutsceneCameraTarget, NPC.Center, 0.06f);
+            }
+
             NPC.dontTakeDamage = true;
             NPC.damage = 0;
             UpdateAmbientBossVFX(player); // aura/mote tema-warna tetap "napas" selama cutscene, bukan cuma pas fight normal (WhoAmI_VFX.cs)
 
             if (aiState == 100)
             {
-                // Mirror-shrine intro, part 1: berdiri diam persis di depan cermin (sudah
-                // diposisikan di NPC.Center oleh bootstrap di AI(), TIDAK dikejar-kejar lagi ke
-                // arah player kayak intro lama), lalu fade dari transparan penuh ke keliatan
-                // penuh ("dari pudar menjadi terang").
-                NPC.velocity = Vector2.Zero;
+                // ============================================================================
+                // "WHO ARE YOU?" CONFRONTATION - PART 1 (see introStage for sub-stage detail):
+                //   introStage 0: appear (fade in), standing still at the spawn point (in front
+                //                 of the mirror).
+                //   introStage 1: walk in toward the player.
+                //   introStage 2: "Who are you?" - hold so the line can be read.
+                //   introStage 3: still facing the player, a second line as it studies them.
+                //   introStage 4: turn to face away from the player + step back a little,
+                //                 "Hmm, why do you look like me?"
+                //   introStage 5: fully turned away, a beat of silence then a fourth line,
+                //                 before turning back.
+                // Continues into aiState 101 (part 2) at the end of introStage 5.
+                // ============================================================================
+
+                // Lock player controls completely for the whole confrontation - SAME pattern as
+                // HandleDesperationCutscene & WhoAmIMirrorAbsorptionSystem (re-applied every tick,
+                // not just once at the start, so there's no 1-frame gap where input leaks through).
+                player.controlLeft = false;
+                player.controlRight = false;
+                player.controlUp = false;
+                player.controlDown = false;
+                player.controlJump = false;
+                player.controlUseItem = false;
+                player.controlUseTile = false;
+                player.controlThrow = false;
+                player.itemAnimation = 0;
+                player.itemTime = 0;
+                player.velocity.X *= 0.85f;
+
+                NPC.alpha = 0; // fully visible by default - introStage 0 below overrides this during fade-in
                 CutsceneShakeIntensity = 0f;
 
-                const int FadeInDuration = 90;
-                NPC.alpha = (int)MathHelper.Lerp(255, 0, MathHelper.Clamp(aiTimer / (float)FadeInDuration, 0f, 1f));
+                switch (introStage)
+                {
+                    case 0:
+                        {
+                            // Appear - fade from fully transparent to fully visible, standing
+                            // completely still at the spawn point (already positioned by the
+                            // bootstrap in AI(), right in front of the mirror).
+                            const int FadeInDuration = 55;
+                            NPC.velocity = Vector2.Zero;
+                            NPC.alpha = (int)MathHelper.Lerp(255, 0, MathHelper.Clamp(aiTimer / (float)FadeInDuration, 0f, 1f));
 
-                if (Main.rand.NextBool(3))
-                    Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.PurpleTorch, 0f, 0f, 150, default, 1.1f);
+                            if (Main.rand.NextBool(3))
+                                Dust.NewDust(NPC.position, NPC.width, NPC.height, DustID.PurpleTorch, 0f, 0f, 150, default, 1.1f);
 
-                if (aiTimer == FadeInDuration + 20) ShowBossDialogue("Where is this?", new Color(160, 110, 240), 130f);
-                if (aiTimer == FadeInDuration + 170) ShowBossDialogue("Why...", new Color(160, 110, 240), 110f);
-                if (aiTimer == FadeInDuration + 300) ShowBossDialogue("Why do you look just like me?", new Color(210, 70, 210), 150f);
-                if (aiTimer >= FadeInDuration + 470) { aiState = 101; aiTimer = 0; NPC.netUpdate = true; }
+                            if (aiTimer >= FadeInDuration)
+                            {
+                                introStage = 1;
+                                aiTimer = 0;
+                                NPC.netUpdate = true;
+                            }
+                        }
+                        break;
+
+                    case 1:
+                        {
+                            // Walk toward the player - stops once close enough to feel face-to-face
+                            // without overlapping (IntroWalkStopDistance), with a hard time cap as a
+                            // safety net in case the player happened to spawn far away.
+                            const float IntroWalkStopDistance = 130f;
+                            const float IntroWalkSpeed = 2.6f;
+                            const int IntroWalkMaxDuration = 100;
+
+                            float dx = player.Center.X - NPC.Center.X;
+                            float absDx = Math.Abs(dx);
+
+                            if (absDx > IntroWalkStopDistance)
+                            {
+                                int moveDir = dx >= 0f ? 1 : -1;
+                                NPC.direction = moveDir;
+                                NPC.spriteDirection = moveDir;
+                                NPC.velocity.X = MathHelper.Lerp(NPC.velocity.X, moveDir * IntroWalkSpeed, 0.1f);
+                            }
+                            else
+                            {
+                                NPC.velocity.X *= 0.8f;
+                            }
+                            NPC.velocity.Y *= 0.85f; // settle vertically, don't drift up/down while walking
+
+                            if (absDx <= IntroWalkStopDistance || aiTimer >= IntroWalkMaxDuration)
+                            {
+                                NPC.velocity.X = 0f;
+                                ShowBossDialogue("Who are you?", new Color(160, 110, 240), 150f);
+                                TriggerIntroGesture();
+                                introStage = 2;
+                                aiTimer = 0;
+                                NPC.netUpdate = true;
+                            }
+                        }
+                        break;
+
+                    case 2:
+                        {
+                            // Hold so "Who are you?" has time to be read before turning away.
+                            const int IntroQ1HoldDuration = 150;
+                            NPC.velocity *= 0.9f;
+
+                            if (aiTimer >= IntroQ1HoldDuration)
+                            {
+                                introStage = 3;
+                                aiTimer = 0;
+                                NPC.netUpdate = true;
+                            }
+                        }
+                        break;
+
+                    case 3:
+                        {
+                            // NEW: still facing the player - a second line as it takes a closer
+                            // look, right before it turns away. Same "just stand and hold" shape
+                            // as case 2, just one more beat.
+                            const int IntroLine2HoldDuration = 140;
+                            NPC.velocity *= 0.9f;
+
+                            if (aiTimer == 8)
+                            {
+                                ShowBossDialogue("...No. That's not right. I know that face.", new Color(160, 110, 240), 150f);
+                                TriggerIntroGesture();
+                            }
+
+                            if (aiTimer >= IntroLine2HoldDuration)
+                            {
+                                introStage = 4;
+                                aiTimer = 0;
+                                NPC.netUpdate = true;
+                            }
+                        }
+                        break;
+
+                    case 4:
+                        {
+                            // Turn to face away from the player (back turned) and step back a
+                            // little, WHILE speaking the third line (not waiting for the walk to
+                            // finish first).
+                            const int IntroStepBackDuration = 45;
+                            const float IntroStepBackSpeed = 2f;
+                            const int IntroStage4TotalDuration = 200;
+
+                            int awayDir = (player.Center.X < NPC.Center.X) ? 1 : -1; // opposite of "facing the player"
+                            NPC.direction = awayDir;
+                            NPC.spriteDirection = awayDir;
+
+                            if (aiTimer < IntroStepBackDuration)
+                                NPC.velocity.X = MathHelper.Lerp(NPC.velocity.X, awayDir * IntroStepBackSpeed, 0.08f);
+                            else
+                                NPC.velocity.X *= 0.85f;
+                            NPC.velocity.Y *= 0.85f;
+
+                            if (aiTimer == 12) { ShowBossDialogue("Hmm, why do you look like me?", new Color(210, 70, 210), 190f); TriggerIntroGesture(); }
+
+                            if (aiTimer >= IntroStage4TotalDuration)
+                            {
+                                NPC.velocity.X = 0f;
+                                introStage = 5;
+                                aiTimer = 0;
+                                NPC.netUpdate = true;
+                            }
+                        }
+                        break;
+
+                    case 5:
+                        {
+                            // NEW: fully turned away, a beat of silence, then a fourth line
+                            // delivered with its back still to the player - before turning back
+                            // around in aiState 101.
+                            const int IntroLine4HoldDuration = 160;
+                            NPC.velocity *= 0.9f;
+
+                            if (aiTimer == 40)
+                            {
+                                ShowBossDialogue("Every reflection is owed a body.", new Color(210, 70, 210), 150f);
+                                TriggerIntroGesture();
+                            }
+
+                            if (aiTimer >= IntroLine4HoldDuration)
+                            {
+                                introStage = 6;
+                                aiState = 101;
+                                aiTimer = 0;
+                                NPC.netUpdate = true;
+                            }
+                        }
+                        break;
+                }
             }
             else if (aiState == 101)
             {
-                // Mirror-shrine intro, part 2: sisa dua baris dialog, lalu lepas ke pertarungan
-                // normal (sama kayak intro lama, gak ada perubahan di bagian transisi keluarnya).
-                NPC.velocity = Vector2.Zero;
-                NPC.alpha = 0;
-                CutsceneShakeIntensity = 0f;
+                // ============================================================================
+                // "WHO ARE YOU?" CONFRONTATION - PART 2:
+                //   introStage 6: turn back to face the player, "Did you summon me to defeat me?"
+                //   introStage 7: still facing the player, a sixth line right before it takes off.
+                //   introStage 8: fly up from where it's standing.
+                //   introStage 9: "Then prepare yourself!" - releases into the normal fight after.
+                // ============================================================================
 
-                if (aiTimer == 40) ShowBossDialogue("Oh, I see.", new Color(140, 200, 255), 130f);
-                if (aiTimer == 170) ShowBossDialogue("Then I now know what I need to do...", new Color(255, 40, 40), 170f);
-                if (aiTimer >= 360) { IsCutsceneActive = false; NPC.dontTakeDamage = false; aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
+                player.controlLeft = false;
+                player.controlRight = false;
+                player.controlUp = false;
+                player.controlDown = false;
+                player.controlJump = false;
+                player.controlUseItem = false;
+                player.controlUseTile = false;
+                player.controlThrow = false;
+                player.itemAnimation = 0;
+                player.itemTime = 0;
+                player.velocity.X *= 0.85f;
+
+                NPC.alpha = 0;
+
+                switch (introStage)
+                {
+                    case 6:
+                        {
+                            // Turn back to face the player, speaking the fifth line.
+                            const int IntroStage6Duration = 210;
+                            CutsceneShakeIntensity = 0f;
+
+                            int faceDir = (player.Center.X < NPC.Center.X) ? -1 : 1;
+                            NPC.direction = faceDir;
+                            NPC.spriteDirection = faceDir;
+                            NPC.velocity *= 0.85f;
+
+                            if (aiTimer == 10) { ShowBossDialogue("Did you summon me to defeat me?", new Color(255, 130, 90), 200f); TriggerIntroGesture(); }
+
+                            if (aiTimer >= IntroStage6Duration)
+                            {
+                                introStage = 7;
+                                aiTimer = 0;
+                                NPC.netUpdate = true;
+                            }
+                        }
+                        break;
+
+                    case 7:
+                        {
+                            // NEW: still facing the player - a sixth line right before it takes
+                            // off, same "just stand and hold" shape as the other new lines.
+                            const int IntroLine6HoldDuration = 140;
+                            NPC.velocity *= 0.9f;
+
+                            if (aiTimer == 8)
+                            {
+                                ShowBossDialogue("Then let's see which one of us is real.", new Color(255, 130, 90), 150f);
+                                TriggerIntroGesture();
+                            }
+
+                            if (aiTimer >= IntroLine6HoldDuration)
+                            {
+                                introStage = 8;
+                                aiTimer = 0;
+                                NPC.netUpdate = true;
+                            }
+                        }
+                        break;
+
+                    case 8:
+                        {
+                            // Fly up from where it's standing - an upward impulse + a dust/sfx
+                            // burst, then eased off into a hover rather than climbing at a flat
+                            // constant speed.
+                            const int IntroFlyUpDuration = 50;
+                            const float IntroFlyUpImpulse = 9f;
+
+                            if (aiTimer == 0)
+                            {
+                                NPC.velocity = new Vector2(0f, -IntroFlyUpImpulse);
+                                CutsceneShakeIntensity = 6f;
+                                Terraria.Audio.SoundEngine.PlaySound(SoundID.Item29, NPC.Center);
+                                for (int i = 0; i < 24; i++)
+                                {
+                                    Vector2 vel = Main.rand.NextVector2Circular(4f, 4f) - new Vector2(0f, 3f);
+                                    Dust d = Dust.NewDustPerfect(NPC.Bottom, DustID.PurpleTorch, vel, 0, new Color(190, 150, 240), 1.4f);
+                                    d.noGravity = true;
+                                }
+                                NPC.netUpdate = true;
+                            }
+                            else
+                            {
+                                NPC.velocity.Y *= 0.93f; // ease off the climb, settle into a hover
+                                CutsceneShakeIntensity *= 0.85f;
+                            }
+                            NPC.velocity.X *= 0.8f;
+
+                            if (aiTimer >= IntroFlyUpDuration)
+                            {
+                                NPC.velocity = Vector2.Zero;
+                                ShowBossDialogue("Then prepare yourself!", new Color(255, 40, 40), 170f);
+                                TriggerIntroGesture();
+                                introStage = 9;
+                                aiTimer = 0;
+                                NPC.netUpdate = true;
+                            }
+                        }
+                        break;
+
+                    case 9:
+                        {
+                            // Final line - releases into the fight right after.
+                            const int IntroFinalHoldDuration = 170;
+                            CutsceneShakeIntensity = 0f;
+                            NPC.velocity *= 0.9f;
+
+                            // Fight starts EXACTLY as the last line above finishes fading out - no
+                            // extra idle gap tacked on afterward.
+                            if (aiTimer >= IntroFinalHoldDuration)
+                            {
+                                IsCutsceneActive = false;
+                                cutsceneCameraInitialized = false;
+                                NPC.dontTakeDamage = false;
+                                aiState = STATE_IDLE;
+                                aiTimer = 0;
+                                introStage = 0;
+                                NPC.netUpdate = true;
+                            }
+                        }
+                        break;
+                }
             }
             else if (aiState == 2)
             {
@@ -991,7 +1735,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 if (Main.rand.NextBool(2)) Dust.NewDust(NPC.position, NPC.width, NPC.height, 198, Main.rand.NextFloat(-3f, 3f), Main.rand.NextFloat(-3f, 3f));
                 if (aiTimer == 30) CombatText.NewText(NPC.getRect(), new Color(255, 25, 25), "IS THIS ALL YOU'VE GOT?!", true);
                 if (aiTimer == 90) CombatText.NewText(NPC.getRect(), new Color(180, 30, 255), "BEHOLD MY TRUE POWER!", true);
-                if (aiTimer >= 140) { IsCutsceneActive = false; NPC.dontTakeDamage = false; aiState = STATE_IDLE; aiTimer = 0; NPC.width = (int)(26 * NPC.scale); NPC.height = (int)(46 * NPC.scale); NPC.netUpdate = true; }
+                if (aiTimer >= 140) { IsCutsceneActive = false; cutsceneCameraInitialized = false; NPC.dontTakeDamage = false; aiState = STATE_IDLE; aiTimer = 0; NPC.width = (int)(26 * NPC.scale); NPC.height = (int)(46 * NPC.scale); NPC.netUpdate = true; }
             }
             else if (aiState == 102)
             {
@@ -1157,11 +1901,40 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 spriteBatch.Draw(pixel, row, null, new Color(20, 14, 30) * 0.82f * alpha, 0f, Vector2.Zero, SpriteEffects.None, 0f);
             }
 
-            // Teks isi dialog, center per baris
+            // Teks isi dialog - direveal karakter-per-karakter ("typewriter") berdasarkan berapa
+            // lama dialog ini udah tampil (dialogueTotalDuration - dialogueTimeLeft = elapsed tick
+            // sejak ShowBossDialogue dipanggil), BUKAN nyimpen progress reveal di field terpisah -
+            // biar tetap akurat walau dialogueTimeLeft di-tick dari luar method Draw ini. Layout
+            // bubble (lines/bubbleWidth/bubbleHeight di atas) tetap dihitung dari TEKS PENUH
+            // supaya ukuran bubble-nya stabil (nggak "kedutan" resize selagi lagi ngetik) - cuma
+            // ISI teks per barisnya aja yang keungkap pelan-pelan.
+            const float TicksPerChar = 1.5f; // ~40 karakter/detik di 60 tps
+            float elapsedTicks = Math.Max(0f, dialogueTotalDuration - dialogueTimeLeft);
+            int totalChars = 0;
+            foreach (string l in lines) totalChars += l.Length;
+            int revealChars = Math.Min((int)(elapsedTicks / TicksPerChar), totalChars);
+            bool stillTyping = revealChars < totalChars;
+            // Kursor kedip nempel di ujung teks yang LAGI diketik - biar kerasa "sedang menulis",
+            // bukan cuma teks yang tau-tau nongol utuh sepotong-sepotong.
+            bool cursorOn = stillTyping && ((int)(elapsedTicks / 15f) % 2 == 0);
+
+            int charsUsed = 0;
             for (int i = 0; i < lines.Count; i++)
             {
+                string full = lines[i];
+                int remaining = revealChars - charsUsed;
+                string shown;
+                if (remaining <= 0) shown = "";
+                else if (remaining >= full.Length) shown = full;
+                else shown = full.Substring(0, remaining);
+
+                bool isActiveLine = remaining > 0 && remaining < full.Length;
+                if (cursorOn && isActiveLine) shown += "_";
+
                 Vector2 linePos = new Vector2(bubbleCenter.X, bubbleRect.Y + padding + i * lineHeight + lineHeight / 2f);
-                Utils.DrawBorderString(spriteBatch, lines[i], linePos, Color.White * alpha, textScale, 0.5f, 0.5f);
+                Utils.DrawBorderString(spriteBatch, shown, linePos, Color.White * alpha, textScale, 0.5f, 0.5f);
+
+                charsUsed += full.Length;
             }
         }
 
@@ -1184,6 +1957,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 Vector2 dir = new Vector2((float)Math.Cos(a), (float)Math.Sin(a));
                 LuminanceUtilities.SpawnParticle(NPC.Top + dir * 6f, dir * 1.2f, tint, 18, 0.55f, ParticleType.Spark);
             }
+        }
+
+        // Picu gesture tangan singkat (lengan ngangkat pelan lalu turun lagi) - dipanggil bareng
+        // ShowBossDialogue selama confrontation intro (aiState 100/101) biar kerasa dia "ngomong
+        // sambil nunjuk/nekanin", bukan diem kaku pas ngomong. Lihat pemakaiannya di
+        // UpdateProxyPlayerVisuals (situ yang beneran nge-apply sweep angle-nya ke dummyPlayer.
+        // itemRotation tiap tick selama introGestureTimer > 0).
+        private void TriggerIntroGesture() => introGestureTimer = IntroGestureDuration;
+
+        // Scan tile grid lurus ke bawah dari worldPos nyari permukaan solid PALING DEKAT (skip tile
+        // "solid top only" kayak platform/meja, biar nggak nyangkut nanggung di pinggir platform).
+        // Balikin null kalau nggak ketemu apa2 dalam jangkauan maxScanDistance (px) - caller HARUS
+        // nge-treat null sebagai "gak usah diubah, biarin posisi apa adanya" (lihat pemakaiannya di
+        // bootstrap cutscene), bukan asumsi ada lantai di suatu tempat.
+        private float? FindGroundYBelow(Vector2 worldPos, float maxScanDistance)
+        {
+            int tileX = (int)(worldPos.X / 16f);
+            int startTileY = (int)(worldPos.Y / 16f);
+            int maxSteps = (int)(maxScanDistance / 16f);
+
+            for (int i = 0; i <= maxSteps; i++)
+            {
+                int tileY = startTileY + i;
+                if (tileX < 0 || tileY < 0 || tileX >= Main.maxTilesX || tileY >= Main.maxTilesY) break;
+
+                Tile t = Main.tile[tileX, tileY];
+                if (t != null && t.HasTile && Main.tileSolid[t.TileType] && !Main.tileSolidTop[t.TileType])
+                    return tileY * 16f;
+            }
+            return null;
         }
 
         // ======================== DESPERATION CUTSCENE (DODGE/QTE MEKANIK) ========================
@@ -2047,7 +2850,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // ======================== STATE METHODS ========================
         private void ExecuteMeleeCombo(Player target)
         {
-            NPC.damage = isPhase2 ? 110 : 70;
+            // BALANCE ("sakit banget"): damage-nya aktif TERUS-MENERUS sepanjang state ini (bukan cuma
+            // pas swing), jadi kalau player nggak mundur bisa kena berkali-kali (i-frame abis, kena
+            // lagi) selama ~65 tick. Diturunin dari 70/110 ke tier "regular hit" (~11%/17% dari HP
+            // referensi 450) - masih berarti kalau numpuk kena 2-3x, tapi nggak segila combo/dash yang
+            // udah dibenerin di file lain.
+            NPC.damage = isPhase2 ? 75 : 50;
             Vector2 targetPos = target.Center;
             Vector2 moveDir = targetPos - NPC.Center;
             if (moveDir != Vector2.Zero) moveDir.Normalize();
@@ -2140,7 +2948,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void ExecuteCounterAttack(Player target)
         {
-            NPC.damage = isPhase2 ? 150 : 100;
+            // BALANCE ("sakit banget"): ini "hukuman" buat player yang nyerang pas boss lagi
+            // isParrying - lebih ke soal pilihan (jangan asal nyerang) daripada refleks ngindar, jadi
+            // wajar kalau tetep lebih sakit dari hit biasa, tapi 150 (33% dari HP referensi 450) buat
+            // 1 kesalahan agak kelewatan. Diturunin ke ~14-20%.
+            NPC.damage = isPhase2 ? 90 : 65;
             NPC.velocity = Vector2.Zero;
 
             if (aiTimer == 0)
@@ -2206,7 +3018,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             {
                 float speed = isPhase2 ? 32f : 24f;
                 NPC.velocity = dashDirection * speed * loadoutSpeedMultiplier;
-                NPC.damage = isPhase2 ? 130 : 90;
+                // BALANCE ("sakit banget"): dash attack ini archetype paling sering muncul (base
+                // pattern tiap TrueMelee archetype), jadi 90/130 (20%/29% dari HP referensi 450) buat
+                // satu jendela hit ~15-tick kerasa berat banget kalau sering ketemu. Diturunin ke tier
+                // "signature hit" (~13%/19%) - masih kerasa lebih berat dari combo biasa (ini kan
+                // emang serangan andalan), tapi nggak makan sepertiga HP sekali kena.
+                NPC.damage = isPhase2 ? 85 : 60;
                 bossWeaponSwingTimer = bossWeaponSwingMax;
                 Terraria.Audio.SoundEngine.PlaySound(SoundID.Item74, NPC.Center);
                 if (!isTrueMelee) FireAttackProjectile(target);
@@ -2226,7 +3043,8 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
             else if (aiTimer > 21 && aiTimer <= 35)
             {
-                NPC.damage = isPhase2 ? 130 : 90;
+                // Matches the initial-impact rebalance above.
+                NPC.damage = isPhase2 ? 85 : 60;
                 if (aiTimer == 28)
                 {
                     Vector2 newDir = target.Center - NPC.Center;
@@ -2277,7 +3095,26 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             dummyPlayer.whoAmI = proxySlot;
             dummyPlayer.active = true;
             dummyPlayer.invis = true;
-            dummyPlayer.channel = isCurrentlyChanneling;
+            // FIX ("pattern yg ngancurin/ngilangin projectile senjatanya sendiri"): a lot of vanilla/
+            // modded weapons (Item.channel == true - laser rifles, drills, chainsaws, most "beam"
+            // weapons, etc.) have their PROJECTILE's own AI check Main.player[owner].channel every
+            // tick and Kill() themselves the instant it reads false, on the assumption their "player"
+            // just let go of the mouse button. isCurrentlyChanneling (below) is only ever written by
+            // IndependentBossAttack - the plain STATE_IDLE auto-fire loop - and NEVER touched by any
+            // of the dedicated pattern states (HandleBlinkEchoCombo, HandleGravityWellTorrent, every
+            // *ArchetypeExtras attack, etc.) or by the "inline" archetype patterns (index 0-3, which
+            // stay in STATE_IDLE but fire via FireAttackProjectile/CustomWeaponFire too - see
+            // WhoAmI_Patterns.cs). Since UpdateProxyPlayerVisuals runs unconditionally every tick
+            // regardless of aiState, dummyPlayer.channel was getting stomped back to whatever stale
+            // value isCurrentlyChanneling last held (false, in most code paths) for the ENTIRE
+            // duration of basically every pattern - so any channel-type weapon it mimicked would
+            // spawn a projectile that killed itself within a frame or two of being fired, looking
+            // exactly like "the pattern destroyed its own projectile". Treat the boss as "still
+            // holding the trigger" for the whole time any dedicated pattern state is active
+            // (aiState != STATE_IDLE) OR any inline pattern session is committed and running
+            // (archetypePatternTimer > 0 - see SelectAndExecuteArchetypePattern), on top of the
+            // original isCurrentlyChanneling signal for plain STATE_IDLE auto-fire.
+            dummyPlayer.channel = isCurrentlyChanneling || aiState != STATE_IDLE || archetypePatternTimer > 0;
 
             if (dummyPlayer.ownedProjectileCounts != null) for (int i = 0; i < dummyPlayer.ownedProjectileCounts.Length; i++) dummyPlayer.ownedProjectileCounts[i] = 0;
             dummyPlayer.numMinions = 0;
@@ -2377,11 +3214,76 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
             else dummyPlayer.wingFrame = 0;
 
-            dummyPlayer.legFrame = target.legFrame;
+            // Selama confrontation intro (aiState 100/101) boss-nya jalan/muter SENDIRI, terlepas
+            // dari player asli (yang kontrolnya dikunci diam total) - kalau legFrame/bodyFrame
+            // dummyPlayer tetap ditimpa punya target di sini, hasilnya bakal keliatan "kaku" soalnya
+            // ngikutin pose diem player yang dibekukan, BUKAN gerakan jalan si boss sendiri. Jadi
+            // selama fase ini biarin dummyPlayer pakai animasi jalan/diamnya sendiri - dihitung
+            // otomatis sama engine tiap tick dari dummyPlayer.velocity yang udah di-sync di atas
+            // (dummyPlayer emang player aktif betulan, Main.player[proxySlot] = dummyPlayer di bawah,
+            // jadi dapet animasi jalan vanilla penuh, bukan pose statis).
+            bool isIntroConfrontation = (aiState == 100 || aiState == 101);
+
+            if (!isIntroConfrontation) dummyPlayer.legFrame = target.legFrame;
             dummyPlayer.headFrame = target.headFrame;
             // Selama desperation cutscene (stage 2+) pertahankan pose lengan terangkat yang di-set di
             // atas - jangan ditimpa balik ke bodyFrame biasa punya target player.
-            if (!isDesperation) dummyPlayer.bodyFrame = target.bodyFrame;
+            if (!isDesperation && !isIntroConfrontation) dummyPlayer.bodyFrame = target.bodyFrame;
+
+            // Idle "breathing" bob selama confrontation intro (di luar/di dalam gesture, jalan
+            // terus) - biar boss nggak keliatan patung diem pas nunggu baris dialog berikutnya.
+            // Cuma offset visual kecil di posisi gambar (lihat pemakaiannya di draw call bawah),
+            // SAMA SEKALI nggak nyentuh NPC.Center asli, jadi nggak ganggu logic jarak/kamera/
+            // transisi stage yang mengandalkan NPC.Center.
+            if (isIntroConfrontation)
+            {
+                introIdleBreatheTimer += 1f;
+                introIdleBobOffset = (float)Math.Sin(introIdleBreatheTimer / 40f) * 1.6f;
+            }
+            else
+            {
+                introIdleBreatheTimer = 0f;
+                introIdleBobOffset = 0f;
+            }
+
+            // Gesture tangan pas ngomong (dipicu TriggerIntroGesture tiap baris dialog baru selama
+            // confrontation intro). FIX: sebelumnya ini nyetel itemAnimation/itemTime ngikutin
+            // introGestureTimer yang ngitung turun dari IntroGestureDuration ke 0 kayak swing
+            // senjata beneran (persis pola bossWeaponSwingTimer di atas) - dan karena dummyPlayer
+            // adalah player aktif betulan (Main.player[proxySlot] = dummyPlayer), itemAnimation>0
+            // kayak gitu bikin engine vanilla ikut nge-drive bodyFrame-nya sendiri kayak lagi
+            // ngayun senjata, ketimpa/bentrok sama itemRotation manual di sini -> hasilnya kelihatan
+            // "ngeswing", bukan cuma ngangkat tangan. Fix: paksa bodyFrame ke frame "lengan
+            // terangkat" secara eksplisit tiap tick selama gesture (teknik yang sama persis dipakai
+            // ForcePlayerCatchPose & pose desperation di atas - bodyFrame.Y = bodyFrame.Height * 2),
+            // dan itemAnimation/itemAnimationMax/itemTime SENGAJA dibiarkan 0 biar vanilla nggak
+            // ikut campur nge-drive frame lain. itemRotation sendiri sekarang naik cepat lalu
+            // DITAHAN di posisi terangkat (bukan sapuan sinus naik-turun) sepanjang tengah durasi,
+            // baru turun pelan di akhir - beneran kerasa "ngangkat tangan terus", bukan mengayun.
+            if (isIntroConfrontation && introGestureTimer > 0)
+            {
+                float gestureProgress = 1f - (introGestureTimer / (float)IntroGestureDuration);
+                float raiseAmt;
+                if (gestureProgress < 0.25f) raiseAmt = gestureProgress / 0.25f;       // ease-in: naik
+                else if (gestureProgress < 0.8f) raiseAmt = 1f;                        // ditahan di atas
+                else raiseAmt = 1f - ((gestureProgress - 0.8f) / 0.2f);                // ease-out: turun
+                raiseAmt = MathHelper.Clamp(raiseAmt, 0f, 1f);
+
+                dummyPlayer.bodyFrame.Y = dummyPlayer.bodyFrame.Height * 2; // pose lengan terangkat, bukan frame swing vanilla
+                dummyPlayer.itemAnimation = 0;
+                dummyPlayer.itemAnimationMax = 0;
+                dummyPlayer.itemTime = 0;
+                dummyPlayer.itemRotation = -1.3f * raiseAmt * dummyPlayer.direction;
+                introGestureTimer--;
+            }
+            else if (isIntroConfrontation)
+            {
+                dummyPlayer.itemAnimation = 0;
+                dummyPlayer.itemAnimationMax = 0;
+                dummyPlayer.itemTime = 0;
+                dummyPlayer.itemRotation = 0f;
+            }
+
             Main.player[proxySlot] = dummyPlayer;
         }
 
@@ -2435,6 +3337,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 return;
             }
 
+            if (isSovereignGuardClone)
+            {
+                OnSovereignGuardCloneKilled();
+                return;
+            }
+
             // Phase 3 clone handling removed
 
             if (Main.player[proxySlot] != null && Main.player[proxySlot].whoAmI == proxySlot) Main.player[proxySlot] = new Player();
@@ -2452,6 +3360,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             NPC.dontTakeDamage = false;
             NPC.damage = 0;
             isPhase2 = true;
+            phase3Triggered = false; // 50% HP is back above the 10% gauntlet threshold - allow it to fire again later
             aiState = STATE_IDLE;
             aiTimer = 0;
 
@@ -2494,12 +3403,38 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // lama - lihat komentar di deklarasi noValidTargetTimer buat root cause-nya. Senyap & gak
         // ngedrop loot, sama kayak EndFromDefeatMenu, plus beres-beres state cutscene/proxy player
         // biar gak nyangkut kalau boss-nya kebetulan lagi di tengah cutscene pas ini kejadian.
+        //
+        // FIX (client error + softlock pas player mati di dalam arena Cartesius Phase 3): method ini
+        // dulu SAMA SEKALI nggak tau soal Phase3ArenaActive dkk (WhoAmI_Phase3Cartesian.cs). Kejadian:
+        // player mati -> TargetClosestRealPlayer() skip player yang dead -> NPC.target == -1 -> abis
+        // NoValidTargetDespawnDelay (120 tick, ~2 detik - JAUH lebih cepet dari waktu respawn normal)
+        // method ini kepanggil dan bikin NPC.active = false, TAPI Phase3ArenaActive/Center/HalfExtent
+        // static-nya nggak pernah direset. Akibatnya WhoAmIPhase3ArenaPlayer.PreUpdateMovement/
+        // PostUpdate (yang cuma ngecek Phase3ArenaActive) TERUS maksa Player.Center balik ke kotak
+        // arena SELAMANYA - bahkan abis player respawn - sambil CanUseItem juga masih permanen
+        // ngeblok Magic Mirror dkk. Player kena reposition paksa berulang-ulang tepat pas lagi di
+        // tengah sequence respawn, itu yang paling mungkin munculin error di client + softlock total
+        // (gak bisa kabur dari kotak arena yang bosnya sendiri udah gak ada).
+        //
+        // Fix: kalau kejadiannya PAS lagi di tengah Phase3 (transition ATAU arena), jalanin cleanup
+        // yang PERSIS sama pola-nya kayak FinishPhase3AndEnterDesperation (WhoAmI_Phase3Cartesian.cs)
+        // - minus bagian "menang" (life=1 & lanjut ke desperation cutscene), karena ini jalur
+        // batal/kalah, bukan menang. phase3Props/phase3ArenaCenter/Phase3ArenaActive dkk field
+        // partial-class yang sama, jadi bisa diakses langsung dari sini.
         private void ForceDespawnNoValidTarget()
         {
             if (Main.player[proxySlot] != null && Main.player[proxySlot].whoAmI == proxySlot)
                 Main.player[proxySlot] = new Player();
             IsCutsceneActive = false;
             Main.hideUI = false;
+
+            if (aiState == STATE_PHASE3_TRANSITION || aiState == STATE_PHASE3_ARENA)
+            {
+                Phase3ArenaActive = false; // lepas clamp/block item WhoAmIPhase3ArenaPlayer SEKARANG, sebelum NPC hilang
+                Phase3FadeAlpha = 0f;      // jaga2 kalau lagi mid-fade - jangan sampai overlay hitam nyangkut kegambar selamanya
+                phase3Props.Clear();
+                KillAllTrackedPhase3MageBolts();
+            }
 
             if (NPC.active)
             {
@@ -2515,26 +3450,49 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             if (dummyPlayer == null || NPC.oldPos == null) return false;
 
             DrawBossAura(spriteBatch, screenPos); // glow/aura tema-warna di belakang badan boss (WhoAmI_VFX.cs)
+            DrawAmbientBodyGlow(spriteBatch, screenPos); // glow oval nempel silhouette boss, selalu nyala (WhoAmI_VFX_AmbientBodyGlow.cs)
+            DrawHitFlash(spriteBatch, screenPos); // flash + impact burst pas boss kehilangan HP (WhoAmI_VFX_HitFlash.cs)
+            DrawMotionSpeedLines(spriteBatch, screenPos); // garis kecepatan tipis pas gerak cukup cepat, independen dari state (WhoAmI_VFX_PatternFlavor.cs)
             DrawAttackPatternVFX(spriteBatch, screenPos); // sprite VFX per-attack, tint disesuaikan pattern yang lagi aktif (WhoAmI_VFX_Attacks.cs)
-            // Phase 3 VFX removed
+            DrawPatternMarkerVFX(spriteBatch, screenPos); // tanda "+" muter cepat->lambat pas pattern mulai, glow+noise (WhoAmI_VFX_PatternMarker.cs)
+            DrawMirrorLanceVFX(spriteBatch, screenPos); // charge-up + beam corridor shader (.fx) khusus STATE_MIRROR_LANCE_RUPTURE (WhoAmI_Pattern_MirrorLance.cs)
+            DrawPatternFieldOverlay(spriteBatch, screenPos); // real per-pixel pattern-flavor energy field, shader-gated (WhoAmI_VFX_PatternFlavor.cs)
+            DrawPhase3Cartesian(spriteBatch, screenPos); // Cartesian grid arena + weapon props (WhoAmI_Phase3Cartesian.cs)
 
             if (aiState != 100 && aiState != 101 && aiState != 102 && aiState != 2 && aiState != STATE_DESPERATION_CUTSCENE)
             {
                 int limit = Math.Min(NPC.oldPos.Length, NPCID.Sets.TrailCacheLength[NPC.type]);
+
+                // Kinetic dash streak: kalau boss lagi ngebut (dash/blink/teleport-trail), gambar
+                // lapisan glow tema-warna DI BAWAH tiap ghost silhouette biar "ekor" gerakannya kebaca
+                // sebagai energi menyala, bukan cuma silhouette semi-transparan doang. Cuma nyala pas
+                // beneran cepat, jadi idle/jalan biasa tetap bersih (lihat DrawDashStreakGlow -
+                // WhoAmI_VFX_HitFlash.cs).
+                bool fastMoving = NPC.velocity.LengthSquared() > 64f; // > 8px/tick
+                if (fastMoving) BeginAdditive(spriteBatch);
+
                 for (int i = 0; i < limit; i++)
                 {
                     if (NPC.oldPos[i] == Vector2.Zero) continue;
                     float alpha = 1f - (i / (float)limit) * 0.8f;
                     Vector2 drawPos = NPC.oldPos[i] + new Vector2(NPC.width / 2f - dummyPlayer.width / 2f, NPC.height / 2f - dummyPlayer.height / 2f);
+
+                    if (fastMoving)
+                        DrawDashStreakGlow(spriteBatch, drawPos + new Vector2(dummyPlayer.width / 2f, dummyPlayer.height / 2f), alpha);
+
                     dummyPlayer.invis = false;
                     dummyPlayer.position = drawPos;
                     Main.PlayerRenderer.DrawPlayer(Main.Camera, dummyPlayer, dummyPlayer.position, dummyPlayer.fullRotation, dummyPlayer.fullRotationOrigin, alpha * 0.3f);
                     dummyPlayer.invis = true;
                 }
+
+                if (fastMoving) EndAdditive(spriteBatch);
             }
 
             dummyPlayer.invis = false;
-            dummyPlayer.position = NPC.Center - new Vector2(dummyPlayer.width / 2f, dummyPlayer.height / 2f);
+            // introIdleBobOffset nambahin sedikit gerak naik-turun (breathing) selama confrontation
+            // intro - cuma di posisi GAMBAR, NPC.Center aslinya nggak disentuh sama sekali.
+            dummyPlayer.position = NPC.Center - new Vector2(dummyPlayer.width / 2f, dummyPlayer.height / 2f) + new Vector2(0f, introIdleBobOffset);
             Main.PlayerRenderer.DrawPlayer(Main.Camera, dummyPlayer, dummyPlayer.position, dummyPlayer.fullRotation, dummyPlayer.fullRotationOrigin, 0f);
             dummyPlayer.invis = true;
 

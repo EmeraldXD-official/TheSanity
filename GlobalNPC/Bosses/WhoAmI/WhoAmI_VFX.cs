@@ -175,14 +175,32 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             BeginAdditive(spriteBatch);
 
             // Lapisan luar (outer) - paling lebar & paling gelap/pekat, ini yang jadi "dasar" gradasi.
-            spriteBatch.Draw(glow, drawPos, null, outerColor * 0.26f, 0f, glowOrigin, pulseScale * 1.35f, SpriteEffects.None, 0f);
-            // Lapisan tengah (mid, tema utama) - medium.
-            spriteBatch.Draw(glow, drawPos, null, midColor * 0.34f, 0f, glowOrigin, pulseScale * 0.95f, SpriteEffects.None, 0f);
+            // (alpha dinaikin dikit dari 0.26 -> 0.30, biar gradasi radialnya kebaca lebih dalam,
+            // sebelumnya nyaris ilang ketiban lapisan2 di atasnya)
+            spriteBatch.Draw(glow, drawPos, null, outerColor * 0.30f, 0f, glowOrigin, pulseScale * 1.35f, SpriteEffects.None, 0f);
+            // Lapisan tengah (mid, tema utama) - medium. (0.34 -> 0.40, tema warnanya sekarang lebih
+            // "mendominasi" dibanding sebelumnya yang kalah kontras sama noise/turbulence di atasnya)
+            spriteBatch.Draw(glow, drawPos, null, midColor * 0.40f, 0f, glowOrigin, pulseScale * 0.95f, SpriteEffects.None, 0f);
             // Inti (core) - DIKECILIN & alpha-nya diturunin dari versi sebelumnya (dulu 0.55/0.5 -
             // itu yang bikin tengah aura jadi blob putih rata nutupin semua noise di baliknya).
             // Sekarang core cuma nyala di titik paling tengah aja, sisanya dibiarin keliatan
-            // teksturnya lewat turbulence/spiky di bawah.
-            spriteBatch.Draw(glow, drawPos, null, coreColor * 0.30f, 0f, glowOrigin, pulseScale * 0.32f, SpriteEffects.None, 0f);
+            // teksturnya lewat turbulence/spiky di bawah. (0.30 -> 0.36, dorong dikit biar titik
+            // pusatnya masih kebaca sebagai "sumber cahaya" yang jelas, bukan ketutup gradasi luar)
+            spriteBatch.Draw(glow, drawPos, null, coreColor * 0.36f, 0f, glowOrigin, pulseScale * 0.32f, SpriteEffects.None, 0f);
+
+            // ---- ANAMORPHIC CROSS-FLARE ("Lucille Karma" signature) ----
+            // Dua garis cahaya tipis memanjang horizontal & vertikal ngelewatin pusat boss, khas
+            // "anamorphic lens flare" di VFX energi tier atas - dibikin murah tanpa aset baru dengan
+            // nge-draw glow yang SAMA tapi discale non-uniform (super lebar/super pipih di 1 sumbu).
+            // Ini yang paling nutupin kesan "cuma glow bulat" - nambahin identitas "sumber cahaya
+            // sangat terang" yang punya arah, bukan cuma blob isotropik.
+            float flarePulse = 0.6f + 0.4f * breathe;
+            Color flareColor = Color.Lerp(coreColor, midColor, 0.4f);
+            spriteBatch.Draw(glow, drawPos, null, flareColor * 0.16f * flarePulse, 0f, glowOrigin, new Vector2(pulseScale * 2.6f, pulseScale * 0.05f), SpriteEffects.None, 0f);
+            spriteBatch.Draw(glow, drawPos, null, flareColor * 0.16f * flarePulse, 0f, glowOrigin, new Vector2(pulseScale * 0.05f, pulseScale * 2.6f), SpriteEffects.None, 0f);
+            // Sepasang lagi di 45 derajat, lebih redup - kesan starburst 4+4 titik, bukan cuma plus-sign.
+            spriteBatch.Draw(glow, drawPos, null, flareColor * 0.09f * flarePulse, MathHelper.PiOver4, glowOrigin, new Vector2(pulseScale * 1.9f, pulseScale * 0.045f), SpriteEffects.None, 0f);
+            spriteBatch.Draw(glow, drawPos, null, flareColor * 0.09f * flarePulse, MathHelper.PiOver4, glowOrigin, new Vector2(pulseScale * 0.045f, pulseScale * 1.9f), SpriteEffects.None, 0f);
 
             // Lapisan energi 7-lobe organik, berputar pelan (lebih cepat pas phase 2) - dapet WARNA
             // MID (bukan outer) supaya nyambung visual sama inti tapi tetap beda dari lapisan dasar.
@@ -232,11 +250,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             spriteBatch.Draw(glow, drawPos - chromaDir * chromaShift, null, new Color(255, 40, 40) * 0.20f, 0f, glowOrigin, pulseScale * 0.5f, SpriteEffects.None, 0f);
             spriteBatch.Draw(glow, drawPos + chromaDir * chromaShift, null, new Color(40, 220, 255) * 0.20f, 0f, glowOrigin, pulseScale * 0.5f, SpriteEffects.None, 0f);
 
-            // ---- GLITCH / TEAR FLICKER (phase 2 only, rolled at random in UpdateAmbientBossVFX) ----
-            // Sesaat aura "korslet": static kasar nyala terang + rim spiky digambar dobel dengan
-            // slice horizontal ter-offset (kayak sinyal TV yang loncat) - kesan realitas di sekitar
-            // boss ini sempat "sobek", nyambung ke tema cermin/identitas WhoAmI.
-            if (isPhase2 && glitchFlickerTimer > 0 && auraStaticTexture?.Value != null)
+            // ---- GLITCH / TEAR FLICKER ----
+            // Phase 2: dipicu random roll di UpdateAmbientBossVFX. Phase 1: dipicu KHUSUS pattern
+            // paling berat lewat TickPatternAmbience (WhoAmI_VFX_PatternFlavor.cs) - makanya kondisi
+            // di sini sengaja BUKAN "isPhase2 &&" lagi, cukup baca glitchFlickerTimer-nya langsung
+            // (yang di kedua kasus itu udah di-set positif duluan oleh pemicu masing2).
+            if (glitchFlickerTimer > 0 && auraStaticTexture?.Value != null)
             {
                 Texture2D staticTex = auraStaticTexture.Value;
                 Vector2 staticOrigin = new Vector2(staticTex.Width / 2f, staticTex.Height / 2f);
@@ -248,6 +267,17 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 float staticRot = Main.rand.NextFloat(MathHelper.TwoPi);
                 spriteBatch.Draw(staticTex, drawPos, null, Color.White * 0.6f * glitchStrength, staticRot, staticOrigin, pulseScale * 0.9f, SpriteEffects.None, 0f);
             }
+
+            // ---- REAL PER-PIXEL AURA FIELD (WhoAmIBossAura.fx, see WhoAmI_VFX_ShaderSystem.cs) ----
+            // Extra layer on top of everything above, not a replacement for it - no-ops entirely
+            // (WhoAmIShaderSystem.AuraShaderReady == false) until the .fx is actually compiled, so
+            // this line is always safe to leave in. Gives a GPU-driven radial gradient + turbulence
+            // + chromatic fringe + glitch tear that reads noticeably crisper than the CPU stack above
+            // because it's computed per-pixel instead of via overlapping blurry sprite copies.
+            float shaderGlitchAmount = glitchFlickerTimer > 0 ? glitchFlickerTimer / 10f : 0f;
+            WhoAmIShaderSystem.DrawAuraField(spriteBatch, spiky, auraTurbulenceTexture?.Value, drawPos,
+                pulseScale * 1.05f, coreColor, midColor, outerColor, accentColor,
+                isPhase2 ? 0.85f : 0.6f, shaderGlitchAmount, chromaDir, 0.012f);
 
             EndAdditive(spriteBatch);
         }

@@ -117,32 +117,54 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             return null;
         }
 
-        // Dipanggil dari BloodBagItem.UseItem() begitu player klik lukisan Perfect Mirror yang
-        // valid sambil pegang blood bag. Balikin false kalau summon gagal dimulai (misal boss udah
-        // ada, atau lukisannya kebetulan udah dihancurkan barusan) supaya item-nya nggak jadi
-        // dikonsumsi percuma.
-        public static bool TrySummon(Point16 paintingPos, Player player)
+        // ================== SYARAT SUMMON (dicek TANPA nge-spawn apapun) ==================
+        // Diekstrak dari TrySummon supaya bisa dipanggil DUA KALI di dua tempat yang beda tujuan:
+        //   1. BloodBagItem.UseItem() manggil ini DULUAN, sebelum mulai animasi "mirror menyerap
+        //      inventory" (lihat WhoAmIMirrorAbsorptionSystem, WhoAmI_MirrorAbsorption.cs) - biar
+        //      item blood bag-nya nggak kekonsumsi & animasinya nggak mulai sama sekali kalau
+        //      syaratnya emang belum kepenuhi dari awal.
+        //   2. TrySummon() sendiri manggil ini LAGI di akhir animasi (lihat di bawah) sebagai
+        //      pengecekan ulang terakhir - soalnya animasi absorpsi itu makan waktu beberapa detik,
+        //      jadi kondisinya (boss keburu ke-spawn dari sumber lain, lukisannya keburu hancur,
+        //      dsb) bisa aja berubah SELAMA animasi berlangsung.
+        // Kedua caller ini tetap cuma manggil TrySummon() buat beneran nge-spawn NPC-nya - method
+        // ini sendiri SAMA SEKALI nggak nyentuh dunia/NPC, cuma baca kondisi & balikin status.
+        public static bool TryCheckSummonReady(Point16 paintingPos, Player player, out string failMessage)
         {
+            failMessage = null;
+
             if (NPC.AnyNPCs(ModContent.NPCType<WhoAmI>()))
             {
-                Main.NewText("Something is already emerging from the mirror...", 255, 90, 90);
+                failMessage = "Something is already emerging from the mirror...";
                 return false;
             }
 
             Tile t = Main.tile[paintingPos.X, paintingPos.Y];
             if (t == null || !t.HasTile || t.TileType != ModContent.TileType<WhoAmIMirrorPaintingTile>())
-                return false;
+                return false; // lukisannya udah nggak ada - diam2 gagal, sama kayak perilaku lama
 
             // ================== SYARAT SUMMON: SENJATA CLASS SESUAI GEAR PLAYER ==================
             // Lihat WhoAmI.TryCheckWeaponRequirement & WhoAmI.TryDetectPlayerClass (WhoAmI_Helpers.cs)
             // buat detail deteksi class dari gear + perhitungan senjatanya. Dicek di sini (bukan di
-            // BloodBagItem.UseItem) supaya SATU-SATUNYA jalur yang beneran nge-spawn NPC-nya
-            // (TrySummon) juga yang jadi satu-satunya sumber kebenaran soal syarat summon - kalau
-            // nanti ada cara lain buat trigger summon selain blood bag, syaratnya otomatis ikut
-            // kepakai tanpa perlu diduplikasi di tempat lain.
-            if (!WhoAmI.TryCheckWeaponRequirement(player, out string failMessage))
+            // BloodBagItem.UseItem) supaya SATU-SATUNYA sumber kebenaran soal syarat summon tetap di
+            // satu tempat - kalau nanti ada cara lain buat trigger summon selain blood bag, syaratnya
+            // otomatis ikut kepakai tanpa perlu diduplikasi di tempat lain.
+            if (!WhoAmI.TryCheckWeaponRequirement(player, out failMessage))
+                return false;
+
+            return true;
+        }
+
+        // Dipanggil di UJUNG animasi "mirror menyerap inventory" (lihat
+        // WhoAmIMirrorAbsorptionSystem.FinishAndSummon, WhoAmI_MirrorAbsorption.cs) buat BENERAN
+        // nge-spawn boss-nya. Balikin false kalau summon gagal dimulai (misal boss udah ada, atau
+        // lukisannya kebetulan udah dihancurkan barusan/selama animasi berlangsung) - si caller yang
+        // nentuin gimana nanganin kegagalan itu (biasanya cuma lepas kunci kamera/kontrol player).
+        public static bool TrySummon(Point16 paintingPos, Player player)
+        {
+            if (!TryCheckSummonReady(paintingPos, player, out string failMessage))
             {
-                Main.NewText(failMessage, 255, 90, 90);
+                if (failMessage != null) Main.NewText(failMessage, 255, 90, 90);
                 return false;
             }
 

@@ -96,7 +96,21 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     return false;
                 }
 
-                if (projectile.minion || projectile.sentry || Main.projPet[projectile.type])
+                // FIX (proyektil "kena limit"/hilang sendiri di Phase 3 Cartesian): blok minion/
+                // sentry/pet di bawah ini nge-Kill() proyektil SEKETIKA kalau dummyPlayer boss
+                // (proxySlot) nggak lagi "channeling" (`!Main.player[proxySlot].channel`) - dan
+                // dummyPlayer itu emang nggak PERNAH beneran channeling (dia nggak dikontrol kayak
+                // player asli). Di fight normal itu nggak masalah (blok ini emang buat nanganin
+                // senjata channel manapun di luar Phase 3). TAPI begitu Phase 3 Cartesian aktif dan
+                // senjata Ranged/Magic real weapon yang ditembak (lihat FireRealRangedProjectileAt /
+                // FireRealWeaponBoltsInAllDirections / FireRealWeaponBoltSpiral, WhoAmI_Phase3Cartesian.cs)
+                // kebetulan proyektilnya ke-flag minion/sentry/pet oleh vanilla, proyektil itu mati
+                // SEKETIKA di tick yang sama dia baru ditembak - jauh sebelum sempat nyentuh batas
+                // arena. Fix: skip TOTAL blok ini selama Phase3ArenaActive - biarin sistem lock
+                // kecepatan + Kill()-di-batas-arena punya WhoAmI_Phase3Cartesian.cs sendiri
+                // (phase3MageBoltLockedVelocity/MaintainPhase3MageBolts) yang jadi SATU-SATUNYA
+                // penentu kapan proyektil Phase 3 boleh hilang.
+                if (!WhoAmI.Phase3ArenaActive && (projectile.minion || projectile.sentry || Main.projPet[projectile.type]))
                 {
                     // (Dulu di sini ada juga cek `aiStyle == 99` yang niatnya nangkep yoyo, tapi itu
                     // dead code dari awal - aiStyle 99 di Terraria SELALU cuma dipakai Yoyo, gak
@@ -256,6 +270,24 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         {
             if (projectile.owner == proxySlot)
             {
+                // FIX ("vfx projectile kadang ngebug" - chromatic trail nge-streak/nyambung dari
+                // jauh): dulu dipanggil dari PreDraw (WhoAmI_VFX_ProjectileShader.cs), yang di-SKIP
+                // total sama Terraria buat proyektil yang lagi di luar layar. PostAI di sini jalan
+                // tiap game tick tanpa peduli kelihatan-nggaknya proyektil, sama kayak AI-nya sendiri
+                // - jadi history-nya selalu rapat/kontinu, nggak ada gap yang bikin trail "lompat"
+                // begitu proyektilnya balik kelihatan. Lihat comment lengkap di PreDraw sana.
+                UpdateChromaticTrailHistory(projectile);
+
+                // UPGRADE ("pencahayaan projectile"): sama alasannya kayak UpdateChromaticTrailHistory
+                // persis di atas - dipanggil dari PostAI (bukan PreDraw) supaya dynamic light-nya jalan
+                // tiap tick tanpa peduli proyektilnya lagi kelihatan kamera apa nggak. Kalau ditaro di
+                // PreDraw, proyektil yang lagi di luar layar (dash boss jauh, orbit lebar, dll) bakal
+                // nge-skip total pemanggilan Lighting.AddLight buat tick itu, dan begitu dia balik
+                // masuk frame areanya bakal "nyala mendadak" alih2 udah nyala terus dari tadi - popping
+                // yang sama persis kayak bug trail yang udah dibenerin di atas, cuma versi lighting.
+                // Lihat ApplyProjectileDynamicLight() di WhoAmI_VFX_ProjectileShader.cs.
+                ApplyProjectileDynamicLight(projectile);
+
                 int idx = NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>());
                 if (idx != -1) projectile.scale = Main.npc[idx].scale;
 
@@ -272,7 +304,37 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 // thing done for minions: force its velocity to hard-home on the nearest real player
                 // every tick here in PostAI, which runs after and overwrites whatever vanilla's own
                 // AI picked that tick.
-                bool isForcedPlayerHoming = projectile.minion || projectile.sentry || Main.projPet[projectile.type] || projectile.type == ProjectileID.Typhoon;
+                // FIX ("proyektil yang harusnya nggak homing malah kayak semi-homing"): sentry itu
+                // BUKAN proyektil yang nyerang langsung - itu badan TURRET yang di-taro/ditancepin
+                // ke satu titik dan DIAM DI SITU selamanya (baru nembakin sub-proyektil serangan
+                // terpisah dari titik itu, sub-proyektil mana yang biasanya nggak ikut ke-flag
+                // sentry=true). Ikutan dimasukin ke isForcedPlayerHoming di bawah bikin BADAN
+                // TURRET-nya sendiri (bukan tembakannya) ke-drag/ngesot pelan-pelan tiap tick ke
+                // arah player - persis kebaca sebagai "harusnya diem/nggak homing, tapi kok kayak
+                // semi-homing". Sentry beda total dari minion/pet/Typhoon di atas (yang emang
+                // DIRANCANG buat ngejar/nempel target) - jadi dikeluarin dari kondisi ini, biar
+                // sentry-nya diem di tempat kayak seharusnya.
+                //
+                // CATATAN kalau abis ini malah ada laporan "sentry-nya diem doang, nggak nyerang
+                // sama sekali": itu masalah yang BEDA (target selection sentry-nya sendiri gak
+                // ketemu player, mirip kasus Typhoon di atas) - bukan homing yang kebalik lagi,
+                // butuh fix terpisah di sisi sentry-nya nyari target, bukan di-drag paksa kayak ini.
+                //
+                // FIX (request: "matikan homing sistem di phase cartesian"): blok di bawah ini
+                // ("isForcedPlayerHoming") secara sengaja MAKSA proyektil minion/pet/Typhoon muter
+                // homing ke player terdekat tiap tick - itu emang tujuannya buat fight normal (biar
+                // minion/pet yang di-mimic boss beneran ngejar player, bukan cuma diem). TAPI di
+                // Phase 3 Cartesian, WhoAmI_Phase3Cartesian.cs udah punya sistem sendiri buat maksa
+                // SEMUA proyektil real-weapon jalan LURUS TOTAL & cuma ilang begitu nyentuh batas
+                // arena (phase3MageBoltLockedVelocity/MaintainPhase3MageBolts) - dua sistem ini
+                // rebutan nge-set projectile.velocity tiap tick kalau dibiarin jalan bareng, dan
+                // homing system ini yang menang di frame-frame tertentu (proyektilnya kebelok ngejar
+                // player alih-alih lurus, kadang malah nabrak/nempel ke boss sendiri di tengah arena
+                // karena boss adalah satu2nya NPC lain di situ, dan mati sebelum sempat nyentuh
+                // batas). Fix: matiin isForcedPlayerHoming total selama Phase3ArenaActive, biar
+                // sistem lurus-total punya Phase 3 yang jadi satu2nya pengatur arah proyektil di
+                // fase ini.
+                bool isForcedPlayerHoming = !WhoAmI.Phase3ArenaActive && (projectile.minion || Main.projPet[projectile.type] || projectile.type == ProjectileID.Typhoon);
                 if (isForcedPlayerHoming)
                 {
                     if (projectile.type == ProjectileID.StardustDragon2 || projectile.type == ProjectileID.StardustDragon3 || projectile.type == ProjectileID.StardustDragon4) return;
@@ -323,6 +385,36 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             int p = Projectile.NewProjectile(projectile.GetSource_FromThis(), projectile.Center, shoot, ProjectileID.PurpleLaser, (int)(projectile.damage * 0.75f), 0f, proxySlot);
                             if (p >= 0 && p < 1000) { Main.projectile[p].hostile = true; Main.projectile[p].friendly = false; }
                         }
+                    }
+                }
+
+                // FIX (proyektil kadang hilang sebelum nyentuh batas arena / kebelok nabrak boss):
+                // WhoAmI_Phase3Cartesian.cs ngunci kecepatan lurus tiap proyektil real-weapon-nya
+                // lewat phase3MageBoltLockedVelocity, tapi itu di-APPLY dari sisi NPC
+                // (MaintainPhase3MageBolts, dipanggil dari HandlePhase3Arena) - yang tick-nya jalan
+                // SEBELUM proyektil ini sendiri dapat giliran AI di tick yang sama. Kalau proyektil
+                // ASLI senjatanya punya homing/curve/gravity bawaan sendiri (bukan cuma
+                // minion/sentry/pet/Typhoon yang udah dipatch di atas - misal Chlorophyte Bullet,
+                // Vampire Knives, dst), AI bawaan itu masih sempat jalan & ngebelokin arah SETELAH
+                // lock dari NPC tadi, telat dikoreksi lagi sampai tick berikutnya - dalam rentang
+                // itu proyektilnya bisa kebelok nabrak boss (satu2nya NPC lain di arena) & mati,
+                // atau sekadar nyimpang dari jalur lurus yang seharusnya. Ngoreksi ULANG di sini -
+                // PostAI proyektil ini sendiri, dijamin jalan SETELAH AI proyektil ini tick ini,
+                // apapun urutan update NPC-vs-Projectile - nutup celah itu total: proyektil Phase 3
+                // SELALU lurus penuh, dan SATU-SATUNYA cara dia hilang adalah nyentuh batas arena
+                // (atau timeLeft safety net di FireRealRangedProjectileAt/FireRealWeaponBoltsInAllDirections/
+                // FireRealWeaponBoltSpiral).
+                if (WhoAmI.Phase3ArenaActive)
+                {
+                    int bossIdx = NPC.FindFirstNPC(ModContent.NPCType<WhoAmI>());
+                    if (bossIdx != -1 && Main.npc[bossIdx].ModNPC is WhoAmI boss &&
+                        boss.phase3MageBoltLockedVelocity.TryGetValue(projectile.whoAmI, out Vector2 lockedVel))
+                    {
+                        projectile.velocity = lockedVel;
+                        projectile.tileCollide = false;
+
+                        if (WhoAmI.IsOutsidePhase3Arena(projectile.Center, WhoAmI.Phase3ArenaCenterStatic, WhoAmI.Phase3ArenaHalfExtentStatic, 60f))
+                            projectile.Kill();
                     }
                 }
             }

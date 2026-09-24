@@ -25,7 +25,11 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
     //      butuh dideteksi manual - item biasa cuma bisa di-"pakai" lewat left click).
     //   5. LEFT-klik (pakai item seperti biasa) DI DEPAN lukisan Perfect Mirror yang udah ditaruh
     //      sambil pegang BloodBagItem buat mulai fight (lihat BloodBagItem.UseItem, yang manggil
-    //      WhoAmIMirrorPaintingTile.FindPaintingNear + TrySummon).
+    //      WhoAmIMirrorPaintingTile.FindPaintingNear + TryCheckSummonReady). Kalau syaratnya lolos,
+    //      BloodBagItem.UseItem TIDAK langsung spawn boss-nya - dia mulai animasi intro "mirror
+    //      menyerap inventory player" dulu (WhoAmIMirrorAbsorptionSystem, lihat
+    //      WhoAmI_MirrorAbsorption.cs), baru di ujung animasi itu boss-nya beneran nongol lewat
+    //      WhoAmIMirrorPaintingTile.TrySummon.
     //
     // Semua nilai stat/recipe di bawah ini CUMA PLACEHOLDER masuk akal - silakan di-tweak sesuai
     // balancing mod kalian (harga, recipe tier, dsb).
@@ -184,14 +188,28 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 return false;
             }
 
-            // NOTE: kalau TrySummon() gagal (boss udah ada / syarat minimal senjata per class belum
-            // kepenuhi / dsb), TrySummon() SENDIRI yang udah nge-print alasan spesifiknya ke chat
-            // (lihat WhoAmI_MirrorPainting.cs) - jangan tambahin pesan generik lagi di sini, biar
-            // player nggak dapet 2 pesan yang nimpang-nimpangin/bikin bingung soal alasan sebenernya.
-            bool started = WhoAmIMirrorPaintingTile.TrySummon(paintingPos.Value, player);
-            if (!started) return false; // item nggak dikonsumsi
+            // Ritual absorpsi udah jalan (misal player kepencet 2x) - jangan numpuk sequence baru
+            // di atas yang lagi jalan, dan jangan konsumsi item lagi buat itu.
+            if (WhoAmIMirrorAbsorptionSystem.SequenceActive) return false;
 
-            return true; // konsumsi 1 stack, summon udah jalan di TrySummon()
+            // Syarat summon dicek DI SINI DULUAN (bukan nunggu sampai animasi absorpsi kelar) - lihat
+            // WhoAmIMirrorPaintingTile.TryCheckSummonReady (WhoAmI_MirrorPainting.cs). Kalau gagal,
+            // method itu sendiri yang udah nge-print alasan spesifiknya ke chat (kalau ada) - jangan
+            // tambahin pesan generik lagi di sini, biar player nggak dapet 2 pesan yang
+            // nimpang-nimpangin/bikin bingung soal alasan sebenarnya.
+            if (!WhoAmIMirrorPaintingTile.TryCheckSummonReady(paintingPos.Value, player, out string failMessage))
+            {
+                if (failMessage != null) Main.NewText(failMessage, 255, 90, 90);
+                return false; // item nggak dikonsumsi
+            }
+
+            // Syaratnya lolos - mulai animasi "mirror menyerap inventory player" (lihat
+            // WhoAmIMirrorAbsorptionSystem, WhoAmI_MirrorAbsorption.cs). Boss-nya BELUM spawn di sini;
+            // WhoAmIMirrorAbsorptionSystem yang bakal manggil WhoAmIMirrorPaintingTile.TrySummon() di
+            // ujung animasinya sendiri begitu sequence-nya kelar.
+            WhoAmIMirrorAbsorptionSystem.BeginAbsorption(paintingPos.Value, player);
+
+            return true; // konsumsi 1 stack - ritualnya udah dimulai (walau boss-nya baru nongol nanti)
         }
     }
 

@@ -45,7 +45,13 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
         private void HandleBlinkEchoCombo(Player target)
         {
-            aiTimer++;
+            // FIX: aiTimer is already incremented once per tick, unconditionally, in WhoAmI.cs AI()
+            // right before the switch(aiState) that dispatches here. The local aiTimer++ that used
+            // to be here double-counted it, which meant this state ran at 2x its intended speed AND
+            // the `aiTimer == 1` entry check just below never actually fired (the value this method
+            // ever saw was 2, 4, 6...) - so blinkEchoLandingPoint/blinkEchoTelegraphPoint never got
+            // (re)computed on activation and the ambush kept aiming at whatever stale position was
+            // left over from the pattern's PREVIOUS use (or Vector2.Zero on the very first use).
             NPC.damage = 0;
 
             // ---- A) TELEGRAPH ----
@@ -97,6 +103,16 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 {
                     ApplySnapDash(blinkEchoLandingPoint - NPC.Center, BlinkEchoDashSpeed);
                     NPC.Center += NPC.velocity; // consume the snap immediately - this IS the blink frame
+
+                    // FIX: velocity was left at full dash speed after manually applying it to Center
+                    // above. The engine's own position update also adds NPC.velocity to the NPC every
+                    // tick, so leaving it non-zero here double-applied the move THIS tick (landing
+                    // further than blinkEchoLandingPoint) and then kept carrying that speed forward
+                    // into the sweeping-slash frames that immediately follow, dragging the boss off
+                    // its landing spot mid-slash instead of planting there. ExecuteSpeedCanceledTeleport
+                    // already zeroes velocity after its own teleport for the same reason - this just
+                    // makes the snap-dash fallback consistent with it.
+                    NPC.velocity = Vector2.Zero;
                 }
 
                 // 3 fading echo ghosts along the traveled path, independent of the teleport's own trail.
