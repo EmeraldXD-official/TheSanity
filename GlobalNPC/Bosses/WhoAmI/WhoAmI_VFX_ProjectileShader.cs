@@ -217,8 +217,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 return new Color(110, 230, 130);
             if (weapon.CountsAsClass(DamageClass.Magic))
                 return new Color(170, 100, 255);
-            if (weapon.CountsAsClass(DamageClass.Summon))
-                return new Color(255, 200, 80);
             return Color.White;
         }
 

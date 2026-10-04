@@ -87,9 +87,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 case STATE_QUANTUM_GLITCH_PHASING:
                     return PatternFlavor.Glyph;
 
-                case STATE_SUMMON_RIFT_SWARM:
-                    return PatternFlavor.Void;
-
                 case STATE_MIRROR_MIRAGE:
                     return PatternFlavor.Echo;
 

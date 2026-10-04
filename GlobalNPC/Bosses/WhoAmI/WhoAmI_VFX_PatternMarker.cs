@@ -242,13 +242,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 case STATE_MAGIC_UMBRAL_DUALITY: return new Color(170, 120, 220);
                 case STATE_MAGIC_PARADOX_MIRROR: return new Color(200, 90, 220);
 
-                case STATE_SUMMON_WRAITH_CONVERGENCE: return new Color(170, 255, 190);
-                case STATE_SUMMON_SOUL_TETHER: return new Color(150, 220, 255);
-                case STATE_SUMMON_SPECTRAL_CAROUSEL: return new Color(255, 190, 90);
 
-                case STATE_WHIP_SERPENTS_COIL: return new Color(120, 255, 90);
-                case STATE_WHIP_FAN_LASH: return new Color(255, 110, 60);
-                case STATE_WHIP_PUPPETEER_SNAP: return new Color(220, 90, 200);
 
                 case STATE_YOYO_PENDULUM_RECKONING: return new Color(140, 170, 220);
                 case STATE_YOYO_BINARY_SNARE: return new Color(170, 195, 235);
@@ -272,7 +266,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 case STATE_GRAVITY_WELL_TORRENT: return MarkerShape.Spiral;
                 case STATE_MIRROR_MIRAGE:
                 case STATE_MIRAGE_DECOY_HOLD: return MarkerShape.MirrorStar;
-                case STATE_SUMMON_RIFT_SWARM: return MarkerShape.Halo;
                 case STATE_WHIP_LASH_CAGE: return MarkerShape.Hex;
                 case STATE_YOYO_TETHER_STORM: return MarkerShape.Halo;
                 case STATE_BOOMERANG_CROSSFIRE: return MarkerShape.CrossedRays;
@@ -297,12 +290,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 case STATE_MAGIC_FRACTURE_BLOOM: return MarkerShape.Bloom;
                 case STATE_MAGIC_UMBRAL_DUALITY: return MarkerShape.BinaryOrbit;
                 case STATE_MAGIC_PARADOX_MIRROR: return MarkerShape.PincerMirror;
-                case STATE_SUMMON_WRAITH_CONVERGENCE: return MarkerShape.ConstrictNet;
-                case STATE_SUMMON_SOUL_TETHER: return MarkerShape.TetherLines;
-                case STATE_SUMMON_SPECTRAL_CAROUSEL: return MarkerShape.Carousel;
-                case STATE_WHIP_SERPENTS_COIL: return MarkerShape.CoilSpiral;
-                case STATE_WHIP_FAN_LASH: return MarkerShape.WideFan;
-                case STATE_WHIP_PUPPETEER_SNAP: return MarkerShape.ChainCurve;
                 case STATE_YOYO_PENDULUM_RECKONING: return MarkerShape.Pendulum;
                 case STATE_YOYO_BINARY_SNARE: return MarkerShape.BinaryOrbit;
                 case STATE_YOYO_CASCADE_UNRAVEL: return MarkerShape.Crescent;

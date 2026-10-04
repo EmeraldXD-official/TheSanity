@@ -262,9 +262,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 case WeaponArchetype.Boomerang:
                     idealDistance = 450f;
                     break;
-                case WeaponArchetype.Summon:
-                    idealDistance = 500f;
-                    break;
             }
             // FIX ("boss nempel banget ke player pas phase 2"): ini dulu `*= 0.8f` - NGECILIN jarak
             // ideal 20% pas phase 2, kebalikan dari intent-nya. Ini function yang dipakai SEMUA
@@ -489,10 +486,19 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         }
 
         // ======================== WEAPON UTILITIES ========================
+        // Summoner weapons (minion / sentry staffs etc. - anything in the Summon damage class that is
+        // NOT a whip) are NOT supported by this boss. Whips stay supported (own Whip archetype).
+        internal static bool IsSummonerWeapon(Item item)
+        {
+            if (item == null || item.IsAir) return false;
+            return item.CountsAsClass(DamageClass.Summon) && !(item.shoot > 0 && ProjectileID.Sets.IsAWhip[item.shoot]);
+        }
+
         internal static bool IsWeaponItem(Item item)
         {
             if (item == null || item.IsAir) return false;
             if (item.damage <= 0) return false;
+            if (IsSummonerWeapon(item)) return false; // boss never sees / copies summoner weapons
             if (item.pick > 0 || item.axe > 0 || item.hammer > 0 || item.tileBoost > 0) return false;
             return true;
         }
@@ -511,7 +517,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             if (item.shoot > 0 && ProjectileID.Sets.IsAWhip[item.shoot]) return WeaponArchetype.Whip;
             if (item.CountsAsClass(DamageClass.Ranged)) return WeaponArchetype.Ranged;
             if (item.CountsAsClass(DamageClass.Magic)) return WeaponArchetype.Magic;
-            if (item.CountsAsClass(DamageClass.Summon)) return WeaponArchetype.Summon;
 
             bool swing = item.useStyle == ItemUseStyleID.Swing;
             bool hasProj = item.shoot > 0;
@@ -534,12 +539,18 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // aksesoris) yang lebih nunjukin class beneran yang mau dia mainkan sepanjang fight.
         internal const int RequiredWeaponsForDetectedClass = 8;
 
+        // Index of the Summon class inside TryDetectPlayerClass's damage-multiplier array. Summoner
+        // gear is still DETECTED (so we can tell the player it's unavailable instead of silently
+        // mis-detecting them as another class), but there is no weapon check / patterns for it.
+        private const int SummonerClassIndex = 3;
+        internal const string SummonerUnavailableMessage = "Summoner class is not available for now.";
+
+        // NOTE: indices 0-2 here must stay aligned with TryDetectPlayerClass (Melee, Ranged, Magic).
         private static readonly (string label, Func<Item, bool> matches)[] WeaponClassChecks = new (string, Func<Item, bool>)[]
         {
             ("Melee",  item => item.CountsAsClass(DamageClass.Melee)),
             ("Ranged", item => item.CountsAsClass(DamageClass.Ranged)),
             ("Magic",  item => item.CountsAsClass(DamageClass.Magic)),
-            ("Summon", item => item.CountsAsClass(DamageClass.Summon)),
         };
 
         // Deteksi class player dari gear-nya SEKARANG (bukan dari senjata yang dipegang - lihat
@@ -598,7 +609,13 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
             if (!TryDetectPlayerClass(player, out int classIndex, out _))
             {
-                failMessage = "The Perfect Mirror can't read your intent - equip a class-focused armor set or accessories first (Melee/Ranged/Magic/Summon).";
+                failMessage = "The Perfect Mirror can't read your intent - equip a class-focused armor set or accessories first (Melee/Ranged/Magic).";
+                return false;
+            }
+
+            if (classIndex == SummonerClassIndex)
+            {
+                failMessage = SummonerUnavailableMessage;
                 return false;
             }
 
@@ -648,7 +665,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     Item item = player.inventory[i];
                     if (!IsWeaponItem(item) || BannedWeapons.Contains(item.type)) continue;
                     if (item.Name == "Tome of Eclipsa" || (item.ModItem != null && item.ModItem.Name == "TomeOfEclipsa")) continue;
-                    if (item.CountsAsClass(DamageClass.Summon) && !(item.shoot > 0 && ProjectileID.Sets.IsAWhip[item.shoot])) continue;
                     if (!unique.Contains(item.type)) { Item w = new Item(); w.SetDefaults(item.type); weaponPool.Add(w); unique.Add(item.type); }
                 }
 
@@ -768,7 +784,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 if (held != null && !held.IsAir && !BannedWeapons.Contains(held.type))
                 {
                     bool isTome = held.Name == "Tome of Eclipsa" || (held.ModItem != null && held.ModItem.Name == "TomeOfEclipsa");
-                    bool isMinion = held.CountsAsClass(DamageClass.Summon) && (held.shoot <= 0 || !ProjectileID.Sets.IsAWhip[held.shoot]);
+                    bool isMinion = IsSummonerWeapon(held);
                     bool isTool = held.pick > 0 || held.axe > 0 || held.hammer > 0 || held.tileBoost > 0;
                     if (!isMinion && !isTome && !isTool) { Item w = new Item(); w.SetDefaults(held.type); activeWeapon = w; }
                 }
@@ -903,7 +919,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             if (weapon.CountsAsClass(DamageClass.Melee) || (weapon.shoot > 0 && ProjectileID.Sets.IsAWhip[weapon.shoot])) return new Color(255, 90, 70);
             if (weapon.CountsAsClass(DamageClass.Ranged)) return new Color(110, 230, 130);
             if (weapon.CountsAsClass(DamageClass.Magic)) return new Color(170, 100, 255);
-            if (weapon.CountsAsClass(DamageClass.Summon)) return new Color(255, 200, 80);
             return new Color(200, 200, 255);
         }
 

@@ -25,16 +25,10 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
     // (isParrying, isCurrentlyChanneling, combo counters) so nothing bleeds over from whatever state
     // the boss was in a moment ago.
     //
-    // KNOWN ISSUE THIS TOOL WILL SURFACE: STATE_SUMMON_SPECTRAL_CAROUSEL (=40) and STATE_WHIP_SERPENTS_
-    // COIL (=41), defined in WhoAmI.cs, numerically collide with STATE_PHASE3_TRANSITION (=40) and
-    // STATE_PHASE3_ARENA (=41), defined in WhoAmI_Phase3Cartesian.cs. AI() checks
-    // `if (aiState == STATE_PHASE3_TRANSITION || aiState == STATE_PHASE3_ARENA) { HandlePhase3(...); return; }`
-    // BEFORE it ever reaches the switch statement that has `case STATE_SUMMON_SPECTRAL_CAROUSEL` /
-    // `case STATE_WHIP_SERPENTS_COIL` - and since C# switches/ifs only see the numeric value, not the
-    // constant's name, that early check silently hijacks both patterns into HandlePhase3 every single
-    // time they'd normally fire. Forcing either one below will reproduce that immediately. The real
-    // fix is renumbering one pair of constants (e.g. move the two Phase3 states to 50/51) - this
-    // forcer does not attempt to patch that for you, it only flags it (see WarnDuplicateStateIds).
+    // NOTE: Summoner patterns (Rift Swarm, Wraith Convergence, Soul Tether, Spectral Carousel and the
+    // Metaball set) were removed - summoner class is not supported. The old STATE id collision
+    // (Phase 3 vs. Spectral Carousel / Serpent's Coil) is also gone; DebugWarnDuplicateStateIds stays
+    // as a safety net in case state IDs ever collide again.
     // ================================================================================================
     public partial class WhoAmI
     {
@@ -54,7 +48,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             (STATE_ORBIT_GRID_LOCK,             "Orbiting Grid Lock"),
             (STATE_GRAVITY_WELL_TORRENT,        "Gravity Well & Arcane Torrent"),
             (STATE_MIRROR_MIRAGE,               "Mirror Mirage (3-way decoy)"),
-            (STATE_SUMMON_RIFT_SWARM,           "Spectral Rift Swarm"),
             (STATE_WHIP_LASH_CAGE,              "Lash Cage"),
             (STATE_YOYO_TETHER_STORM,           "Tether Storm"),
             (STATE_BOOMERANG_CROSSFIRE,         "Boomerang Crossfire"),
@@ -77,12 +70,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             (STATE_MAGIC_FRACTURE_BLOOM,        "Fracture Bloom"),
             (STATE_MAGIC_UMBRAL_DUALITY,        "Umbral Duality"),
             (STATE_MAGIC_PARADOX_MIRROR,        "Paradox Mirror Volley"),
-            (STATE_SUMMON_WRAITH_CONVERGENCE,   "Wraith Convergence"),
-            (STATE_SUMMON_SOUL_TETHER,          "Soul Tether Bind"),
-            (STATE_SUMMON_SPECTRAL_CAROUSEL,    "Spectral Carousel"),      // see collision warning above
-            (STATE_WHIP_SERPENTS_COIL,          "Serpent's Coil"),         // see collision warning above
-            (STATE_WHIP_FAN_LASH,               "Cracked Fan Lash"),
-            (STATE_WHIP_PUPPETEER_SNAP,         "Puppeteer's Snap"),
             (STATE_YOYO_PENDULUM_RECKONING,     "Pendulum Reckoning"),
             (STATE_YOYO_BINARY_SNARE,           "Binary Orbit Snare"),
             (STATE_YOYO_CASCADE_UNRAVEL,        "Cascade Unravel"),

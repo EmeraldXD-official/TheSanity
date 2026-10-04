@@ -76,7 +76,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private const int Phase3GrowTicks = 55;                // durasi senjata "membesar" di awal tiap wave
         private const int Phase3ResolveTicks = 40;             // durasi senjata mengecil/hilang di akhir tiap wave
         private const int Phase3StandardActiveDuration = 600;  // 10 detik - Melee/Ranged/Magic
-        private const int Phase3RiftCycleDuration = 600;       // 10 detik per celah - Summon (x3 = 30 detik)
         private const int Phase3MaxWaves = 5;                  // jaring pengaman biar gauntlet nggak infinite loop
 
         private const float Phase3GridUnit = 130f;                     // px dunia per 1 satuan grid (dinaikin dari 58 - arena kerasa kecil di 58)
@@ -109,8 +108,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // sebelumnya (masih sekitar 4 wave dari 5 max, bukan langsung kelar 1 wave doang gara2
         // budget HP-nya sekarang jauh lebih tipis).
         private const float Phase3DamagePerWave = 0.025f;      // ~2.5% max HP boss per wave yang berhasil dilewati
-        private const float Phase3RiftSafeRadius = 70f;
-        private const int Phase3RiftFailureDamage = 500;
 
         private const int Phase3RangedFireInterval = 40;
         private const float Phase3RangedBoltSpeed = 17f;
@@ -308,16 +305,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private bool phase3TeleportedIn = false;
 
         private int phase3WaveNumber = 0;
-        private int phase3ClassIndex = -1; // 0 Melee, 1 Ranged, 2 Magic, 3 Summon (sama urutan TryDetectPlayerClass)
+        private int phase3ClassIndex = -1; // 0 Melee, 1 Ranged, 2 Magic (sama urutan TryDetectPlayerClass; Summon (3) nggak didukung)
         private int phase3SubStage = 0;    // 0 grow-in, 1 active, 2 resolve
         private int phase3StageTimer = 0;
 
         private readonly List<WhoAmIPhase3WeaponProp> phase3Props = new List<WhoAmIPhase3WeaponProp>();
 
-        private Vector2 phase3RiftWorldPos = Vector2.Zero;
-        private Point phase3RiftGrid = Point.Zero;
-        private int phase3RiftCycle = 0;
-        private int phase3RiftTimer = 0;
         private float phase3MeleeGroupSpin = 0f; // sudut bersama buat SEMUA bilah melee - LEGACY (peninggalan pola "3 bilah muter statis" lama), nggak dipakai lagi sama state machine sweep di bawah, ditinggal biar nggak nabrak referensi lama yang lain
 
         // ---- Melee (Phase 3) "270-degree sweep" - 1 Terra Blade raksasa, ngayun cepat lewat busur
@@ -502,9 +495,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             MaintainPhase3MageBolts();
 
             // FIX (request "broken hero sword cuma pas pattern melee"): dulu jalan TIAP TICK lepas dari
-            // class wave manapun (Melee/Ranged/Magic/Summon), makanya obstacle sword ini nongol terus di
+            // class wave manapun (Melee/Ranged/Magic), makanya obstacle sword ini nongol terus di
             // SEMUA pattern. Sekarang dibatesin cuma jalan pas phase3ClassIndex == 0 (Melee) - di wave
-            // Ranged/Magic/Summon, hazard-nya berhenti nge-tick (freeze di state terakhirnya) dan nggak
+            // Ranged/Magic, hazard-nya berhenti nge-tick (freeze di state terakhirnya) dan nggak
             // digambar (lihat gate yang sama di DrawPhase3ObstacleSwords, dipanggil dari
             // DrawPhase3Cartesian), jadi otomatis nyambung lagi persis dari state yang sama begitu wave
             // Melee berikutnya mulai - nggak perlu re-init.
@@ -522,12 +515,12 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private void SetupPhase3Wave(Player player)
         {
             phase3Props.Clear();
-            phase3RiftCycle = 0;
-            phase3RiftTimer = 0;
             KillAllTrackedPhase3MageBolts(); // wave (dan bisa jadi class) ganti - jangan biarin bolt volley kemarin nyangkut ke wave baru
 
-            if (!TryDetectPlayerClass(player, out int detected, out _))
-                detected = 0; // gear player nggak lagi condong ke class manapun - fallback ke Melee daripada nge-stuck
+            // Summoner class (index 3) NOT supported - kalau gear player berubah jadi summoner di tengah
+            // fight, atau nggak ada class yang kedeteksi, fallback ke Melee daripada nge-stuck.
+            if (!TryDetectPlayerClass(player, out int detected, out _) || detected == SummonerClassIndex)
+                detected = 0;
 
             phase3ClassIndex = detected;
 
@@ -535,8 +528,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             {
                 case 0: SetupMeleePattern(player); break;
                 case 1: SetupRangedPattern(player); break;
-                case 2: SetupMagePattern(player); break;
-                default: /* Summon (3): nggak butuh weapon props, cuma rift minigame */ break;
+                default: SetupMagePattern(player); break; // 2 = Magic
             }
 
             phase3SubStage = 0;
@@ -696,9 +688,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 phase3SubStage = 1;
                 phase3StageTimer = 0;
 
-                if (phase3ClassIndex == 3)
-                    StartNextRift(player);
-
                 Main.NewText(Phase3WaveStartMessage(phase3ClassIndex), ArchetypeGlowColor(phase3ClassIndex));
             }
         }
@@ -712,8 +701,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             {
                 case 0: TickMeleeActive(player); break;
                 case 1: TickRangedActive(player); break;
-                case 2: TickMagicActive(player); break;
-                default: TickSummonActive(player); break;
+                default: TickMagicActive(player); break; // 2 = Magic
             }
         }
 
@@ -1031,23 +1019,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
         }
 
-        private void TickSummonActive(Player player)
-        {
-            if (phase3RiftTimer > 0)
-            {
-                phase3RiftTimer--;
-                if (phase3RiftTimer <= 0)
-                    ResolveRift(player);
-                else if (Main.rand.NextBool(4))
-                {
-                    // Ambient spark drifting off the rift every few ticks, so it reads as an active,
-                    // unstable tear instead of a static glow circle.
-                    Vector2 vel = Main.rand.NextVector2Circular(1.6f, 1.6f);
-                    LuminanceUtilities.SpawnParticle(phase3RiftWorldPos + Main.rand.NextVector2Circular(20f, 20f), vel, ArchetypeGlowColor(3), 30, 1f, ParticleType.Spark);
-                }
-            }
-        }
-
         // ---------------- SUB-STAGE 2: RESOLVE ----------------
         private void TickPhase3Resolve(Player player)
         {
@@ -1120,106 +1091,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             aiTimer = 0;
 
             Main.NewText("The reflection can't take any more of itself.", 190, 150, 240);
-        }
-
-        // ============================================================================================
-        // SUMMON PATTERN: rift/celah - lihat penjelasan lengkap di komentar besar atas file ini.
-        // ============================================================================================
-        private void StartNextRift(Player player)
-        {
-            phase3RiftGrid = new Point(Main.rand.Next(-10, 11), Main.rand.Next(-10, 11));
-            phase3RiftWorldPos = phase3ArenaCenter + new Vector2(phase3RiftGrid.X * Phase3GridUnit, -phase3RiftGrid.Y * Phase3GridUnit);
-            phase3RiftTimer = Phase3RiftCycleDuration;
-
-            Main.NewText($"A rift opens at ({phase3RiftGrid.X}, {phase3RiftGrid.Y}) - reach it in {Phase3RiftCycleDuration / 60} seconds!", ArchetypeGlowColor(3));
-            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item29, phase3RiftWorldPos);
-        }
-
-        private void ResolveRift(Player player)
-        {
-            // Ledakan celahnya SENDIRI - dipicu SETIAP KALI hitungan waktu habis, baik player berhasil
-            // masuk MAUPUN nggak (beda dari SpawnRiftFailureVFX di bawah, yang KHUSUS buat feedback
-            // "kena hukuman" pas gagal doang). Ini representasi visual "celahnya nutup paksa/collapse"
-            // begitu 10 detiknya abis - request: "visual effect ledakan saat hitungan waktu habis".
-            SpawnRiftExplosionVFX(phase3RiftWorldPos);
-
-            // Shockwave dari BOSS (NPC.Center) - BUKAN dari celah atau posisi player. Sekarang JALAN DI
-            // KEDUA KASUS (safe/nggak), sama kayak SpawnRiftExplosionVFX di atas - jadi shockwave-nya
-            // tetap keliatan walaupun player berhasil masuk celah tepat waktu, bukan cuma pas kena damage.
-            // Pakai ShockwaveSystem yang UDAH ADA di mod ini (Common/Systems/ShockwaveSystem.cs,
-            // yang sama juga dipakai PlutoBomb) lewat TriggerBombShockwave() - itu jalur yang auto-maju
-            // & auto-selesai sendiri (ambil slot dari pool, majuin progress/opacity tiap tick, terus
-            // deactivate sendiri di PostUpdateEverything), jadi nggak perlu manggil UpdateProgress()/
-            // Stop() manual dari sini. Tint pakai ArchetypeGlowColor(3) - magenta yang sama persis
-            // kayak warna rift/Summon yang udah dipakai di teks & partikel celah di atas, biar satu
-            // tema visual. maxRangeTiles di-0-kan (TANPA batas) karena default bawaan TriggerBombShockwave
-            // (20 tile / 320px) itu dituning buat ledakan lokal PlutoBomb - kekecilan buat efek yang
-            // harus kebaca di seluruh layar arena Phase 3 ini.
-            ShockwaveSystem.TriggerBombShockwave(NPC.Center, tintColor: ArchetypeGlowColor(3), tintStrength: 0.45f, maxRangeTiles: 0f);
-
-            bool safe = Vector2.Distance(player.Center, phase3RiftWorldPos) <= Phase3RiftSafeRadius;
-            if (!safe)
-            {
-                // Phase3RiftFailureDamage (100) sekarang TRUE DAMAGE - armorPenetration digedein jauh
-                // di atas defense player mentok manapun, jadi defense/damage reduction dari armor
-                // NGGAK ngurangin damage ini sama sekali (beda dari sebelumnya yang kena defense normal).
-                player.Hurt(PlayerDeathReason.ByCustomReason(player.name + " didn't reach the rift in time."), Phase3RiftFailureDamage, 0, dodgeable: false, armorPenetration: 9999f);
-                SpawnRiftFailureVFX(player.Center);
-            }
-            else
-            {
-                Terraria.Audio.SoundEngine.PlaySound(SoundID.Item4, phase3RiftWorldPos);
-            }
-
-            phase3RiftCycle++;
-            if (phase3RiftCycle >= 3)
-            {
-                phase3SubStage = 2;
-                phase3StageTimer = 0;
-            }
-            else
-            {
-                StartNextRift(player);
-            }
-        }
-
-        // Ledakan visual titik celah pas 10 detiknya abis - dust ring + spark burst + screenshake
-        // ringan, dipakein tint magenta (ArchetypeGlowColor(3)) yang sama kayak warna rift/Summon di
-        // tempat lain (teks StartNextRift, spark ambient TickSummonActive, dll) biar satu tema.
-        // JALAN DI KEDUA KASUS (safe/nggak) - lihat komentar pemanggilnya di ResolveRift.
-        private void SpawnRiftExplosionVFX(Vector2 pos)
-        {
-            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item14, pos);
-            ScreenShakeSystem.StartShakeAtPoint(pos, 8f, 0.3f); // lebih ringan dari SpawnRiftFailureVFX (12f/0.4f) - ini "ledakan netral", bukan hukuman
-
-            Color riftColor = ArchetypeGlowColor(3);
-
-            for (int i = 0; i < 50; i++)
-            {
-                Vector2 vel = Main.rand.NextVector2CircularEdge(7f, 7f) * Main.rand.NextFloat(0.4f, 1f);
-                Dust d = Dust.NewDustPerfect(pos, DustID.PurpleTorch, vel, 0, riftColor, 1.9f);
-                d.noGravity = true;
-            }
-
-            // Spark tambahan - konsisten sama gaya LuminanceUtilities.SpawnParticle yang dipakai di
-            // seluruh file ini (ParticleType.Spark, lihat ambient spark rift di TickSummonActive).
-            for (int i = 0; i < 3; i++)
-            {
-                Vector2 sparkVel = Main.rand.NextVector2Circular(6f, 6f);
-                LuminanceUtilities.SpawnParticle(pos + Main.rand.NextVector2Circular(15f, 15f), sparkVel, riftColor, 35, 1.6f, ParticleType.Spark);
-            }
-        }
-
-        private void SpawnRiftFailureVFX(Vector2 pos)
-        {
-            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item14, pos);
-            ScreenShakeSystem.StartShakeAtPoint(pos, 12f, 0.4f);
-            for (int i = 0; i < 40; i++)
-            {
-                Vector2 vel = Main.rand.NextVector2Circular(9f, 9f);
-                Dust d = Dust.NewDustPerfect(pos, DustID.RedTorch, vel, 0, Color.OrangeRed, 1.8f);
-                d.noGravity = true;
-            }
         }
 
         // ============================================================================================
@@ -1612,8 +1483,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             {
                 case 0: return "Three edges begin to turn...";
                 case 1: return "The corners take aim...";
-                case 2: return "The mirrors begin to fire...";
-                default: return "A rift is about to open somewhere in the grid...";
+                default: return "The mirrors begin to fire..."; // 2 = Magic
             }
         }
 
@@ -1624,7 +1494,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 case 0: return new Color(255, 90, 70);   // Melee
                 case 1: return new Color(110, 230, 130); // Ranged
                 case 2: return new Color(170, 100, 255); // Magic
-                case 3: return new Color(230, 110, 230); // Summon / rift
                 default: return Color.White;
             }
         }
@@ -1788,40 +1657,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     spriteBatch.Draw(safeGapTex, markerDrawPos, null, markerGlow, phase3SafeGapBladeSpin, markerOrigin, Phase3SafeGapBladeScale * 1.2f, SpriteEffects.None, 0f);
                     spriteBatch.Draw(safeGapTex, markerDrawPos, null, Color.White * 0.85f, phase3SafeGapBladeSpin, markerOrigin, Phase3SafeGapBladeScale, SpriteEffects.None, 0f);
                 }
-            }
-
-            if (phase3ClassIndex == 3 && phase3SubStage == 1 && phase3RiftTimer > 0)
-            {
-                // FIX ("visual celahnya malah panjang kebawah, kelewat polos"): versi lama nge-scale
-                // TextureAssets.MagicPixel (1x1) pakai SATU float scale lewat spriteBatch.Draw yang
-                // origin-nya Vector2(0.5f) - itu origin dalam PIXEL LOKAL tekstur (bukan 0..1 relatif),
-                // jadi buat tekstur 1x1 origin-nya ketiban ke ujung, bukan ke tengah, dan begitu
-                // scale-nya gede (70-220px) hasilnya jadi blok miring/kepotong ke satu arah (kebawah)
-                // alih-alih lingkaran rapi di tengah rift. Sekarang numpang tekstur AuraGlow yang
-                // beneran bundar (udah ke-load lewat WhoAmIPhase3Bolt, texture-nya sama) dan origin
-                // dihitung dari tex.Size()/2 yang bener-bener di tengah tekstur - circle pulse-nya
-                // sekarang selalu bundar & center-nya presisi di titik rift, nggak peduli scale-nya.
-                Vector2 riftScreen = phase3RiftWorldPos - screenPos;
-                float pulse = 0.7f + 0.3f * (float)Math.Sin(Main.GameUpdateCount * 0.15f);
-                float ringPulse = 1.4f + pulse * 0.3f;
-                Color riftColor = ArchetypeGlowColor(3);
-
-                Texture2D glowTex = TextureAssets.Projectile[ModContent.ProjectileType<WhoAmIPhase3Bolt>()].Value;
-                Vector2 glowOrigin = glowTex.Size() / 2f;
-
-                float outerDiameter = 190f * ringPulse;
-                spriteBatch.Draw(glowTex, riftScreen, null, riftColor * 0.30f, 0f, glowOrigin, outerDiameter / Math.Max(1f, glowTex.Width), SpriteEffects.None, 0f);
-
-                float innerDiameter = 95f * ringPulse;
-                spriteBatch.Draw(glowTex, riftScreen, null, riftColor * 0.65f, 0f, glowOrigin, innerDiameter / Math.Max(1f, glowTex.Width), SpriteEffects.None, 0f);
-
-                float coreDiameter = 30f * ringPulse;
-                spriteBatch.Draw(glowTex, riftScreen, null, Color.White * 0.85f, 0f, glowOrigin, coreDiameter / Math.Max(1f, glowTex.Width), SpriteEffects.None, 0f);
-
-                int secondsLeft = phase3RiftTimer / 60 + 1;
-                string countdown = secondsLeft.ToString();
-                Vector2 cdSize = font.MeasureString(countdown);
-                spriteBatch.DrawString(font, countdown, riftScreen - cdSize / 2f, Color.White);
             }
         }
 

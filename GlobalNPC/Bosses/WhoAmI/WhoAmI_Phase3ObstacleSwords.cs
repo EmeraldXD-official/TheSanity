@@ -13,7 +13,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 {
     // ================================================================================================
     // BROKEN HERO SWORD - "pengganggu" tetap di 4 batas arena Cartesius (Phase 3). FIX (request "broken
-    // hero sword cuma pas pattern melee"): dulu jalan LEPAS dari class wave (Melee/Ranged/Magic/Summon)
+    // hero sword cuma pas pattern melee"): dulu jalan LEPAS dari class wave (Melee/Ranged/Magic)
     // yang lagi aktif - sekarang TickPhase3ObstacleSwords/DrawPhase3ObstacleSwords cuma dipanggil pas
     // phase3ClassIndex == 0 (lihat gate-nya di HandlePhase3Arena & DrawPhase3Cartesian,
     // WhoAmI_Phase3Cartesian.cs) - jadi Broken Hero Sword sekarang eksklusif buat wave Melee doang.
@@ -33,7 +33,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
     //
     // CATATAN UPDATE (fix 2 bug yang dilaporin):
     //   1) Damage nggak kena: dulu player.Hurt() di sini nggak nentuin cooldownCounter, jadi ikutan
-    //      ImmunityCooldownID.General - slot immunity yang SAMA dipakai blade melee & rift-fail damage
+    //      ImmunityCooldownID.General - slot immunity yang SAMA dipakai blade melee
     //      di WhoAmI_Phase3Cartesian.cs. Karena obstacle sword ini jalan TERLEPAS dari wave yang aktif
     //      (sering banget numpuk waktu sama pattern lain lagi nyerang juga), i-frame dari hit pattern
     //      lain ikut nge-block Hurt() punya sword ini. Sekarang dikasih slot ImmunityCooldownID.Bosses
@@ -205,7 +205,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             if (Vector2.Distance(player.Center, closest) < Phase3ObstacleContactRadius)
             {
                 // FIX #1: dulu nggak nentuin cooldownCounter, jadi ikutan ImmunityCooldownID.General -
-                // slot yang sama dipakai Hurt() blade melee & rift-fail damage (WhoAmI_Phase3Cartesian.cs).
+                // slot yang sama dipakai Hurt() blade melee (WhoAmI_Phase3Cartesian.cs).
                 // Karena obstacle sword ini jalan terus lepas dari wave aktif, sering numpuk waktu sama
                 // pattern lain lagi nyerang - i-frame dari hit lain ikut nge-block Hurt() ini, jadi
                 // kelihatan kayak "nggak pernah ngedamage" padahal cuma ke-eat immunity dari sumber lain.

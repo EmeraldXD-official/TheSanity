@@ -236,7 +236,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         // patterns and never got a unique one of their own (TrueMelee/ProjMelee got Blink & Echo Combo,
         // Ranged got Orbiting Grid Lock, Magic got Gravity Well Torrent - Summon/Whip/Yoyo/Boomerang
         // did not). See WhoAmI_Pattern_ArchetypeExtras.cs.
-        private const int STATE_SUMMON_RIFT_SWARM = 15;     // Summon — retreat + minion rift swarm + synced dive
         private const int STATE_WHIP_LASH_CAGE = 16;        // Whip — 3-point flank snap-dash lash cage
         private const int STATE_YOYO_TETHER_STORM = 17;     // Yoyo — rotating fan throw + orbital sweep
         private const int STATE_BOOMERANG_CROSSFIRE = 18;   // Boomerang — twin flank snap-dash crossfire
@@ -309,13 +308,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private const int STATE_MAGIC_UMBRAL_DUALITY = 36;   // "Umbral Duality" - twin light/dark motes in binary orbit
         private const int STATE_MAGIC_PARADOX_MIRROR = 37;   // "Paradox Mirror Volley" - mirrored illusion pincer volley
 
-        private const int STATE_SUMMON_WRAITH_CONVERGENCE = 38;  // "Wraith Convergence" - closing arc of minions
-        private const int STATE_SUMMON_SOUL_TETHER = 39;         // "Soul Tether Bind" - tether-linked pulsing minions
-        private const int STATE_SUMMON_SPECTRAL_CAROUSEL = 40;   // "Spectral Carousel" - accelerating ring of firing minions
-
-        private const int STATE_WHIP_SERPENTS_COIL = 41;     // "Serpent's Coil" - tightening coil snap
-        private const int STATE_WHIP_FAN_LASH = 42;          // "Cracked Fan Lash" - wide anchored multi-crack arc
-        private const int STATE_WHIP_PUPPETEER_SNAP = 43;    // "Puppeteer's Snap" - lagging chain-link crack along an S-curve
 
         private const int STATE_YOYO_PENDULUM_RECKONING = 44;  // "Pendulum Reckoning" - building pendulum swing + smash
         private const int STATE_YOYO_BINARY_SNARE = 45;        // "Binary Orbit Snare" - twin yoyos in binary orbit
@@ -424,7 +416,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
         private float glitchIntensity = 0f;
         private bool executionDone = false;
 
-        internal enum WeaponArchetype { TrueMelee, ProjMelee, Ranged, Magic, Summon, Whip, Yoyo, Boomerang }
+        internal enum WeaponArchetype { TrueMelee, ProjMelee, Ranged, Magic, Whip, Yoyo, Boomerang }
         private WeaponArchetype currentArchetype = WeaponArchetype.TrueMelee;
         private bool loadoutHasWings = false;
         private bool loadoutHasDashAccessory = false;
@@ -1152,10 +1144,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     HandleMirrorMirage(player);
                     break;
 
-                case STATE_SUMMON_RIFT_SWARM:
-                    HandleSummonRiftSwarm(player);
-                    break;
-
                 case STATE_WHIP_LASH_CAGE:
                     HandleWhipLashCage(player);
                     break;
@@ -1243,30 +1231,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
                 case STATE_MAGIC_PARADOX_MIRROR:
                     HandleMagicParadoxMirror(player);
-                    break;
-
-                case STATE_SUMMON_WRAITH_CONVERGENCE:
-                    HandleSummonWraithConvergence(player);
-                    break;
-
-                case STATE_SUMMON_SOUL_TETHER:
-                    HandleSummonSoulTether(player);
-                    break;
-
-                case STATE_SUMMON_SPECTRAL_CAROUSEL:
-                    HandleSummonSpectralCarousel(player);
-                    break;
-
-                case STATE_WHIP_SERPENTS_COIL:
-                    HandleWhipSerpentsCoil(player);
-                    break;
-
-                case STATE_WHIP_FAN_LASH:
-                    HandleWhipFanLash(player);
-                    break;
-
-                case STATE_WHIP_PUPPETEER_SNAP:
-                    HandleWhipPuppeteerSnap(player);
                     break;
 
                 case STATE_YOYO_PENDULUM_RECKONING:
@@ -3124,7 +3088,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 if (p.active && p.owner == proxySlot)
                 {
                     if (dummyPlayer.ownedProjectileCounts != null && p.type >= 0 && p.type < dummyPlayer.ownedProjectileCounts.Length) dummyPlayer.ownedProjectileCounts[p.type]++;
-                    if (p.minion || Main.projPet[p.type]) dummyPlayer.numMinions++;
                 }
             }
 
@@ -3321,7 +3284,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 Item held = player.inventory[player.selectedItem];
                 if (held != null && !held.IsAir && !BannedWeapons.Contains(held.type))
                 {
-                    bool isMinion = held.CountsAsClass(DamageClass.Summon) && (held.shoot <= 0 || !ProjectileID.Sets.IsAWhip[held.shoot]);
+                    bool isMinion = IsSummonerWeapon(held); // summoner weapons are not supported (see IsWeaponItem)
                     bool isTome = held.Name == "Tome of Eclipsa" || (held.ModItem != null && held.ModItem.Name == "TomeOfEclipsa");
                     if (!isMinion && !isTome) { Item w = new Item(); w.SetDefaults(held.type); activeWeapon = w; }
                 }

@@ -66,19 +66,9 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     // index 11 = Paradox Mirror Volley (STATE_MAGIC_PARADOX_MIRROR)
                     validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 } : new List<int> { 3 };
                     break;
-                case WeaponArchetype.Summon:
-                    // index 4 = new Spectral Rift Swarm (STATE_SUMMON_RIFT_SWARM)
-                    // index 5 = Wraith Convergence (STATE_SUMMON_WRAITH_CONVERGENCE)
-                    // index 6 = Soul Tether Bind (STATE_SUMMON_SOUL_TETHER)
-                    // index 7 = Spectral Carousel (STATE_SUMMON_SPECTRAL_CAROUSEL)
-                    validPatterns = hasProjectile ? new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 } : new List<int> { 1 };
-                    break;
                 case WeaponArchetype.Whip:
                     // index 4 = new Lash Cage (STATE_WHIP_LASH_CAGE)
-                    // index 5 = Serpent's Coil (STATE_WHIP_SERPENTS_COIL)
-                    // index 6 = Cracked Fan Lash (STATE_WHIP_FAN_LASH)
-                    // index 7 = Puppeteer's Snap (STATE_WHIP_PUPPETEER_SNAP)
-                    validPatterns = new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 };
+                    validPatterns = new List<int> { 0, 1, 2, 3, 4 };
                     break;
                 case WeaponArchetype.Yoyo:
                     // index 4 = new Tether Storm (STATE_YOYO_TETHER_STORM)
@@ -208,9 +198,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                     break;
                 case WeaponArchetype.Magic:
                     ExecuteMagicPattern(target, archetypePatternIndex);
-                    break;
-                case WeaponArchetype.Summon:
-                    ExecuteSummonPattern(target, archetypePatternIndex);
                     break;
                 case WeaponArchetype.Whip:
                     ExecuteWhipPattern(target, archetypePatternIndex);
@@ -1453,203 +1440,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             }
         }
 
-        // ---------- Summon ----------
-        private void ExecuteSummonPattern(Player target, int pattern)
-        {
-            bool hasProjectile = WeaponHasProjectile(activeWeapon);
-
-            if (isPhase2)
-            {
-                switch (pattern)
-                {
-                    case 0:
-                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
-                        if (aiTimer % 20 == 0 && aiTimer < 100)
-                        {
-                            FireAttackProjectile(target);
-                            FireAttackProjectile(target);
-                        }
-                        if (aiTimer > 120) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
-                        break;
-                    case 1:
-                        if (aiTimer == 0) NPC.alpha = 255;
-                        else if (aiTimer == 40) NPC.alpha = 0;
-                        else if (aiTimer == 60)
-                        {
-                            if (hasProjectile)
-                            {
-                                for (int i = 0; i < 4; i++)
-                                    FireAttackProjectile(target);
-                            }
-                            else
-                                SpawnMeleeSlash(target, 0f);
-                        }
-                        if (aiTimer > 80) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
-                        break;
-                    case 2:
-                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
-                        if (aiTimer % 6 == 0 && aiTimer < 70)
-                        {
-                            Vector2 dir = target.Center - NPC.Center;
-                            if (dir != Vector2.Zero) dir.Normalize();
-                            Vector2 perp = new Vector2(-dir.Y, dir.X) * Main.rand.NextFloat(-1f, 1f) * 80f;
-                            FireAttackProjectile(target);
-                        }
-                        if (aiTimer > 90) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
-                        break;
-                    case 3:
-                        if (aiTimer == 20)
-                        {
-                            for (int i = 0; i < 12; i++)
-                            {
-                                Vector2 dir = Main.rand.NextVector2Circular(1f, 1f);
-                                if (hasProjectile)
-                                    FireAttackProjectile(target);
-                                else
-                                    SpawnMeleeSlash(target, dir.ToRotation());
-                            }
-                            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item14, NPC.Center);
-                        }
-                        if (aiTimer > 40) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
-                        break;
-                    case 4:
-                        // NEW: Spectral Rift Swarm - see WhoAmI_Pattern_ArchetypeExtras.cs
-                        if (aiState != STATE_SUMMON_RIFT_SWARM)
-                        {
-                            aiState = STATE_SUMMON_RIFT_SWARM;
-                            aiTimer = 0;
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 5:
-                        // NEW WAVE 2: Wraith Convergence - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_SUMMON_WRAITH_CONVERGENCE)
-                        {
-                            aiState = STATE_SUMMON_WRAITH_CONVERGENCE;
-                            aiTimer = 0;
-                            ResetSummonWraithConvergenceState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 6:
-                        // NEW WAVE 2: Soul Tether Bind - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_SUMMON_SOUL_TETHER)
-                        {
-                            aiState = STATE_SUMMON_SOUL_TETHER;
-                            aiTimer = 0;
-                            ResetSummonSoulTetherState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 7:
-                        // NEW WAVE 2: Spectral Carousel - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_SUMMON_SPECTRAL_CAROUSEL)
-                        {
-                            aiState = STATE_SUMMON_SPECTRAL_CAROUSEL;
-                            aiTimer = 0;
-                            ResetSummonSpectralCarouselState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                }
-            }
-            else
-            {
-                // Phase 1 Summon (existing)
-                switch (pattern)
-                {
-                    case 0:
-                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
-                        if (aiTimer % 30 == 0 && aiTimer < 120)
-                        {
-                            FireAttackProjectile(target);
-                        }
-                        if (aiTimer > 150) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
-                        break;
-                    case 1:
-                        if (aiTimer == 0) NPC.alpha = 255;
-                        else if (aiTimer == 60) NPC.alpha = 0;
-                        else if (aiTimer == 80)
-                        {
-                            if (hasProjectile)
-                            {
-                                FireAttackProjectile(target);
-                                FireAttackProjectile(target);
-                            }
-                            else
-                                SpawnMeleeSlash(target, 0f);
-                        }
-                        if (aiTimer > 100) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
-                        break;
-                    case 2:
-                        if (!hasProjectile) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; return; }
-                        if (aiTimer % 10 == 0 && aiTimer < 80)
-                        {
-                            Vector2 dir = target.Center - NPC.Center;
-                            if (dir != Vector2.Zero) dir.Normalize();
-                            Vector2 perp = new Vector2(-dir.Y, dir.X) * Main.rand.NextFloat(-1f, 1f) * 50f;
-                            FireAttackProjectile(target);
-                        }
-                        if (aiTimer > 100) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
-                        break;
-                    case 3:
-                        if (aiTimer == 30)
-                        {
-                            for (int i = 0; i < 6; i++)
-                            {
-                                Vector2 dir = Main.rand.NextVector2Circular(1f, 1f);
-                                if (hasProjectile)
-                                    FireAttackProjectile(target);
-                                else
-                                    SpawnMeleeSlash(target, dir.ToRotation());
-                            }
-                            Terraria.Audio.SoundEngine.PlaySound(SoundID.Item14, NPC.Center);
-                        }
-                        if (aiTimer > 50) { aiState = STATE_IDLE; aiTimer = 0; NPC.netUpdate = true; }
-                        break;
-                    case 4:
-                        // NEW: Spectral Rift Swarm - see WhoAmI_Pattern_ArchetypeExtras.cs
-                        if (aiState != STATE_SUMMON_RIFT_SWARM)
-                        {
-                            aiState = STATE_SUMMON_RIFT_SWARM;
-                            aiTimer = 0;
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 5:
-                        // NEW WAVE 2: Wraith Convergence - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_SUMMON_WRAITH_CONVERGENCE)
-                        {
-                            aiState = STATE_SUMMON_WRAITH_CONVERGENCE;
-                            aiTimer = 0;
-                            ResetSummonWraithConvergenceState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 6:
-                        // NEW WAVE 2: Soul Tether Bind - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_SUMMON_SOUL_TETHER)
-                        {
-                            aiState = STATE_SUMMON_SOUL_TETHER;
-                            aiTimer = 0;
-                            ResetSummonSoulTetherState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 7:
-                        // NEW WAVE 2: Spectral Carousel - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_SUMMON_SPECTRAL_CAROUSEL)
-                        {
-                            aiState = STATE_SUMMON_SPECTRAL_CAROUSEL;
-                            aiTimer = 0;
-                            ResetSummonSpectralCarouselState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                }
-            }
-        }
-
         // ---------- Whip ----------
         private void ExecuteWhipPattern(Player target, int pattern)
         {
@@ -1712,36 +1502,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                             NPC.netUpdate = true;
                         }
                         break;
-                    case 5:
-                        // NEW WAVE 2: Serpent's Coil - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_WHIP_SERPENTS_COIL)
-                        {
-                            aiState = STATE_WHIP_SERPENTS_COIL;
-                            aiTimer = 0;
-                            ResetWhipSerpentsCoilState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 6:
-                        // NEW WAVE 2: Cracked Fan Lash - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_WHIP_FAN_LASH)
-                        {
-                            aiState = STATE_WHIP_FAN_LASH;
-                            aiTimer = 0;
-                            ResetWhipFanLashState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 7:
-                        // NEW WAVE 2: Puppeteer's Snap - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_WHIP_PUPPETEER_SNAP)
-                        {
-                            aiState = STATE_WHIP_PUPPETEER_SNAP;
-                            aiTimer = 0;
-                            ResetWhipPuppeteerSnapState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
                 }
             }
             else
@@ -1799,36 +1559,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                         {
                             aiState = STATE_WHIP_LASH_CAGE;
                             aiTimer = 0;
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 5:
-                        // NEW WAVE 2: Serpent's Coil - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_WHIP_SERPENTS_COIL)
-                        {
-                            aiState = STATE_WHIP_SERPENTS_COIL;
-                            aiTimer = 0;
-                            ResetWhipSerpentsCoilState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 6:
-                        // NEW WAVE 2: Cracked Fan Lash - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_WHIP_FAN_LASH)
-                        {
-                            aiState = STATE_WHIP_FAN_LASH;
-                            aiTimer = 0;
-                            ResetWhipFanLashState();
-                            NPC.netUpdate = true;
-                        }
-                        break;
-                    case 7:
-                        // NEW WAVE 2: Puppeteer's Snap - see WhoAmI_Pattern_SummonWhipExtras2.cs
-                        if (aiState != STATE_WHIP_PUPPETEER_SNAP)
-                        {
-                            aiState = STATE_WHIP_PUPPETEER_SNAP;
-                            aiTimer = 0;
-                            ResetWhipPuppeteerSnapState();
                             NPC.netUpdate = true;
                         }
                         break;

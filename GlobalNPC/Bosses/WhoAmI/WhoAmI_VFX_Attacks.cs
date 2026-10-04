@@ -4,6 +4,7 @@ using System;
 using Terraria;
 using Terraria.ModLoader;
 using Luminance.Core.Graphics;
+using TheSanity.Common.Systems; // ShockwaveSystem
 
 namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 {
@@ -79,7 +80,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
             // Kilatan singkat pas pattern baru mulai (aiTimer == 1) - ring partikel GANDA (dalam +
             // luar, arah putarnya kebalik) biar transisi ke attack baru kerasa jadi "momen" beneran,
             // bukan cuma tint yang pelan-pelan nongol. Pattern2 "bernama" (bukan combo dasar) dapet
-            // treatment lebih gede lagi: screen-ripple tipis (numpang shader Phase3RiftShockwave yang
+            // treatment lebih gede lagi: screen-ripple tipis (numpang ShockwaveSystem yang
             // tadinya cuma dipakai buat hukuman rift - sekarang dipakai lebih luas buat "punya" tiap
             // pattern signature momen masuknya) + shake kecil, biar kerasa signifikan tanpa spam di
             // combo-combo dasar yang sering banget ganti-ganti.
@@ -100,7 +101,7 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
 
                 if (IsSignaturePattern(aiState))
                 {
-                    Phase3RiftShockwaveSystem.Trigger(NPC.Center, patternColor.Value, tintStrength: 0.28f, rippleCount: 2f, density: 700f, speed: 20f, opacityStrength: 3.2f, mirrorEchoStrength: 0.18f, maxRange: 620f);
+                    ShockwaveSystem.TriggerBombShockwave(NPC.Center, tintColor: patternColor.Value, tintStrength: 0.28f, maxRangeTiles: 620f / 16f);
                     ScreenShakeSystem.StartShakeAtPoint(NPC.Center, 5f, 0.18f);
                 }
             }
@@ -118,7 +119,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 case STATE_ORBIT_GRID_LOCK:
                 case STATE_GRAVITY_WELL_TORRENT:
                 case STATE_MIRROR_MIRAGE:
-                case STATE_SUMMON_RIFT_SWARM:
                 case STATE_WHIP_LASH_CAGE:
                 case STATE_YOYO_TETHER_STORM:
                 case STATE_BOOMERANG_CROSSFIRE:
@@ -189,10 +189,6 @@ namespace TheSanity.GlobalNPC.Bosses.WhoAmI
                 case STATE_MIRROR_MIRAGE:
                     intensity = 0.38f;
                     return new Color(230, 110, 230); // ilusi cermin - magenta
-
-                case STATE_SUMMON_RIFT_SWARM:
-                    intensity = 0.32f;
-                    return new Color(255, 200, 80); // panggilan swarm - kuning keemasan, senada minion
 
                 case STATE_WHIP_LASH_CAGE:
                     intensity = 0.34f;
